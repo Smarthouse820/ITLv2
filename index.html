@@ -575,6 +575,23 @@ const GOAL_REP_RULES = {
   maintain: { sets: 3, repLow: 8, repHigh: 12 },
 };
 
+// Fraction of total weight change assumed to be FAT (vs. lean mass), for converting a body-fat-%
+// goal into an implied target weight. Based on research in trained individuals with adequate
+// protein intake (Helms et al. and similar) rather than the unrealistic "100% of change is fat"
+// assumption — cutting retains meaningfully more lean mass than that, and bulking gains some fat
+// alongside muscle even in a controlled surplus.
+const GOAL_FAT_RATIO = { cut: 0.80, bulk: 0.35 };
+
+// Converts a body-fat-% goal into an implied target weight, given a fixed fat/lean ratio for the
+// change. This is a real modeling assumption, not a measurement — surfaced clearly in the wizard
+// rather than presented as a precise fact.
+function impliedTargetWeightFromBF(currentWeight, currentBF, targetBF, goal) {
+  const ratioFat = GOAL_FAT_RATIO[goal] || 0.8;
+  const f1 = currentBF / 100, f2 = targetBF / 100;
+  if (Math.abs(f2 - ratioFat) < 1e-6) return currentWeight; // degenerate case, avoid divide-by-zero
+  return (currentWeight * (f1 - ratioFat)) / (f2 - ratioFat);
+}
+
 function computeCustomMacros(weight, activity, goal) {
   const maintenance = weight * (ACTIVITY_CAL_PER_LB[activity] || 14);
   const targetCal = Math.round(maintenance * (GOAL_CAL_ADJUST[goal] || 1.0));
@@ -608,15 +625,22 @@ function buildCustomExercises(goal) {
   return cloned;
 }
 
-function buildCustomMilestones(currentWeight, targetWeight, weeksNeeded) {
+function buildCustomMilestones(currentWeight, targetWeight, weeksNeeded, currentBF, targetBF) {
+  const trackBF = currentBF != null && targetBF != null;
   const milestones = [];
   for (let w = 1; w <= weeksNeeded; w++) {
     const frac = weeksNeeded === 1 ? 1 : (w - 1) / (weeksNeeded - 1);
     const weight = currentWeight + frac * (targetWeight - currentWeight);
-    milestones.push({
+    const entry = {
       week: w, phase: Math.ceil(w / 5), weight: Math.round(weight * 10) / 10,
       deload: w % 5 === 0, goal: w === weeksNeeded,
-    });
+    };
+    if (trackBF) {
+      const bf = currentBF + frac * (targetBF - currentBF);
+      entry.bf = Math.round(bf * 10) / 10;
+      entry.fat = Math.round(weight * (bf / 100) * 10) / 10;
+    }
+    milestones.push(entry);
   }
   return milestones;
 }
@@ -1060,6 +1084,7 @@ function freshProgramState(exercises) {
     logs: {}, nutritionLogs: {}, hydrationLogs: {}, milestoneActuals: {}, groceryLogs: {},
     skipped: {}, customMealOverrides: {}, undoSnapshot: null, exerciseDifficulty: {}, foodLog: {},
     sleepLogs: {},
+    dailyWeightLogs: {},
     extraDeloadWeeks: [], deloadRecommendation: null,
     nutritionDayComplete: {},
     hydrationDayComplete: {},
@@ -1493,6 +1518,56 @@ function App() {
     saveProgram({ milestoneActuals: newActuals });
   }
 
+  function logDailyWeight(weight) {
+    const key = todayKey();
+    const newLogs = Object.assign({}, prog.dailyWeightLogs);
+    newLogs[key] = weight;
+    saveProgram({ dailyWeightLogs: newLogs });
+  }
+
+  // Calories actually logged for a given real calendar date — deliberately reads only the free-form
+  // food log (self-contained per-100g data at the time it was logged), not the meal-checklist
+  // percentages. Meal-plan content can change when the 4-week rotation advances, so reconstructing
+  // "what a checked-off meal was" for a date weeks ago isn't reliable — a raw food-log entry is.
+  function loggedCaloriesForDate(dateKey) {
+    const entries = prog.foodLog[dateKey] || [];
+    return entries.reduce(function (a, entry) {
+      const per100 = entry.per100 || allFoods.filter(function (f) { return f.name === entry.name; })[0];
+      if (!per100) return a;
+      return a + (per100.cal * entry.grams) / 100;
+    }, 0);
+  }
+
+  // Adaptive TDEE estimate, in the spirit of MacroFactor's approach: instead of trusting a formula
+  // computed once at setup and never revisited, this compares your real smoothed weight trend
+  // against your real logged calorie intake and infers what your true expenditure must have been.
+  // Simplification worth knowing: this uses one fixed blended energy density (3500 kcal/lb) rather
+  // than a density that slides with your rate of change the way more sophisticated commercial
+  // models do — it still self-corrects over time, just with less precision than that finer model.
+  const ADAPTIVE_ENERGY_DENSITY_PER_LB = 3500;
+  function computeAdaptiveTDEE() {
+    const dateKeys = Object.keys(prog.dailyWeightLogs).sort();
+    if (dateKeys.length < 8) return { insufficientData: true, daysLogged: dateKeys.length, daysNeeded: 8 };
+    const recent = dateKeys.slice(-14);
+    const mid = Math.floor(recent.length / 2);
+    const firstHalf = recent.slice(0, mid);
+    const secondHalf = recent.slice(mid);
+    function avgWeight(keys) { return keys.reduce(function (a, k) { return a + prog.dailyWeightLogs[k]; }, 0) / keys.length; }
+    const firstAvg = avgWeight(firstHalf);
+    const secondAvg = avgWeight(secondHalf);
+    const halfSpanDays = recent.length / 2;
+    const weeklyRateLb = ((secondAvg - firstAvg) / halfSpanDays) * 7;
+    const avgCalories = recent.reduce(function (a, k) { return a + loggedCaloriesForDate(k); }, 0) / recent.length;
+    const impliedTDEE = avgCalories - (weeklyRateLb * ADAPTIVE_ENERGY_DENSITY_PER_LB) / 7;
+    return {
+      insufficientData: false, daysUsed: recent.length,
+      weeklyRateLb: Math.round(weeklyRateLb * 100) / 100,
+      avgCalories: Math.round(avgCalories), impliedTDEE: Math.round(impliedTDEE),
+    };
+  }
+  const adaptiveTDEE = computeAdaptiveTDEE();
+  const plannedCalories = (data.customProgramConfig && data.customProgramConfig.macros) ? data.customProgramConfig.macros.cal : null;
+
   const groceryKey = "w" + groceryDisplayWeek;
   const groceryChecked = (prog.groceryLogs && prog.groceryLogs[groceryKey]) || {};
   function toggleGrocery(itemName) {
@@ -1683,6 +1758,8 @@ function App() {
             tab === "milestones" && h(MilestonesTab, {
               currentWeek: prog.currentWeek, actuals: prog.milestoneActuals, setActual: setMilestoneActual,
               hasTargets: def.hasMilestoneTargets, goalLine: def.goalLine, customMilestones: def.customMilestones || null,
+              dailyWeightLogs: prog.dailyWeightLogs, logDailyWeight: logDailyWeight,
+              adaptiveTDEE: adaptiveTDEE, plannedCalories: plannedCalories,
             }),
             tab === "grocery" && h(GroceryTab, {
               list: groceryList, checked: groceryChecked, toggle: toggleGrocery, reset: resetGroceryList,
@@ -1995,6 +2072,50 @@ function ExerciseHistory(props) {
 // both raw would make the fat-mass line look almost flat. Each series is normalized to its own
 // min/max range here so both trends are equally readable — the point labels still show real
 // pound values, so nothing about the actual numbers is lost, only the shared visual scale.
+// A parallel body-composition tracking path for anyone without a reliable way to measure BF%
+// directly (calipers, DEXA, a smart scale). Instead of a measured fat mass, this infers an implied
+// TDEE from your real smoothed weight trend versus your real logged calorie intake — the same core
+// idea MacroFactor is built around, simplified to one fixed blended energy density rather than a
+// density that slides with your rate of change.
+function AdaptiveTDEESection(props) {
+  const [weightInput, setWeightInput] = useState("");
+  const todayLogged = props.dailyWeightLogs[todayKey()];
+  const tdee = props.adaptiveTDEE;
+  const diverging = tdee && !tdee.insufficientData && props.plannedCalories &&
+    Math.abs(tdee.impliedTDEE - props.plannedCalories) >= 150;
+
+  return h("div", { style: { marginTop: 24 } },
+    h("div", { className: "food-cat-title" }, "Daily Weigh-In (for an adaptive calorie estimate)"),
+    h("p", { style: { fontSize: "11px", color: "#737373", marginBottom: 8 } },
+      "Optional, separate from the weekly check-in above — logging this daily (even without a BF% measurement) lets the app infer whether your calorie target still matches reality."),
+    h("div", { className: "swap-form-row", style: { marginBottom: 12 } },
+      h("input", {
+        type: "number", inputMode: "decimal", placeholder: todayLogged != null ? "Today: " + todayLogged + " lb" : "Today's weight",
+        value: weightInput, onChange: function (e) { setWeightInput(e.target.value); },
+        className: "search-input",
+      }),
+      h("button", {
+        className: "swap-save-btn", style: { flex: "0 0 auto" },
+        onClick: function () { if (weightInput !== "") { props.logDailyWeight(Number(weightInput)); setWeightInput(""); } },
+      }, "Log")
+    ),
+    tdee && tdee.insufficientData
+      ? h("p", { style: { fontSize: "12px", color: "#737373" } },
+          "Logged " + tdee.daysLogged + " of the ~" + tdee.daysNeeded + " days needed for a meaningful trend — keep going.")
+      : tdee && h("div", { className: "panel" },
+          h("h3", null, "Adaptive Estimate (last " + tdee.daysUsed + " days)"),
+          h("div", { className: "sleep-duration-row" }, h("span", null, "Real weekly trend"), h("span", null, (tdee.weeklyRateLb > 0 ? "+" : "") + tdee.weeklyRateLb + " lb/week")),
+          h("div", { className: "sleep-duration-row" }, h("span", null, "Avg. calories actually logged"), h("span", null, tdee.avgCalories + " cal/day")),
+          h("div", { className: "sleep-duration-row" }, h("span", null, "Implied true TDEE"), h("span", null, tdee.impliedTDEE + " cal/day")),
+          diverging && h("p", { className: "plan-error", style: { marginTop: 8 } },
+            "Your implied TDEE (" + tdee.impliedTDEE + ") differs from your planned calories (" + props.plannedCalories + ") by " +
+            Math.abs(tdee.impliedTDEE - props.plannedCalories) + " cal/day — worth recalculating your target through the Custom setup again."),
+          h("p", { style: { fontSize: "11px", color: "#525252", marginTop: 8 } },
+            "Uses a single fixed energy-density assumption (3,500 cal/lb) rather than one that adjusts for how fast you're changing — a real simplification, not a precise composition measurement.")
+        )
+  );
+}
+
 function BodyCompositionChart(props) {
   const weeks = Object.keys(props.actuals).map(Number).sort(function (a, b) { return a - b; });
   const points = weeks.filter(function (w) {
@@ -2746,7 +2867,8 @@ function MilestonesTab(props) {
           );
         })
       ),
-      h(BodyCompositionChart, { actuals: props.actuals })
+      h(BodyCompositionChart, { actuals: props.actuals }),
+      h(AdaptiveTDEESection, { dailyWeightLogs: props.dailyWeightLogs, logDailyWeight: props.logDailyWeight, adaptiveTDEE: props.adaptiveTDEE, plannedCalories: props.plannedCalories })
     );
   }
   const baseMilestones = props.customMilestones || MILESTONES;
@@ -2796,7 +2918,8 @@ function MilestonesTab(props) {
         );
       })
     ),
-    h(BodyCompositionChart, { actuals: props.actuals })
+    h(BodyCompositionChart, { actuals: props.actuals }),
+    h(AdaptiveTDEESection, { dailyWeightLogs: props.dailyWeightLogs, logDailyWeight: props.logDailyWeight, adaptiveTDEE: props.adaptiveTDEE, plannedCalories: props.plannedCalories })
   );
 }
 
@@ -2844,8 +2967,11 @@ function CoordinatorPlaceholder(props) {
 function CustomSetupWizard(props) {
   const [step, setStep] = useState("goals");
   const [goal, setGoal] = useState("cut");
+  const [goalMethod, setGoalMethod] = useState("weight");
   const [currentWeight, setCurrentWeight] = useState("");
   const [targetWeight, setTargetWeight] = useState("");
+  const [currentBF, setCurrentBF] = useState("");
+  const [targetBF, setTargetBF] = useState("");
   const [activity, setActivity] = useState("moderate");
   const [likedFoodsCustom, setLikedFoodsCustom] = useState([]);
   const [plan, setPlan] = useState(null);
@@ -2859,20 +2985,31 @@ function CustomSetupWizard(props) {
 
   function goToFoods() {
     const cw = Number(currentWeight);
-    const tw = goal === "maintain" ? cw : Number(targetWeight);
-    if (!cw || (goal !== "maintain" && !tw)) {
-      window.alert("Enter your current weight (and target weight, if cutting or bulking).");
-      return;
+    if (!cw) { window.alert("Enter your current weight."); return; }
+    let tw = cw, cbf = null, tbf = null;
+    if (goal !== "maintain") {
+      if (goalMethod === "bodyfat") {
+        cbf = Number(currentBF); tbf = Number(targetBF);
+        if (!cbf || !tbf) { window.alert("Enter your current and target body fat %."); return; }
+        tw = impliedTargetWeightFromBF(cw, cbf, tbf, goal);
+      } else {
+        tw = Number(targetWeight);
+        if (!tw) { window.alert("Enter your target weight."); return; }
+      }
     }
     const macros = computeCustomMacros(cw, activity, goal);
     const weeksNeeded = computeWeeksNeeded(cw, tw, goal, macros.maintenance, macros.cal);
     const exercises = buildCustomExercises(goal);
-    const milestones = buildCustomMilestones(cw, tw, weeksNeeded);
+    const milestones = buildCustomMilestones(cw, tw, weeksNeeded, cbf, tbf);
     const perMeal = { p: macros.p / 4, c: macros.c / 4, f: macros.f / 4 };
     const slots = [1, 2, 3, 4].map(function (i) {
       return { id: "cm" + i, label: "Meal " + i, p: Math.round(perMeal.p), c: Math.round(perMeal.c), f: Math.round(perMeal.f) };
     });
-    setComputed({ currentWeight: cw, targetWeight: tw, macros: macros, weeksNeeded: weeksNeeded, exercises: exercises, milestones: milestones, slots: slots });
+    setComputed({
+      currentWeight: cw, targetWeight: Math.round(tw * 10) / 10, currentBF: cbf, targetBF: tbf,
+      usedBFMethod: goalMethod === "bodyfat" && goal !== "maintain",
+      macros: macros, weeksNeeded: weeksNeeded, exercises: exercises, milestones: milestones, slots: slots,
+    });
     setStep("foods");
   }
 
@@ -2906,8 +3043,25 @@ function CustomSetupWizard(props) {
       h("div", { className: "food-cat-title" }, "Current Weight (lb)"),
       h("input", { type: "number", inputMode: "decimal", className: "search-input", value: currentWeight, onChange: function (e) { setCurrentWeight(e.target.value); } }),
       goal !== "maintain" && h(React.Fragment, null,
-        h("div", { className: "food-cat-title" }, "Target Weight (lb)"),
-        h("input", { type: "number", inputMode: "decimal", className: "search-input", value: targetWeight, onChange: function (e) { setTargetWeight(e.target.value); } })
+        h("div", { className: "food-cat-title" }, "Set goal by"),
+        h("div", { className: "food-chip-grid" },
+          h("button", { className: "food-chip" + (goalMethod === "weight" ? " liked" : ""), onClick: function () { setGoalMethod("weight"); } }, "Weight"),
+          h("button", { className: "food-chip" + (goalMethod === "bodyfat" ? " liked" : ""), onClick: function () { setGoalMethod("bodyfat"); } }, "Body Fat %")
+        ),
+        goalMethod === "weight"
+          ? h(React.Fragment, null,
+              h("div", { className: "food-cat-title" }, "Target Weight (lb)"),
+              h("input", { type: "number", inputMode: "decimal", className: "search-input", value: targetWeight, onChange: function (e) { setTargetWeight(e.target.value); } })
+            )
+          : h(React.Fragment, null,
+              h("div", { className: "food-cat-title" }, "Current Body Fat %"),
+              h("input", { type: "number", inputMode: "decimal", className: "search-input", value: currentBF, onChange: function (e) { setCurrentBF(e.target.value); } }),
+              h("div", { className: "food-cat-title" }, "Target Body Fat %"),
+              h("input", { type: "number", inputMode: "decimal", className: "search-input", value: targetBF, onChange: function (e) { setTargetBF(e.target.value); } }),
+              h("p", { style: { fontSize: "11px", color: "#737373", marginTop: 4 } },
+                "Your target weight will be estimated from this, assuming " + (goal === "cut" ? "80% of the change is fat, 20% lean mass (typical for a cut with adequate protein)" : "35% of the change is fat, 65% lean mass (typical for a moderate, controlled bulk)") +
+                " — a research-based estimate, not a guarantee.")
+            )
       ),
       h("div", { className: "food-cat-title" }, "Activity Level"),
       h("div", { className: "food-chip-grid" },
@@ -2955,7 +3109,11 @@ function CustomSetupWizard(props) {
     ),
     h("div", { className: "panel", style: { marginBottom: 16 } },
       h("h3", null, "Timeline"),
-      h("p", { style: { color: "#a3a3a3", margin: 0 } }, computed.weeksNeeded + " weeks to reach " + computed.targetWeight + " lb from " + computed.currentWeight + " lb")
+      h("p", { style: { color: "#a3a3a3", margin: 0 } }, computed.weeksNeeded + " weeks to reach " + computed.targetWeight + " lb from " + computed.currentWeight + " lb"),
+      computed.usedBFMethod && h("p", { style: { fontSize: "12px", color: "#737373", marginTop: 8 } },
+        "That " + computed.targetWeight + " lb figure is estimated from your " + computed.currentBF + "% → " + computed.targetBF + "% body fat goal (not a directly-set target) — see the assumption noted on the previous step."),
+      computed.usedBFMethod && h("p", { style: { color: "#a3a3a3", margin: "8px 0 0" } },
+        "Body fat: " + computed.currentBF + "% → " + computed.targetBF + "%")
     ),
     h("div", { className: "panel", style: { marginBottom: 16 } },
       h("h3", null, "Training Style"),
