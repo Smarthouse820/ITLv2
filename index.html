@@ -611,18 +611,174 @@ function computeWeeksNeeded(currentWeight, targetWeight, goal, maintenance, targ
   return Math.min(24, Math.max(4, Math.ceil(diff / weeklyRateLb)));
 }
 
-function buildCustomExercises(goal) {
-  const rules = GOAL_REP_RULES[goal] || GOAL_REP_RULES.maintain;
-  const cloned = JSON.parse(JSON.stringify(EXERCISES_CUTTING));
-  Object.keys(cloned).forEach(function (day) {
-    cloned[day].exercises.forEach(function (ex) {
-      if (ex.isFailure) return; // keep bodyweight-to-failure exercises as-is, they're already goal-agnostic
-      ex.sets = rules.sets;
-      ex.repLow = rules.repLow;
-      ex.repHigh = rules.repHigh;
-    });
+const ALL_WEEKDAYS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
+
+// A hand-curated exercise pool, tagged by muscle group, mechanic (compound/isolation), and which
+// equipment types it needs — built in the same spirit as open exercise databases like the
+// Free Exercise DB, but authored directly into this app rather than fetched from a live service,
+// since this app deliberately has no backend and no runtime dependency on external APIs.
+// weight: a conservative, adjustable starting point — same as every other exercise default in
+// this app, meant to be corrected through actual logging, not a prescription.
+const EXERCISE_POOL = [
+  // Quads (squat pattern) — compound
+  { name: "Barbell Back Squat", muscle: "quads", mechanic: "compound", equipment: ["barbell"], weight: 95 },
+  { name: "Goblet Squat", muscle: "quads", mechanic: "compound", equipment: ["dumbbell", "kettlebell"], weight: 30 },
+  { name: "Leg Press", muscle: "quads", mechanic: "compound", equipment: ["machine"], weight: 140 },
+  { name: "Bodyweight Squat", muscle: "quads", mechanic: "compound", equipment: ["bodyweight"], weight: null, bodyweight: true, isFailure: true },
+  { name: "Banded Squat", muscle: "quads", mechanic: "compound", equipment: ["band"], weight: 0 },
+  // Hamstrings/glutes (hinge pattern) — compound
+  { name: "Barbell Romanian Deadlift", muscle: "hamstrings_glutes", mechanic: "compound", equipment: ["barbell"], weight: 95 },
+  { name: "Dumbbell Romanian Deadlift", muscle: "hamstrings_glutes", mechanic: "compound", equipment: ["dumbbell"], weight: 30 },
+  { name: "Kettlebell Swing", muscle: "hamstrings_glutes", mechanic: "compound", equipment: ["kettlebell"], weight: 25 },
+  { name: "Cable Pull-Through", muscle: "hamstrings_glutes", mechanic: "compound", equipment: ["machine"], weight: 50 },
+  { name: "Glute Bridge", muscle: "hamstrings_glutes", mechanic: "compound", equipment: ["bodyweight"], weight: null, bodyweight: true, isFailure: true },
+  { name: "Banded Hip Thrust", muscle: "hamstrings_glutes", mechanic: "compound", equipment: ["band"], weight: 0 },
+  // Chest (horizontal push) — compound
+  { name: "Barbell Bench Press", muscle: "chest", mechanic: "compound", equipment: ["barbell"], weight: 65 },
+  { name: "Dumbbell Bench Press", muscle: "chest", mechanic: "compound", equipment: ["dumbbell"], weight: 25 },
+  { name: "Machine Chest Press", muscle: "chest", mechanic: "compound", equipment: ["machine"], weight: 40 },
+  { name: "Pushup", muscle: "chest", mechanic: "compound", equipment: ["bodyweight"], weight: null, bodyweight: true, isFailure: true },
+  { name: "Banded Chest Press", muscle: "chest", mechanic: "compound", equipment: ["band"], weight: 0 },
+  // Back — horizontal pull (row) — compound
+  { name: "Barbell Bent-Over Row", muscle: "back_horizontal", mechanic: "compound", equipment: ["barbell"], weight: 65 },
+  { name: "Dumbbell Row", muscle: "back_horizontal", mechanic: "compound", equipment: ["dumbbell"], weight: 25 },
+  { name: "Seated Cable Row", muscle: "back_horizontal", mechanic: "compound", equipment: ["machine"], weight: 50 },
+  { name: "Inverted Row", muscle: "back_horizontal", mechanic: "compound", equipment: ["bodyweight", "pullup_bar"], weight: null, bodyweight: true, isFailure: true },
+  { name: "Banded Row", muscle: "back_horizontal", mechanic: "compound", equipment: ["band"], weight: 0 },
+  // Back — vertical pull — compound
+  { name: "Pull-Up", muscle: "back_vertical", mechanic: "compound", equipment: ["pullup_bar"], weight: null, bodyweight: true, isFailure: true },
+  { name: "Lat Pulldown", muscle: "back_vertical", mechanic: "compound", equipment: ["machine"], weight: 60 },
+  { name: "Dumbbell Pullover", muscle: "back_vertical", mechanic: "compound", equipment: ["dumbbell"], weight: 20 },
+  { name: "Banded Pulldown", muscle: "back_vertical", mechanic: "compound", equipment: ["band"], weight: 0 },
+  // Shoulders (overhead press) — compound
+  { name: "Barbell Overhead Press", muscle: "shoulders", mechanic: "compound", equipment: ["barbell"], weight: 45 },
+  { name: "Seated Dumbbell Shoulder Press", muscle: "shoulders", mechanic: "compound", equipment: ["dumbbell"], weight: 20 },
+  { name: "Machine Shoulder Press", muscle: "shoulders", mechanic: "compound", equipment: ["machine"], weight: 30 },
+  { name: "Pike Pushup", muscle: "shoulders", mechanic: "compound", equipment: ["bodyweight"], weight: null, bodyweight: true, isFailure: true },
+  { name: "Kettlebell Overhead Press", muscle: "shoulders", mechanic: "compound", equipment: ["kettlebell"], weight: 20 },
+  { name: "Banded Overhead Press", muscle: "shoulders", mechanic: "compound", equipment: ["band"], weight: 0 },
+  // Biceps — isolation
+  { name: "Barbell Bicep Curl", muscle: "biceps", mechanic: "isolation", equipment: ["barbell"], weight: 30 },
+  { name: "Dumbbell Bicep Curl", muscle: "biceps", mechanic: "isolation", equipment: ["dumbbell"], weight: 12 },
+  { name: "Cable Bicep Curl", muscle: "biceps", mechanic: "isolation", equipment: ["machine"], weight: 25 },
+  { name: "Banded Bicep Curl", muscle: "biceps", mechanic: "isolation", equipment: ["band"], weight: 0 },
+  { name: "Chin-Up", muscle: "biceps", mechanic: "isolation", equipment: ["pullup_bar"], weight: null, bodyweight: true, isFailure: true },
+  // Triceps — isolation
+  { name: "Triceps Pushdown", muscle: "triceps", mechanic: "isolation", equipment: ["machine"], weight: 40 },
+  { name: "Dumbbell Overhead Triceps Extension", muscle: "triceps", mechanic: "isolation", equipment: ["dumbbell"], weight: 15 },
+  { name: "Close-Grip Bench Press", muscle: "triceps", mechanic: "isolation", equipment: ["barbell"], weight: 45 },
+  { name: "Diamond Pushup", muscle: "triceps", mechanic: "isolation", equipment: ["bodyweight"], weight: null, bodyweight: true, isFailure: true },
+  { name: "Banded Triceps Pushdown", muscle: "triceps", mechanic: "isolation", equipment: ["band"], weight: 0 },
+  // Quads — isolation (Intermediate Lower day)
+  { name: "Leg Extension", muscle: "quads_isolation", mechanic: "isolation", equipment: ["machine"], weight: 50 },
+  { name: "Bulgarian Split Squat", muscle: "quads_isolation", mechanic: "isolation", equipment: ["dumbbell"], weight: 15 },
+  { name: "Walking Lunge", muscle: "quads_isolation", mechanic: "isolation", equipment: ["bodyweight"], weight: null, bodyweight: true, isFailure: true },
+  { name: "Banded Lateral Walk", muscle: "quads_isolation", mechanic: "isolation", equipment: ["band"], weight: 0 },
+  // Hamstrings — isolation (Intermediate Lower day)
+  { name: "Seated Leg Curl", muscle: "hamstrings_isolation", mechanic: "isolation", equipment: ["machine"], weight: 50 },
+  { name: "Single-Leg Deadlift", muscle: "hamstrings_isolation", mechanic: "isolation", equipment: ["dumbbell"], weight: 15 },
+  { name: "Nordic Curl", muscle: "hamstrings_isolation", mechanic: "isolation", equipment: ["bodyweight"], weight: null, bodyweight: true, isFailure: true },
+  { name: "Banded Hamstring Curl", muscle: "hamstrings_isolation", mechanic: "isolation", equipment: ["band"], weight: 0 },
+];
+
+// Picks the best available exercise for a required muscle group/mechanic, given the equipment the
+// person actually has. Falls back progressively (relax mechanic, then fall back to bodyweight) so
+// there's always something usable rather than a dead end for an unusual equipment combination.
+function pickExercise(muscle, mechanic, equipmentAvailable) {
+  const eq = equipmentAvailable && equipmentAvailable.length ? equipmentAvailable : ["bodyweight"];
+  function matches(ex, requireMechanic) {
+    return ex.muscle === muscle && (!requireMechanic || ex.mechanic === mechanic) &&
+      ex.equipment.some(function (e) { return eq.indexOf(e) !== -1; });
+  }
+  const exact = EXERCISE_POOL.filter(function (ex) { return matches(ex, true); });
+  if (exact.length) return exact[0];
+  const relaxed = EXERCISE_POOL.filter(function (ex) { return matches(ex, false); });
+  if (relaxed.length) return relaxed[0];
+  const bodyweightFallback = EXERCISE_POOL.filter(function (ex) { return ex.muscle === muscle && ex.equipment.indexOf("bodyweight") !== -1; });
+  return bodyweightFallback[0] || EXERCISE_POOL.filter(function (ex) { return ex.muscle === muscle; })[0];
+}
+
+function requirementToExercise(req, idSuffix, equipmentAvailable) {
+  const picked = pickExercise(req.muscle, req.mechanic, equipmentAvailable);
+  return Object.assign({ id: req.slot + idSuffix }, {
+    name: picked.name, weight: picked.weight, bodyweight: picked.bodyweight || false, isFailure: picked.isFailure || false,
+    sets: 3, repLow: 10, repHigh: 15, // overwritten by goal-based rules right after selection
   });
-  return cloned;
+}
+
+// Beginner: one simple full-body session, repeated for every training day — four fundamental
+// movement patterns (squat, hinge, push, pull). Nothing to relearn between sessions, and true
+// beginners get most of their progress from consistency on a handful of compound lifts, not volume.
+const BEGINNER_REQUIREMENTS = [
+  { slot: "beg1", muscle: "quads", mechanic: "compound" },
+  { slot: "beg2", muscle: "hamstrings_glutes", mechanic: "compound" },
+  { slot: "beg3", muscle: "chest", mechanic: "compound" },
+  { slot: "beg4", muscle: "back_horizontal", mechanic: "compound" },
+];
+// Intermediate: a traditional Upper/Lower split, repeated twice across 4 training days.
+const INTERMEDIATE_UPPER_REQUIREMENTS = [
+  { slot: "intU1", muscle: "chest", mechanic: "compound" },
+  { slot: "intU2", muscle: "back_horizontal", mechanic: "compound" },
+  { slot: "intU3", muscle: "back_vertical", mechanic: "compound" },
+  { slot: "intU4", muscle: "shoulders", mechanic: "compound" },
+  { slot: "intU5", muscle: "biceps", mechanic: "isolation" },
+];
+const INTERMEDIATE_LOWER_REQUIREMENTS = [
+  { slot: "intL1", muscle: "quads", mechanic: "compound" },
+  { slot: "intL2", muscle: "hamstrings_glutes", mechanic: "compound" },
+  { slot: "intL3", muscle: "quads_isolation", mechanic: "isolation" },
+  { slot: "intL4", muscle: "hamstrings_isolation", mechanic: "isolation" },
+];
+
+function buildRequirementDay(label, requirements, equipmentAvailable) {
+  return { label: label, exercises: requirements.map(function (req) { return requirementToExercise(req, "", equipmentAvailable); }) };
+}
+
+const EXPERIENCE_DAY_COUNT = { beginner: 3, intermediate: 4, advanced: 5 };
+
+function experienceTemplates(experience, equipmentAvailable) {
+  if (experience === "beginner") {
+    const day = buildRequirementDay("Full Body", BEGINNER_REQUIREMENTS, equipmentAvailable);
+    return [day, JSON.parse(JSON.stringify(day)), JSON.parse(JSON.stringify(day))];
+  }
+  if (experience === "intermediate") {
+    const upper = buildRequirementDay("Upper", INTERMEDIATE_UPPER_REQUIREMENTS, equipmentAvailable);
+    const lower = buildRequirementDay("Lower", INTERMEDIATE_LOWER_REQUIREMENTS, equipmentAvailable);
+    return [upper, lower, JSON.parse(JSON.stringify(upper)), JSON.parse(JSON.stringify(lower))];
+  }
+  // advanced — reuse the same 5-day split already built for the other programs (assumes full gym access)
+  return ["Monday", "Tuesday", "Thursday", "Friday", "Saturday"].map(function (d) { return EXERCISES_CUTTING[d]; });
+}
+
+// Builds a full week of exercises from an experience-tier template, placed onto whichever real
+// weekdays the person actually has available to train, with cardio added onto whichever days they
+// chose (training day or otherwise) — rather than assuming a fixed Monday-Saturday layout.
+function buildCustomExercises(goal, experience, trainingDays, cardioDays, equipmentAvailable) {
+  const rules = GOAL_REP_RULES[goal] || GOAL_REP_RULES.maintain;
+  const templates = experienceTemplates(experience || "advanced", equipmentAvailable);
+  const trainDays = (trainingDays && trainingDays.length ? trainingDays : ["Monday", "Tuesday", "Thursday", "Friday", "Saturday"]).slice(0, templates.length);
+  const cardioSet = {};
+  (cardioDays || []).forEach(function (d) { cardioSet[d] = true; });
+
+  const result = {};
+  ALL_WEEKDAYS.forEach(function (day) {
+    const trainIdx = trainDays.indexOf(day);
+    if (trainIdx === -1) {
+      result[day] = { label: "Full Rest", exercises: [] };
+    } else {
+      const template = JSON.parse(JSON.stringify(templates[trainIdx]));
+      template.exercises.forEach(function (ex) {
+        if (ex.isFailure) return;
+        ex.sets = rules.sets; ex.repLow = rules.repLow; ex.repHigh = rules.repHigh;
+      });
+      result[day] = template;
+    }
+    if (cardioSet[day]) {
+      result[day] = Object.assign({}, result[day], { cardio: "20–30 min cardio" });
+      if (result[day].label === "Full Rest") result[day].label = "Cardio Only";
+    }
+  });
+  return result;
 }
 
 function buildCustomMilestones(currentWeight, targetWeight, weeksNeeded, currentBF, targetBF) {
@@ -1917,7 +2073,12 @@ function WorkoutsTab(props) {
                       next[ex.id] = !next[ex.id];
                       setHistoryOpen(next);
                     },
-                  }, isHistoryOpen ? "Hide history" : "History")
+                  }, isHistoryOpen ? "Hide history" : "History"),
+                  h("a", {
+                    className: "ex-action-btn", target: "_blank", rel: "noopener noreferrer",
+                    style: { textAlign: "center", textDecoration: "none", display: "block" },
+                    href: "https://www.youtube.com/results?search_query=" + encodeURIComponent(ex.name + " exercise form"),
+                  }, "Watch Demo")
                 ),
                 isHistoryOpen && h(ExerciseHistory, { exercise: ex, logs: props.data.logs, currentWeek: props.data.currentWeek, ratings: props.data.exerciseDifficulty, color: props.color }),
                 h(ExerciseNotes, { exerciseId: ex.id, notes: state.notes || "", onSave: props.updateExerciseNote }),
@@ -2973,6 +3134,10 @@ function CustomSetupWizard(props) {
   const [currentBF, setCurrentBF] = useState("");
   const [targetBF, setTargetBF] = useState("");
   const [activity, setActivity] = useState("moderate");
+  const [experience, setExperience] = useState("beginner");
+  const [trainingDays, setTrainingDays] = useState([]);
+  const [cardioDays, setCardioDays] = useState([]);
+  const [equipmentAvailable, setEquipmentAvailable] = useState(["bodyweight"]);
   const [likedFoodsCustom, setLikedFoodsCustom] = useState([]);
   const [plan, setPlan] = useState(null);
   const [computed, setComputed] = useState(null);
@@ -2982,10 +3147,27 @@ function CustomSetupWizard(props) {
       return cur.indexOf(name) !== -1 ? cur.filter(function (n) { return n !== name; }) : cur.concat([name]);
     });
   }
+  function toggleDay(list, setList, day, maxCount) {
+    setList(function (cur) {
+      if (cur.indexOf(day) !== -1) return cur.filter(function (d) { return d !== day; });
+      if (maxCount && cur.length >= maxCount) return cur; // ignore extra picks past what this tier needs
+      return cur.concat([day]);
+    });
+  }
+  function toggleEquipment(id) {
+    setEquipmentAvailable(function (cur) {
+      return cur.indexOf(id) !== -1 ? cur.filter(function (e) { return e !== id; }) : cur.concat([id]);
+    });
+  }
 
   function goToFoods() {
     const cw = Number(currentWeight);
     if (!cw) { window.alert("Enter your current weight."); return; }
+    const daysNeeded = EXPERIENCE_DAY_COUNT[experience];
+    if (trainingDays.length !== daysNeeded) {
+      window.alert("Pick exactly " + daysNeeded + " training day" + (daysNeeded > 1 ? "s" : "") + " for the " + experience + " program.");
+      return;
+    }
     let tw = cw, cbf = null, tbf = null;
     if (goal !== "maintain") {
       if (goalMethod === "bodyfat") {
@@ -2999,7 +3181,7 @@ function CustomSetupWizard(props) {
     }
     const macros = computeCustomMacros(cw, activity, goal);
     const weeksNeeded = computeWeeksNeeded(cw, tw, goal, macros.maintenance, macros.cal);
-    const exercises = buildCustomExercises(goal);
+    const exercises = buildCustomExercises(goal, experience, trainingDays, cardioDays, equipmentAvailable);
     const milestones = buildCustomMilestones(cw, tw, weeksNeeded, cbf, tbf);
     const perMeal = { p: macros.p / 4, c: macros.c / 4, f: macros.f / 4 };
     const slots = [1, 2, 3, 4].map(function (i) {
@@ -3030,6 +3212,16 @@ function CustomSetupWizard(props) {
 
   const GOALS = [{ id: "cut", label: "Cut (lose fat)" }, { id: "bulk", label: "Bulk (gain muscle)" }, { id: "maintain", label: "Maintain" }];
   const ACTIVITIES = [{ id: "sedentary", label: "Sedentary" }, { id: "light", label: "Lightly Active" }, { id: "moderate", label: "Moderately Active" }, { id: "active", label: "Very Active" }];
+  const EXPERIENCES = [
+    { id: "beginner", label: "Beginner", note: "3 days/week, full-body sessions — 4 core lifts each time. The least intimidating way to start; consistency matters far more than volume at this stage." },
+    { id: "intermediate", label: "Intermediate", note: "4 days/week, a traditional Upper/Lower split repeated twice — more volume and variety than Beginner, without the full Advanced session length." },
+    { id: "advanced", label: "Advanced", note: "5 days/week, Upper/Lower/Push/Pull/Legs — the same full split used in this app's built-in programs." },
+  ];
+  const EQUIPMENT_OPTIONS = [
+    { id: "barbell", label: "Barbell" }, { id: "dumbbell", label: "Dumbbells" }, { id: "machine", label: "Machines / Cables" },
+    { id: "kettlebell", label: "Kettlebell" }, { id: "band", label: "Resistance Bands" }, { id: "pullup_bar", label: "Pull-Up Bar" },
+    { id: "bodyweight", label: "Bodyweight Only" },
+  ];
   const FOOD_CATS = [{ key: "protein", label: "Proteins (pick at least 1)" }, { key: "carb", label: "Carbs (pick at least 1)" }, { key: "fat", label: "Fats (pick at least 1)" }, { key: "veg", label: "Vegetables (optional)" }];
 
   if (step === "goals") {
@@ -3066,6 +3258,48 @@ function CustomSetupWizard(props) {
       h("div", { className: "food-cat-title" }, "Activity Level"),
       h("div", { className: "food-chip-grid" },
         ACTIVITIES.map(function (a) { return h("button", { key: a.id, className: "food-chip" + (activity === a.id ? " liked" : ""), onClick: function () { setActivity(a.id); } }, a.label); })
+      ),
+      h("div", { className: "food-cat-title" }, "Training Experience"),
+      h("div", { className: "food-chip-grid" },
+        EXPERIENCES.map(function (ex) {
+          return h("button", {
+            key: ex.id, className: "food-chip" + (experience === ex.id ? " liked" : ""),
+            onClick: function () { setExperience(ex.id); setTrainingDays([]); },
+          }, ex.label);
+        })
+      ),
+      h("p", { style: { fontSize: "11px", color: "#737373", marginTop: 4 } }, EXPERIENCES.filter(function (ex) { return ex.id === experience; })[0].note),
+      experience !== "advanced" && h(React.Fragment, null,
+        h("div", { className: "food-cat-title" }, "What equipment do you have access to?"),
+        h("div", { className: "food-chip-grid" },
+          EQUIPMENT_OPTIONS.map(function (eq) {
+            return h("button", {
+              key: eq.id, className: "food-chip" + (equipmentAvailable.indexOf(eq.id) !== -1 ? " liked" : ""),
+              onClick: function () { toggleEquipment(eq.id); },
+            }, eq.label);
+          })
+        ),
+        h("p", { style: { fontSize: "11px", color: "#737373", marginTop: 4 } },
+          "Exercises will be picked to match what you actually have — no assumption of full gym access.")
+      ),
+      h("div", { className: "food-cat-title" }, "Which " + EXPERIENCE_DAY_COUNT[experience] + " days can you train?"),
+      h("div", { className: "food-chip-grid" },
+        ALL_WEEKDAYS.map(function (d) {
+          return h("button", {
+            key: d, className: "food-chip" + (trainingDays.indexOf(d) !== -1 ? " liked" : ""),
+            onClick: function () { toggleDay(trainingDays, setTrainingDays, d, EXPERIENCE_DAY_COUNT[experience]); },
+          }, d.slice(0, 3));
+        })
+      ),
+      h("p", { style: { fontSize: "11px", color: "#737373", marginTop: 4 } }, trainingDays.length + " of " + EXPERIENCE_DAY_COUNT[experience] + " selected"),
+      h("div", { className: "food-cat-title" }, "Which days do you want cardio? (optional, any day)"),
+      h("div", { className: "food-chip-grid" },
+        ALL_WEEKDAYS.map(function (d) {
+          return h("button", {
+            key: d, className: "food-chip" + (cardioDays.indexOf(d) !== -1 ? " liked" : ""),
+            onClick: function () { toggleDay(cardioDays, setCardioDays, d, null); },
+          }, d.slice(0, 3));
+        })
       ),
       h("button", { className: "generate-btn", onClick: goToFoods }, "Next: Pick Your Foods")
     );
