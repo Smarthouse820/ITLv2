@@ -1810,7 +1810,7 @@ function App() {
     const config = {
       setupComplete: true,
       goal: setup.goal, currentWeight: setup.currentWeight, targetWeight: setup.targetWeight,
-      activity: setup.activity, weeksNeeded: setup.weeksNeeded, macros: setup.macros,
+      activity: setup.activity, weeksNeeded: setup.weeksNeeded, macros: setup.macros, age: setup.age,
       exercises: setup.exercises, slots: setup.slots, milestones: setup.milestones,
       mealsByWeek: mealsByWeek, groceryByWeek: groceryByWeek,
     };
@@ -1890,6 +1890,7 @@ function App() {
               expanded: expanded, setExpanded: setExpanded, logSet: logSet, completeDay: completeDay,
               toggleSkip: toggleSkip, setSwap: setSwap, clearSwap: clearSwap, undoCompleteWeek: undoCompleteWeek, updateExerciseNote: updateExerciseNote,
               setExerciseDifficulty: setExerciseDifficulty, color: def.color,
+              targetHR: (data.customProgramConfig && data.customProgramConfig.age) ? Math.round((220 - data.customProgramConfig.age) * 0.65) : null,
               deloadRecommendation: prog.deloadRecommendation, acceptDeloadRecommendation: acceptDeloadRecommendation,
               dismissDeloadRecommendation: dismissDeloadRecommendation,
             }),
@@ -2008,6 +2009,11 @@ function WorkoutsTab(props) {
     h("div", { className: "day-title-row" },
       h("h2", null, props.selectedDay + " — " + day.label),
       day.cardio && h("span", null, day.cardio)
+    ),
+    day.cardio && props.targetHR && h("div", { className: "plan-error", style: { marginBottom: 12 } },
+      h("strong", null, "Target heart rate for fat-burning: ~" + props.targetHR + " bpm"),
+      h("p", { style: { margin: "4px 0 0", fontSize: "12px" } },
+        "Estimated as (220 − age) × 65% — a commonly used guideline, not a precise measurement. Aim to keep your heart rate near this level during cardio, not as a hard ceiling.")
     ),
     isRest
       ? h("div", { className: "rest-box" }, "No cardio, no lifting.")
@@ -3130,6 +3136,7 @@ function CustomSetupWizard(props) {
   const [goal, setGoal] = useState("cut");
   const [goalMethod, setGoalMethod] = useState("weight");
   const [currentWeight, setCurrentWeight] = useState("");
+  const [age, setAge] = useState("");
   const [targetWeight, setTargetWeight] = useState("");
   const [currentBF, setCurrentBF] = useState("");
   const [targetBF, setTargetBF] = useState("");
@@ -3189,7 +3196,7 @@ function CustomSetupWizard(props) {
     });
     setComputed({
       currentWeight: cw, targetWeight: Math.round(tw * 10) / 10, currentBF: cbf, targetBF: tbf,
-      usedBFMethod: goalMethod === "bodyfat" && goal !== "maintain",
+      usedBFMethod: goalMethod === "bodyfat" && goal !== "maintain", age: age ? Number(age) : null,
       macros: macros, weeksNeeded: weeksNeeded, exercises: exercises, milestones: milestones, slots: slots,
     });
     setStep("foods");
@@ -3204,7 +3211,7 @@ function CustomSetupWizard(props) {
   function confirm() {
     props.onComplete({
       goal: goal, currentWeight: computed.currentWeight, targetWeight: computed.targetWeight,
-      activity: activity, weeksNeeded: computed.weeksNeeded, macros: computed.macros,
+      activity: activity, weeksNeeded: computed.weeksNeeded, macros: computed.macros, age: computed.age,
       exercises: computed.exercises, slots: computed.slots, milestones: computed.milestones,
       planResults: plan.results,
     });
@@ -3234,6 +3241,10 @@ function CustomSetupWizard(props) {
       ),
       h("div", { className: "food-cat-title" }, "Current Weight (lb)"),
       h("input", { type: "number", inputMode: "decimal", className: "search-input", value: currentWeight, onChange: function (e) { setCurrentWeight(e.target.value); } }),
+      h("div", { className: "food-cat-title" }, "Age"),
+      h("input", { type: "number", inputMode: "numeric", className: "search-input", value: age, onChange: function (e) { setAge(e.target.value); } }),
+      h("p", { style: { fontSize: "11px", color: "#737373", marginTop: 4 } },
+        "Used only to estimate a target heart rate for cardio days — shown as a guideline, not a hard limit."),
       goal !== "maintain" && h(React.Fragment, null,
         h("div", { className: "food-cat-title" }, "Set goal by"),
         h("div", { className: "food-chip-grid" },
