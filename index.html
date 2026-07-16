@@ -1310,6 +1310,22 @@ function loadData() {
 }
 
 function App() {
+  const APP_VERSION = "2026-07-16T04:17:23";
+  const [updateAvailable, setUpdateAvailable] = useState(false);
+  useEffect(function () {
+    function checkVersion() {
+      fetch("version.json?t=" + Date.now()) // cache-busting query param — never want a stale cached copy of this check itself
+        .then(function (res) { return res.json(); })
+        .then(function (data) { if (data.version && data.version !== APP_VERSION) setUpdateAvailable(true); })
+        .catch(function () {}); // silent — a failed check just means no banner, never breaks the app
+    }
+    checkVersion();
+    const interval = setInterval(checkVersion, 5 * 60 * 1000); // re-check every 5 minutes while open
+    function onVisible() { if (document.visibilityState === "visible") checkVersion(); }
+    document.addEventListener("visibilitychange", onVisible);
+    return function () { clearInterval(interval); document.removeEventListener("visibilitychange", onVisible); };
+  }, []);
+
   const [tab, setTab] = useState("workouts");
   const [data, setData] = useState(loadData);
   const [selectedDay, setSelectedDay] = useState(function () {
@@ -1850,6 +1866,10 @@ function App() {
   }
 
   return h("div", { className: "app" },
+    updateAvailable && h("div", {
+      style: { background: "#8b5cf6", color: "#fff", padding: "10px 16px", textAlign: "center", fontSize: "13px", cursor: "pointer" },
+      onClick: function () { window.location.reload(); },
+    }, "A new version is available — tap to refresh"),
     h("header", { className: "header" },
       h("div", { className: "header-top" },
         h("img", { src: LOGO_HEADER_URI, className: "app-logo", alt: "In The Lab Fitness" }),
@@ -2011,7 +2031,9 @@ function WorkoutsTab(props) {
       day.cardio && h("span", null, day.cardio)
     ),
     day.cardio && props.targetHR && h("div", { className: "plan-error", style: { marginBottom: 12 } },
-      h("strong", null, "Target heart rate for fat-burning: ~" + props.targetHR + " bpm")
+      h("strong", null, "Target heart rate for fat-burning: ~" + props.targetHR + " bpm"),
+      h("p", { style: { margin: "4px 0 0", fontSize: "12px" } },
+        "Estimated as (220 − age) × 65% — a commonly used guideline, not a precise measurement. Aim to keep your heart rate near this level during cardio, not as a hard ceiling.")
     ),
     isRest
       ? h("div", { className: "rest-box" }, "No cardio, no lifting.")
