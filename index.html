@@ -577,6 +577,9 @@ const EMPTY_CUSTOM_DEF = {
 
 const ACTIVITY_CAL_PER_LB = { sedentary: 12, light: 14, moderate: 16, active: 18 };
 const GOAL_CAL_ADJUST = { cut: 0.8, bulk: 1.12, maintain: 1.0 };
+// Standard activity multipliers used with the Mifflin-St Jeor equation — different scale than the
+// per-pound heuristic above, since this multiplies a true BMR rather than bodyweight directly.
+const MSJ_ACTIVITY_MULTIPLIER = { sedentary: 1.2, light: 1.375, moderate: 1.55, active: 1.725 };
 const GOAL_REP_RULES = {
   cut: { sets: 3, repLow: 10, repHigh: 15 },
   bulk: { sets: 4, repLow: 8, repHigh: 12 },
@@ -600,8 +603,33 @@ function impliedTargetWeightFromBF(currentWeight, currentBF, targetBF, goal) {
   return (currentWeight * (f1 - ratioFat)) / (f2 - ratioFat);
 }
 
-function computeCustomMacros(weight, activity, goal) {
-  const maintenance = weight * (ACTIVITY_CAL_PER_LB[activity] || 14);
+// Mifflin-St Jeor — the equation generally recommended over older ones like Harris-Benedict,
+// since it accounts for age, height, and gender rather than treating bodyweight as the only
+// variable that determines metabolic rate. Two people at the same weight can have meaningfully
+// different real BMRs; this is what actually captures that, instead of a flat per-pound estimate.
+// Spaces N meal times evenly across a start-to-end eating window (inclusive of both ends) —
+// e.g. an 8am-6pm window with 4 meals lands them at 8:00am, 11:20am, 2:40pm, 6:00pm.
+function interpolateMealTimes(startStr, endStr, count) {
+  const parts1 = startStr.split(":").map(Number), parts2 = endStr.split(":").map(Number);
+  const startMin = parts1[0] * 60 + parts1[1], endMin = parts2[0] * 60 + parts2[1];
+  const times = [];
+  for (let i = 0; i < count; i++) {
+    const frac = count === 1 ? 0 : i / (count - 1);
+    const totalMin = Math.round(startMin + frac * (endMin - startMin));
+    let hh = Math.floor(totalMin / 60) % 24, mm = ((totalMin % 60) + 60) % 60;
+    const ampm = hh >= 12 ? "PM" : "AM";
+    let displayHH = hh % 12; if (displayHH === 0) displayHH = 12;
+    times.push(displayHH + ":" + String(mm).padStart(2, "0") + " " + ampm);
+  }
+  return times;
+}
+
+function computeCustomMacros(weight, activity, goal, gender, heightCm, age) {
+  const weightKg = weight / 2.20462;
+  const bmr = gender === "male"
+    ? 10 * weightKg + 6.25 * heightCm - 5 * age + 5
+    : 10 * weightKg + 6.25 * heightCm - 5 * age - 161;
+  const maintenance = bmr * (MSJ_ACTIVITY_MULTIPLIER[activity] || 1.375);
   const targetCal = Math.round(maintenance * (GOAL_CAL_ADJUST[goal] || 1.0));
   const protein = Math.round(weight * 1.0); // ~1g/lb, standard evidence-based target used throughout this app
   const fat = Math.round((targetCal * 0.25) / 9);
@@ -1319,7 +1347,7 @@ function loadData() {
 }
 
 function App() {
-  const APP_VERSION = "2026-07-17T15:00:51";
+  const APP_VERSION = "2026-07-17T18:17:23";
   const [updateAvailable, setUpdateAvailable] = useState(false);
   useEffect(function () {
     function checkVersion() {
@@ -1832,12 +1860,11 @@ function App() {
 
   function completeCustomSetup(setup) {
     const idMap = ["m1", "m2", "m3", "m4"];
-    const timeMap = { m1: "7:00 AM", m2: "11:00 AM", m3: "3:00 PM", m4: "7:00 PM" };
     const nameMap = { m1: "Meal 1", m2: "Meal 2", m3: "Meal 3", m4: "Meal 4" };
     const mealsWeek = idMap.map(function (id, i) {
       const r = setup.planResults[i];
       const foodStr = r.items.map(function (it) { return formatMealItem(it, allFoods); }).join(" + ");
-      return { id: id, time: timeMap[id], name: nameMap[id], food: foodStr, cal: Math.round(r.cal), p: Math.round(r.p), c: Math.round(r.c), f: Math.round(r.f), items: r.items };
+      return { id: id, time: setup.slots[i].time, name: nameMap[id], food: foodStr, cal: Math.round(r.cal), p: Math.round(r.p), c: Math.round(r.c), f: Math.round(r.f), items: r.items };
     });
     const mealsByWeek = { 1: mealsWeek, 2: mealsWeek, 3: mealsWeek, 4: mealsWeek };
     const overrideForGrocery = {};
@@ -3346,6 +3373,11 @@ function CustomSetupWizard(props) {
   const [goalMethod, setGoalMethod] = useState("weight");
   const [currentWeight, setCurrentWeight] = useState("");
   const [age, setAge] = useState("");
+  const [gender, setGender] = useState("");
+  const [heightFeet, setHeightFeet] = useState("");
+  const [heightInches, setHeightInches] = useState("");
+  const [eatingStart, setEatingStart] = useState("08:00");
+  const [eatingEnd, setEatingEnd] = useState("18:00");
   const [targetWeight, setTargetWeight] = useState("");
   const [currentBF, setCurrentBF] = useState("");
   const [targetBF, setTargetBF] = useState("");
@@ -3379,6 +3411,12 @@ function CustomSetupWizard(props) {
   function goToFoods() {
     const cw = Number(currentWeight);
     if (!cw) { window.alert("Enter your current weight."); return; }
+    if (!gender) { window.alert("Select male or female — needed for an accurate calorie estimate."); return; }
+    const feet = Number(heightFeet) || 0, inches = Number(heightInches) || 0;
+    if (!feet && !inches) { window.alert("Enter your height."); return; }
+    const ageNum = Number(age);
+    if (!ageNum) { window.alert("Enter your age — needed for an accurate calorie estimate, not just the heart rate guideline."); return; }
+    if (eatingEnd <= eatingStart) { window.alert("Eating window end time must be after the start time."); return; }
     const daysNeeded = EXPERIENCE_DAY_COUNT[experience];
     if (trainingDays.length !== daysNeeded) {
       window.alert("Pick exactly " + daysNeeded + " training day" + (daysNeeded > 1 ? "s" : "") + " for the " + experience + " program.");
@@ -3395,17 +3433,19 @@ function CustomSetupWizard(props) {
         if (!tw) { window.alert("Enter your target weight."); return; }
       }
     }
-    const macros = computeCustomMacros(cw, activity, goal);
+    const heightCm = (feet * 12 + inches) * 2.54;
+    const macros = computeCustomMacros(cw, activity, goal, gender, heightCm, ageNum);
     const weeksNeeded = computeWeeksNeeded(cw, tw, goal, macros.maintenance, macros.cal);
     const exercises = buildCustomExercises(goal, experience, trainingDays, cardioDays, equipmentAvailable);
     const milestones = buildCustomMilestones(cw, tw, weeksNeeded, cbf, tbf);
     const perMeal = { p: macros.p / 4, c: macros.c / 4, f: macros.f / 4 };
+    const mealTimes = interpolateMealTimes(eatingStart, eatingEnd, 4);
     const slots = [1, 2, 3, 4].map(function (i) {
-      return { id: "cm" + i, label: "Meal " + i, p: Math.round(perMeal.p), c: Math.round(perMeal.c), f: Math.round(perMeal.f) };
+      return { id: "cm" + i, label: "Meal " + i, time: mealTimes[i - 1], p: Math.round(perMeal.p), c: Math.round(perMeal.c), f: Math.round(perMeal.f) };
     });
     setComputed({
       currentWeight: cw, targetWeight: Math.round(tw * 10) / 10, currentBF: cbf, targetBF: tbf,
-      usedBFMethod: goalMethod === "bodyfat" && goal !== "maintain", age: age ? Number(age) : null,
+      usedBFMethod: goalMethod === "bodyfat" && goal !== "maintain", age: ageNum, gender: gender, heightCm: heightCm,
       macros: macros, weeksNeeded: weeksNeeded, exercises: exercises, milestones: milestones, slots: slots,
     });
     setStep("foods");
@@ -3450,10 +3490,28 @@ function CustomSetupWizard(props) {
       ),
       h("div", { className: "food-cat-title" }, "Current Weight (lb)"),
       h("input", { type: "number", inputMode: "decimal", className: "search-input", value: currentWeight, onChange: function (e) { setCurrentWeight(e.target.value); } }),
+      h("div", { className: "food-cat-title" }, "Gender"),
+      h("div", { className: "food-chip-grid" },
+        h("button", { className: "food-chip" + (gender === "male" ? " liked" : ""), onClick: function () { setGender("male"); } }, "Male"),
+        h("button", { className: "food-chip" + (gender === "female" ? " liked" : ""), onClick: function () { setGender("female"); } }, "Female")
+      ),
+      h("div", { className: "food-cat-title" }, "Height"),
+      h("div", { style: { display: "flex", gap: 8 } },
+        h("input", { type: "number", inputMode: "numeric", className: "search-input", placeholder: "ft", value: heightFeet, onChange: function (e) { setHeightFeet(e.target.value); } }),
+        h("input", { type: "number", inputMode: "numeric", className: "search-input", placeholder: "in", value: heightInches, onChange: function (e) { setHeightInches(e.target.value); } })
+      ),
       h("div", { className: "food-cat-title" }, "Age"),
       h("input", { type: "number", inputMode: "numeric", className: "search-input", value: age, onChange: function (e) { setAge(e.target.value); } }),
       h("p", { style: { fontSize: "11px", color: "#737373", marginTop: 4 } },
-        "Used only to estimate a target heart rate for cardio days — shown as a guideline, not a hard limit."),
+        "Gender, height, and age together are used for an accurate calorie estimate (the Mifflin-St Jeor equation) — age alone also sets the target heart rate guideline on cardio days."),
+      h("div", { className: "food-cat-title" }, "Eating Window"),
+      h("div", { style: { display: "flex", gap: 8, alignItems: "center" } },
+        h("input", { type: "time", className: "search-input", value: eatingStart, onChange: function (e) { setEatingStart(e.target.value); } }),
+        h("span", { style: { color: "#737373" } }, "to"),
+        h("input", { type: "time", className: "search-input", value: eatingEnd, onChange: function (e) { setEatingEnd(e.target.value); } })
+      ),
+      h("p", { style: { fontSize: "11px", color: "#737373", marginTop: 4 } },
+        "Your 4 meals will be spaced evenly across this window — also what meal-time reminders will be based on."),
       goal !== "maintain" && h(React.Fragment, null,
         h("div", { className: "food-cat-title" }, "Set goal by"),
         h("div", { className: "food-chip-grid" },
