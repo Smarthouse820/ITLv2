@@ -593,6 +593,46 @@ const GOAL_REP_RULES = {
 // alongside muscle even in a controlled surplus.
 const GOAL_FAT_RATIO = { cut: 0.80, bulk: 0.35 };
 
+// Standard, well-established tolerable upper intake levels (adult, per NIH/DRI figures) — stable
+// enough to hardcode rather than needing a live external database. This exists specifically to
+// automate what was previously a manual audit (the vitamin D and vitamin C overlaps found by hand
+// while verifying an earlier supplement protocol) — same idea, now checked automatically for any
+// supplement list entered.
+const NUTRIENT_UL = {
+  vitaminD: { amount: 4000, unit: "IU", label: "Vitamin D" },
+  vitaminC: { amount: 2000, unit: "mg", label: "Vitamin C" },
+  zinc: { amount: 40, unit: "mg", label: "Zinc" },
+  calcium: { amount: 2500, unit: "mg", label: "Calcium" },
+  iron: { amount: 45, unit: "mg", label: "Iron" },
+  magnesium: { amount: 350, unit: "mg", label: "Magnesium (supplemental)" },
+  vitaminB6: { amount: 100, unit: "mg", label: "Vitamin B6" },
+  folate: { amount: 1000, unit: "mcg", label: "Folate" },
+  vitaminA: { amount: 10000, unit: "IU", label: "Vitamin A" },
+  selenium: { amount: 400, unit: "mcg", label: "Selenium" },
+};
+const NUTRIENT_OPTIONS = Object.keys(NUTRIENT_UL).map(function (k) { return { id: k, label: NUTRIENT_UL[k].label, unit: NUTRIENT_UL[k].unit }; });
+
+function computeNutrientTotals(supplementList) {
+  const totals = {};
+  supplementList.forEach(function (supp) {
+    (supp.nutrients || []).forEach(function (n) {
+      totals[n.nutrient] = (totals[n.nutrient] || 0) + Number(n.amount || 0);
+    });
+  });
+  return totals;
+}
+function checkNutrientOverlaps(supplementList) {
+  const totals = computeNutrientTotals(supplementList);
+  const warnings = [];
+  Object.keys(totals).forEach(function (key) {
+    const ul = NUTRIENT_UL[key];
+    if (ul && totals[key] >= ul.amount) {
+      warnings.push({ nutrient: ul.label, total: totals[key], limit: ul.amount, unit: ul.unit });
+    }
+  });
+  return warnings;
+}
+
 // Converts a body-fat-% goal into an implied target weight, given a fixed fat/lean ratio for the
 // change. This is a real modeling assumption, not a measurement — surfaced clearly in the wizard
 // rather than presented as a precise fact.
@@ -624,7 +664,11 @@ function interpolateMealTimes(startStr, endStr, count) {
   return times;
 }
 
-function computeCustomMacros(weight, activity, goal, gender, heightCm, age) {
+// Diet style changes only how the fat/carb split is calculated — calories (from Mifflin-St Jeor +
+// goal) and protein (~1g/lb) stay exactly the same regardless of style, since those are the two
+// pieces with the strongest evidence behind them either way. This also means the existing meal
+// solver needs no changes at all — it just receives a different fat/carb target to hit.
+function computeCustomMacros(weight, activity, goal, gender, heightCm, age, dietStyle) {
   const weightKg = weight / 2.20462;
   const bmr = gender === "male"
     ? 10 * weightKg + 6.25 * heightCm - 5 * age + 5
@@ -632,9 +676,20 @@ function computeCustomMacros(weight, activity, goal, gender, heightCm, age) {
   const maintenance = bmr * (MSJ_ACTIVITY_MULTIPLIER[activity] || 1.375);
   const targetCal = Math.round(maintenance * (GOAL_CAL_ADJUST[goal] || 1.0));
   const protein = Math.round(weight * 1.0); // ~1g/lb, standard evidence-based target used throughout this app
-  const fat = Math.round((targetCal * 0.25) / 9);
-  const carbCals = targetCal - protein * 4 - fat * 9;
-  const carb = Math.max(0, Math.round(carbCals / 4));
+  let fat, carb;
+  if (dietStyle === "keto") {
+    carb = 25; // conservative, standard starting point for keto — not zero, since some carb intake still matters for micronutrients/fiber
+    const remaining = targetCal - protein * 4 - carb * 4;
+    fat = Math.max(0, Math.round(remaining / 9));
+  } else if (dietStyle === "lowfat") {
+    fat = Math.round((targetCal * 0.15) / 9); // roughly 15% of calories from fat, vs. 25% standard
+    const carbCals = targetCal - protein * 4 - fat * 9;
+    carb = Math.max(0, Math.round(carbCals / 4));
+  } else {
+    fat = Math.round((targetCal * 0.25) / 9);
+    const carbCals = targetCal - protein * 4 - fat * 9;
+    carb = Math.max(0, Math.round(carbCals / 4));
+  }
   return { cal: targetCal, p: protein, c: carb, f: fat, maintenance: Math.round(maintenance) };
 }
 
@@ -1296,6 +1351,8 @@ function makeDefaultData() {
     likedFoods: [],
     customFoods: [],
     customProgramConfig: null,
+    supplementList: [],
+    supplementLogs: {},
     programs: {
       cutting: freshProgramState(EXERCISES_CUTTING),
       cruise: freshProgramState(EXERCISES_CRUISE),
@@ -1313,6 +1370,8 @@ function normalizeV2(parsed) {
     likedFoods: parsed.likedFoods || [],
     customFoods: parsed.customFoods || [],
     customProgramConfig: parsed.customProgramConfig || null,
+    supplementList: parsed.supplementList || [],
+    supplementLogs: parsed.supplementLogs || {},
     programs: {
       cutting: mergeProgramState((parsed.programs || {}).cutting, EXERCISES_CUTTING),
       cruise: mergeProgramState((parsed.programs || {}).cruise, EXERCISES_CRUISE),
@@ -1347,7 +1406,7 @@ function loadData() {
 }
 
 function App() {
-  const APP_VERSION = "2026-07-17T18:17:23";
+  const APP_VERSION = "2026-07-18T13:18:53";
   const [updateAvailable, setUpdateAvailable] = useState(false);
   useEffect(function () {
     function checkVersion() {
@@ -1734,6 +1793,21 @@ function App() {
     saveProgram({ dailyWeightLogs: newLogs });
   }
 
+  function addSupplement(name, timing, nutrients) {
+    const supp = { id: "supp_" + Date.now(), name: name, timing: timing, nutrients: nutrients };
+    save(Object.assign({}, data, { supplementList: data.supplementList.concat([supp]) }));
+  }
+  function removeSupplement(id) {
+    save(Object.assign({}, data, { supplementList: data.supplementList.filter(function (s) { return s.id !== id; }) }));
+  }
+  function toggleSupplementLog(id) {
+    const key = todayKey();
+    const todayLog = Object.assign({}, data.supplementLogs[key] || {});
+    todayLog[id] = !todayLog[id];
+    const newLogs = Object.assign({}, data.supplementLogs, { [key]: todayLog });
+    save(Object.assign({}, data, { supplementLogs: newLogs }));
+  }
+
   // Calories actually logged for a given real calendar date — deliberately reads only the free-form
   // food log (self-contained per-100g data at the time it was logged), not the meal-checklist
   // percentages. Meal-plan content can change when the 4-week rotation advances, so reconstructing
@@ -2042,6 +2116,9 @@ function App() {
               dayIdx: nutritionDayIdx, setDayIdx: setNutritionDayIdx,
               selectedDate: nutritionSelectedDate, isToday: nutritionIsToday,
               isCustomProgram: data.activeProgram === "custom", swapIngredient: swapMealIngredient, likedFoods: data.likedFoods,
+              supplementList: data.supplementList, supplementLogsToday: data.supplementLogs[nutritionSelectedDate] || {},
+              addSupplement: addSupplement, removeSupplement: removeSupplement, toggleSupplementLog: toggleSupplementLog,
+              nutrientWarnings: checkNutrientOverlaps(data.supplementList),
             }),
             tab === "hydration" && h(HydrationTab, {
               hToday: hToday, toggleHydration: toggleHydration, ozLogged: ozLogged, hydrationHistory: hydrationHistory,
@@ -2148,7 +2225,15 @@ function WorkoutsTab(props) {
     const readyToRate = !isSkipped && allSetsHaveReps(logsForEx, setsToday);
     const isOpen = !!props.expanded[ex.id];
     const status = statuses[idx];
-    const canEnter = status.completed || status.inProgress || anyInProgressIdx === -1;
+    // Normally only one exercise can be "in progress" at a time, locking the rest until it's rated —
+    // but that's wrong for a superset, where the whole point is alternating between exercises
+    // without fully finishing one first. So an exercise sharing a superset group with whichever one
+    // is in progress stays unlocked too.
+    const myGroupIdx = groupOf[ex.id];
+    const inProgressEx = anyInProgressIdx !== -1 ? day.exercises[anyInProgressIdx] : null;
+    const inProgressGroupIdx = inProgressEx ? groupOf[inProgressEx.id] : null;
+    const sameSuperset = myGroupIdx != null && inProgressGroupIdx != null && myGroupIdx === inProgressGroupIdx;
+    const canEnter = status.completed || status.inProgress || anyInProgressIdx === -1 || sameSuperset;
     const blockedBy = !canEnter ? (props.data.exerciseState[day.exercises[anyInProgressIdx].id].nameOverride || day.exercises[anyInProgressIdx].name) : null;
     const isSelected = pendingSelection.indexOf(ex.id) !== -1;
 
@@ -2927,6 +3012,91 @@ function MealSwapControl(props) {
   );
 }
 
+// Shows a simple checklist of supplements tagged to a given timing (a specific meal, or the
+// standalone "other" bucket) — same interaction pattern as the meal-status buttons above it.
+function SupplementSection(props) {
+  if (!props.supplements || props.supplements.length === 0) return null;
+  return h("div", { style: { marginTop: props.compact ? 8 : 0, marginBottom: props.compact ? 0 : 16 } },
+    props.compact
+      ? h("div", { style: { fontSize: 11, color: "#737373", marginBottom: 4 } }, props.title + ":")
+      : h("div", { className: "food-cat-title" }, props.title),
+    props.supplements.map(function (s) {
+      const checked = !!props.logsToday[s.id];
+      return h("label", { key: s.id, style: { display: "flex", alignItems: "center", gap: 8, fontSize: 13, padding: "4px 0" } },
+        h("input", { type: "checkbox", checked: checked, disabled: props.disabled, onChange: function () { props.toggleLog(s.id); } }),
+        h("span", null, s.name)
+      );
+    })
+  );
+}
+
+// Lets the person build their own supplement list — deliberately manual entry rather than a
+// searchable database, since what matters for supplements is the exact product/label (as the real
+// verified protocol this app is built around showed directly), not a generic category lookup the
+// way a food database works. Nutrient tagging is optional per supplement; only tagged nutrients
+// get checked against NUTRIENT_UL for overlaps.
+function SupplementManager(props) {
+  const [name, setName] = useState("");
+  const [timing, setTiming] = useState("m1");
+  const [nutrientRows, setNutrientRows] = useState([{ nutrient: "", amount: "" }]);
+
+  function updateRow(i, field, value) {
+    const next = nutrientRows.slice();
+    next[i] = Object.assign({}, next[i], { [field]: value });
+    setNutrientRows(next);
+  }
+  function removeRow(i) { setNutrientRows(nutrientRows.filter(function (_, idx) { return idx !== i; })); }
+
+  function submit() {
+    if (!name.trim()) { window.alert("Enter a supplement name."); return; }
+    const nutrients = nutrientRows.filter(function (r) { return r.nutrient && r.amount; }).map(function (r) { return { nutrient: r.nutrient, amount: Number(r.amount) }; });
+    props.addSupplement(name.trim(), timing, nutrients);
+    setName(""); setNutrientRows([{ nutrient: "", amount: "" }]);
+  }
+
+  const TIMING_LABELS = { m1: "With Meal 1", m2: "With Meal 2", m3: "With Meal 3", m4: "With Meal 4", standalone: "Standalone (pre-workout, bedtime, etc.)" };
+
+  return h("div", { className: "panel", style: { marginTop: 16, marginBottom: 16 } },
+    h("h3", null, "Supplements"),
+    props.supplementList.length > 0 && h("div", { style: { marginBottom: 16 } },
+      props.supplementList.map(function (s) {
+        return h("div", { key: s.id, style: { display: "flex", justifyContent: "space-between", alignItems: "center", padding: "6px 0", borderBottom: "1px solid #262626" } },
+          h("div", null,
+            h("div", { style: { fontSize: 13 } }, s.name),
+            h("div", { style: { fontSize: 11, color: "#737373" } }, TIMING_LABELS[s.timing] + (s.nutrients.length ? " · " + s.nutrients.map(function (n) { return (NUTRIENT_UL[n.nutrient] ? NUTRIENT_UL[n.nutrient].label : n.nutrient) + " " + n.amount + (NUTRIENT_UL[n.nutrient] ? NUTRIENT_UL[n.nutrient].unit : ""); }).join(", ") : ""))
+          ),
+          h("button", { className: "ex-action-btn", style: { flex: "0 0 auto" }, onClick: function () { props.removeSupplement(s.id); } }, "Remove")
+        );
+      })
+    ),
+    h("p", { className: "food-cat-title" }, "Add a Supplement"),
+    h("input", { className: "search-input", placeholder: "Name (e.g. Vitamin D3 5000IU — Sports Research)", value: name, onChange: function (e) { setName(e.target.value); } }),
+    h("select", {
+      className: "search-input", style: { marginTop: 8 }, value: timing,
+      onChange: function (e) { setTiming(e.target.value); },
+    },
+      Object.keys(TIMING_LABELS).map(function (k) { return h("option", { key: k, value: k }, TIMING_LABELS[k]); })
+    ),
+    h("p", { style: { fontSize: "11px", color: "#737373", marginTop: 8 } },
+      "Optional — tag which nutrients this provides, so overlaps with your other supplements can be flagged automatically:"),
+    nutrientRows.map(function (row, i) {
+      return h("div", { key: i, style: { display: "flex", gap: 6, marginTop: 6 } },
+        h("select", {
+          className: "search-input", value: row.nutrient,
+          onChange: function (e) { updateRow(i, "nutrient", e.target.value); },
+        },
+          h("option", { value: "" }, "Nutrient..."),
+          NUTRIENT_OPTIONS.map(function (n) { return h("option", { key: n.id, value: n.id }, n.label + " (" + n.unit + ")"); })
+        ),
+        h("input", { type: "number", className: "search-input", placeholder: "Amount", value: row.amount, onChange: function (e) { updateRow(i, "amount", e.target.value); } }),
+        nutrientRows.length > 1 && h("button", { className: "ex-action-btn", style: { flex: "0 0 auto" }, onClick: function () { removeRow(i); } }, "×")
+      );
+    }),
+    h("button", { className: "ex-action-btn", style: { marginTop: 8 }, onClick: function () { setNutrientRows(nutrientRows.concat([{ nutrient: "", amount: "" }])); } }, "+ Add another nutrient"),
+    h("button", { className: "generate-btn", style: { marginTop: 12 }, onClick: submit }, "Add Supplement")
+  );
+}
+
 function NutritionTab(props) {
   const STATUS_OPTS = [
     { id: "full", label: "Full" }, { id: "three_quarter", label: "¾", pct: 75 },
@@ -2979,6 +3149,20 @@ function NutritionTab(props) {
       "Previewing next week's meal plan — useful for planning what to cook, but nothing here can be logged until that week actually starts."),
     !isFutureWeek && isFutureDay && h("div", { className: "preview-banner" }, "That's a future day — nothing to log yet."),
 
+    props.nutrientWarnings && props.nutrientWarnings.length > 0 && h("div", { className: "plan-error", style: { marginBottom: 16 } },
+      h("strong", null, "Supplement overlap — worth a look:"),
+      props.nutrientWarnings.map(function (w) {
+        return h("p", { key: w.nutrient, style: { margin: "4px 0 0", fontSize: "12px" } },
+          "Your entered supplements total " + w.total + w.unit + " of " + w.nutrient + " — at or above the commonly-cited " + w.limit + w.unit + " adult upper limit.");
+      })
+    ),
+
+    h(SupplementSection, {
+      title: "Other Supplements", timing: "standalone",
+      supplements: props.supplementList.filter(function (s) { return s.timing === "standalone"; }),
+      logsToday: props.supplementLogsToday, toggleLog: props.toggleSupplementLog, disabled: isFutureDay,
+    }),
+
     h("div", { style: { marginBottom: 24 } },
       props.meals.map(function (m, idx) {
         const entry = props.nToday[m.id];
@@ -3003,12 +3187,19 @@ function NutritionTab(props) {
             props.isCustomProgram && !isFutureWeek && !isFutureDay && h(MealSwapControl, {
               allFoods: props.allFoods, likedFoods: props.likedFoods,
               onSwap: function (role, foodName) { props.swapIngredient(idx, role, foodName); },
+            }),
+            h(SupplementSection, {
+              title: "Also take", timing: m.id,
+              supplements: props.supplementList.filter(function (s) { return s.timing === m.id; }),
+              logsToday: props.supplementLogsToday, toggleLog: props.toggleSupplementLog, disabled: isFutureDay,
+              compact: true,
             })
           )
         );
       })
     ),
     h(FoodSearchLog, { foodLog: props.foodLog, logFood: props.logFood, removeEntry: props.removeFoodLogEntry, updateGrams: props.updateFoodLogGrams, allFoods: props.allFoods }),
+    h(SupplementManager, { supplementList: props.supplementList, addSupplement: props.addSupplement, removeSupplement: props.removeSupplement }),
     h("div", { className: "panel", style: { marginBottom: 16 } },
       h("h3", null, dateLabel + " Progress"),
       h(MacroBar, { label: "Calories", value: props.macroProgress.cal, target: props.mealTotals.cal, unit: "" }),
@@ -3378,6 +3569,7 @@ function CustomSetupWizard(props) {
   const [heightInches, setHeightInches] = useState("");
   const [eatingStart, setEatingStart] = useState("08:00");
   const [eatingEnd, setEatingEnd] = useState("18:00");
+  const [dietStyle, setDietStyle] = useState("standard");
   const [targetWeight, setTargetWeight] = useState("");
   const [currentBF, setCurrentBF] = useState("");
   const [targetBF, setTargetBF] = useState("");
@@ -3434,7 +3626,7 @@ function CustomSetupWizard(props) {
       }
     }
     const heightCm = (feet * 12 + inches) * 2.54;
-    const macros = computeCustomMacros(cw, activity, goal, gender, heightCm, ageNum);
+    const macros = computeCustomMacros(cw, activity, goal, gender, heightCm, ageNum, dietStyle);
     const weeksNeeded = computeWeeksNeeded(cw, tw, goal, macros.maintenance, macros.cal);
     const exercises = buildCustomExercises(goal, experience, trainingDays, cardioDays, equipmentAvailable);
     const milestones = buildCustomMilestones(cw, tw, weeksNeeded, cbf, tbf);
@@ -3468,6 +3660,7 @@ function CustomSetupWizard(props) {
 
   const GOALS = [{ id: "cut", label: "Cut (lose fat)" }, { id: "bulk", label: "Bulk (gain muscle)" }, { id: "maintain", label: "Maintain" }];
   const ACTIVITIES = [{ id: "sedentary", label: "Sedentary" }, { id: "light", label: "Lightly Active" }, { id: "moderate", label: "Moderately Active" }, { id: "active", label: "Very Active" }];
+  const DIET_STYLES = [{ id: "standard", label: "Standard" }, { id: "keto", label: "Keto (low-carb)" }, { id: "lowfat", label: "Low-Fat" }];
   const EXPERIENCES = [
     { id: "beginner", label: "Beginner", note: "3 days/week, full-body sessions — 4 core lifts each time. The least intimidating way to start; consistency matters far more than volume at this stage." },
     { id: "intermediate", label: "Intermediate", note: "4 days/week, a traditional Upper/Lower split repeated twice — more volume and variety than Beginner, without the full Advanced session length." },
@@ -3537,6 +3730,18 @@ function CustomSetupWizard(props) {
       h("div", { className: "food-chip-grid" },
         ACTIVITIES.map(function (a) { return h("button", { key: a.id, className: "food-chip" + (activity === a.id ? " liked" : ""), onClick: function () { setActivity(a.id); } }, a.label); })
       ),
+      h("div", { className: "food-cat-title" }, "Diet Style (optional)"),
+      h("div", { className: "food-chip-grid" },
+        DIET_STYLES.map(function (d) {
+          return h("button", { key: d.id, className: "food-chip" + (dietStyle === d.id ? " liked" : ""), onClick: function () { setDietStyle(d.id); } }, d.label);
+        })
+      ),
+      h("p", { style: { fontSize: "11px", color: "#737373", marginTop: 4 } },
+        dietStyle === "keto"
+          ? "Very low carb (~25g/day), higher fat. Protein and total calories don't change. Worth knowing: if you like mostly higher-carb foods in the next step, the meal solver may struggle to hit this target — leaning on lower-carb picks (meats, eggs, cheese, nuts, low-carb vegetables) will make this work more reliably."
+          : dietStyle === "lowfat"
+          ? "Lower fat (~15% of calories, vs. 25% standard), higher carb. Protein and total calories don't change."
+          : "Standard split — protein ~1g/lb, 25% of calories from fat, the rest from carbs."),
       h("div", { className: "food-cat-title" }, "Training Experience"),
       h("div", { className: "food-chip-grid" },
         EXPERIENCES.map(function (ex) {
