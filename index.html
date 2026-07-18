@@ -155,6 +155,13 @@
 
   .navbar { position: fixed; bottom: 0; left: 0; right: 0; background: #171717; border-top: 1px solid #262626;
     display: flex; justify-content: space-around; padding: 8px 0; max-width: 32rem; margin: 0 auto; }
+  .rest-timer-bar { position: fixed; bottom: 64px; left: 50%; transform: translateX(-50%); width: calc(100% - 24px);
+    max-width: calc(32rem - 24px); background: #1d4ed8; color: #fff; border-radius: 12px; padding: 10px 14px;
+    display: flex; align-items: center; justify-content: space-between; gap: 10px; font-size: 14px; z-index: 40;
+    box-shadow: 0 4px 16px rgba(0,0,0,0.5); }
+  .rest-timer-bar .rest-time { font-variant-numeric: tabular-nums; font-weight: 700; font-size: 18px; }
+  .rest-timer-bar button { background: rgba(255,255,255,0.15); border: none; color: #fff; border-radius: 8px;
+    padding: 6px 12px; font-size: 12px; cursor: pointer; }
   .nav-btn { display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 6px 12px;
     border-radius: 8px; font-size: 11px; background: none; border: none; color: #737373; cursor: pointer; }
   .nav-btn.active { color: #3d97d3; }
@@ -604,10 +611,15 @@ const NUTRIENT_UL = {
   zinc: { amount: 40, unit: "mg", label: "Zinc" },
   calcium: { amount: 2500, unit: "mg", label: "Calcium" },
   iron: { amount: 45, unit: "mg", label: "Iron" },
-  magnesium: { amount: 350, unit: "mg", label: "Magnesium (supplemental)" },
+  // foodCounts: false — these ULs apply to specific forms, not to food in general, so food-sourced
+  // amounts must NOT be folded into the running total (doing so would fire false warnings from
+  // ordinary meals): magnesium's 350mg UL covers supplemental magnesium only; folate's 1000mcg UL
+  // covers synthetic folic acid, not natural food folate; vitamin A's 10000 IU UL covers preformed
+  // retinol, not the beta-carotene in plants like carrots or sweet potato.
+  magnesium: { amount: 350, unit: "mg", label: "Magnesium (supplemental)", foodCounts: false },
   vitaminB6: { amount: 100, unit: "mg", label: "Vitamin B6" },
-  folate: { amount: 1000, unit: "mcg", label: "Folate" },
-  vitaminA: { amount: 10000, unit: "IU", label: "Vitamin A" },
+  folate: { amount: 1000, unit: "mcg", label: "Folate", foodCounts: false },
+  vitaminA: { amount: 10000, unit: "IU", label: "Vitamin A", foodCounts: false },
   selenium: { amount: 400, unit: "mcg", label: "Selenium" },
 };
 const NUTRIENT_OPTIONS = Object.keys(NUTRIENT_UL).map(function (k) { return { id: k, label: NUTRIENT_UL[k].label, unit: NUTRIENT_UL[k].unit }; });
@@ -621,6 +633,25 @@ function computeNutrientTotals(supplementList) {
   });
   return totals;
 }
+// Sums micronutrients from a day's logged food entries, scaled by logged grams. Only foods in the
+// built-in database carry `micro` data (per-100g, hand-authored USDA-typical values — same spirit as
+// the hand-curated exercise pool); custom foods and unmatched entries simply contribute nothing.
+// Nutrients whose UL doesn't apply to food-sourced forms (foodCounts: false above) are skipped here.
+function computeFoodNutrientTotals(dayFoodLog, foodSource) {
+  const totals = {};
+  (dayFoodLog || []).forEach(function (entry) {
+    let food = null;
+    for (let i = 0; i < foodSource.length; i++) { if (foodSource[i].name === entry.name) { food = foodSource[i]; break; } }
+    if (!food || !food.micro) return;
+    const scale = (Number(entry.grams) || 0) / 100;
+    Object.keys(food.micro).forEach(function (key) {
+      const ul = NUTRIENT_UL[key];
+      if (!ul || ul.foodCounts === false) return;
+      totals[key] = (totals[key] || 0) + food.micro[key] * scale;
+    });
+  });
+  return totals;
+}
 function checkNutrientOverlaps(supplementList) {
   const totals = computeNutrientTotals(supplementList);
   const warnings = [];
@@ -628,6 +659,27 @@ function checkNutrientOverlaps(supplementList) {
     const ul = NUTRIENT_UL[key];
     if (ul && totals[key] >= ul.amount) {
       warnings.push({ nutrient: ul.label, total: totals[key], limit: ul.amount, unit: ul.unit });
+    }
+  });
+  return warnings;
+}
+// The full check: entered supplement regimen + the selected day's logged food, combined — this is
+// what catches the "fortified/rich food plus a supplement" overlaps a supplement-only check misses.
+// Warnings carry the supplement/food split so the UI can show where the total is coming from.
+function checkCombinedNutrientOverlaps(supplementList, dayFoodLog, foodSource) {
+  const suppTotals = computeNutrientTotals(supplementList);
+  const foodTotals = computeFoodNutrientTotals(dayFoodLog, foodSource);
+  const warnings = [];
+  Object.keys(NUTRIENT_UL).forEach(function (key) {
+    const ul = NUTRIENT_UL[key];
+    const fromSupp = suppTotals[key] || 0;
+    const fromFood = foodTotals[key] || 0;
+    const total = fromSupp + fromFood;
+    if (total >= ul.amount) {
+      warnings.push({
+        nutrient: ul.label, total: Math.round(total), limit: ul.amount, unit: ul.unit,
+        fromSupp: Math.round(fromSupp), fromFood: Math.round(fromFood),
+      });
     }
   });
   return warnings;
@@ -975,103 +1027,107 @@ function computeAdjustedMilestones(actuals, base) {
 // ---------- Custom Plan Generator: food database + math solver ----------
 // cal/protein/carb/fat per 100g, sourced from the same figures used throughout this program
 const FOOD_DB = [
+  // `micro` = per-100g micronutrient content (hand-authored USDA-typical values, same spirit as
+  // the hand-curated exercise pool). Only nutrients whose UL applies to food-sourced forms are
+  // tagged; magnesium/folate/vitamin A are deliberately absent (their ULs cover supplemental or
+  // specific chemical forms only — see NUTRIENT_UL). Untagged foods contribute nothing.
   // Proteins
-  { name: "Chicken breast", cat: "protein", cal: 165, p: 31, c: 0, f: 3.6 },
-  { name: "Chicken thigh", cat: "protein", cal: 209, p: 26, c: 0, f: 10.9 },
-  { name: "Turkey breast", cat: "protein", cal: 135, p: 30, c: 0, f: 1 },
-  { name: "Ground turkey (93/7)", cat: "protein", cal: 150, p: 20, c: 0, f: 7 },
-  { name: "Lean beef (93/7)", cat: "protein", cal: 172, p: 21, c: 0, f: 9 },
-  { name: "Ground beef (85/15)", cat: "protein", cal: 215, p: 21, c: 0, f: 14 },
-  { name: "Steak (sirloin)", cat: "protein", cal: 183, p: 27, c: 0, f: 8 },
-  { name: "Pork tenderloin", cat: "protein", cal: 143, p: 26, c: 0, f: 3.5 },
-  { name: "Pork chop", cat: "protein", cal: 231, p: 25, c: 0, f: 14 },
-  { name: "Bacon", cat: "protein", cal: 541, p: 37, c: 1.4, f: 42 },
-  { name: "Salmon", cat: "protein", cal: 208, p: 20, c: 0, f: 13 },
-  { name: "Tuna (canned in water)", cat: "protein", cal: 116, p: 26, c: 0, f: 0.8 },
-  { name: "Tilapia", cat: "protein", cal: 96, p: 20, c: 0, f: 1.7 },
-  { name: "Shrimp", cat: "protein", cal: 99, p: 24, c: 0.2, f: 0.3 },
-  { name: "Egg (whole)", cat: "protein", cal: 155, p: 13, c: 1.1, f: 11 },
+  { name: "Chicken breast", cat: "protein", cal: 165, p: 31, c: 0, f: 3.6, micro: { selenium: 28, zinc: 1 } },
+  { name: "Chicken thigh", cat: "protein", cal: 209, p: 26, c: 0, f: 10.9, micro: { selenium: 24, zinc: 2.4, iron: 1.2 } },
+  { name: "Turkey breast", cat: "protein", cal: 135, p: 30, c: 0, f: 1, micro: { selenium: 30, zinc: 1.7 } },
+  { name: "Ground turkey (93/7)", cat: "protein", cal: 150, p: 20, c: 0, f: 7, micro: { selenium: 30, zinc: 3, iron: 1.4 } },
+  { name: "Lean beef (93/7)", cat: "protein", cal: 172, p: 21, c: 0, f: 9, micro: { zinc: 5.5, iron: 2.5, selenium: 20 } },
+  { name: "Ground beef (85/15)", cat: "protein", cal: 215, p: 21, c: 0, f: 14, micro: { zinc: 5.8, iron: 2.5, selenium: 20 } },
+  { name: "Steak (sirloin)", cat: "protein", cal: 183, p: 27, c: 0, f: 8, micro: { zinc: 4.9, iron: 1.6, selenium: 30 } },
+  { name: "Pork tenderloin", cat: "protein", cal: 143, p: 26, c: 0, f: 3.5, micro: { selenium: 40, zinc: 2.2, iron: 1 } },
+  { name: "Pork chop", cat: "protein", cal: 231, p: 25, c: 0, f: 14, micro: { selenium: 40, zinc: 2, iron: 0.8 } },
+  { name: "Bacon", cat: "protein", cal: 541, p: 37, c: 1.4, f: 42, micro: { selenium: 60, zinc: 3.5 } },
+  { name: "Salmon", cat: "protein", cal: 208, p: 20, c: 0, f: 13, micro: { vitaminD: 530, selenium: 36 } },
+  { name: "Tuna (canned in water)", cat: "protein", cal: 116, p: 26, c: 0, f: 0.8, micro: { vitaminD: 47, selenium: 70 } },
+  { name: "Tilapia", cat: "protein", cal: 96, p: 20, c: 0, f: 1.7, micro: { vitaminD: 124, selenium: 46 } },
+  { name: "Shrimp", cat: "protein", cal: 99, p: 24, c: 0.2, f: 0.3, micro: { selenium: 40, zinc: 1.6, calcium: 70 } },
+  { name: "Egg (whole)", cat: "protein", cal: 155, p: 13, c: 1.1, f: 11, micro: { vitaminD: 82, selenium: 30, zinc: 1.3, calcium: 56, iron: 1.8 } },
   { name: "Egg whites", cat: "protein", cal: 52, p: 11, c: 0.7, f: 0.2 },
-  { name: "Tofu (firm)", cat: "protein", cal: 144, p: 15, c: 3, f: 8 },
-  { name: "Tempeh", cat: "protein", cal: 192, p: 20, c: 8, f: 11 },
-  { name: "Cottage cheese (2%)", cat: "protein", cal: 90, p: 11, c: 3.4, f: 2.5 },
-  { name: "Greek yogurt (0%)", cat: "protein", cal: 59, p: 10, c: 3.6, f: 0.4 },
-  { name: "Greek yogurt (full fat)", cat: "protein", cal: 97, p: 9, c: 4, f: 5 },
-  { name: "Whey protein powder", cat: "protein", cal: 375, p: 80, c: 8, f: 5 },
-  { name: "Deli turkey slices", cat: "protein", cal: 104, p: 17, c: 3, f: 2 },
-  { name: "Deli ham slices", cat: "protein", cal: 145, p: 21, c: 1.5, f: 6 },
+  { name: "Tofu (firm)", cat: "protein", cal: 144, p: 15, c: 3, f: 8, micro: { calcium: 350, iron: 2.7, zinc: 0.8, selenium: 17 } },
+  { name: "Tempeh", cat: "protein", cal: 192, p: 20, c: 8, f: 11, micro: { calcium: 111, iron: 2.7, zinc: 1.1 } },
+  { name: "Cottage cheese (2%)", cat: "protein", cal: 90, p: 11, c: 3.4, f: 2.5, micro: { calcium: 91, selenium: 10, zinc: 0.5 } },
+  { name: "Greek yogurt (0%)", cat: "protein", cal: 59, p: 10, c: 3.6, f: 0.4, micro: { calcium: 110, zinc: 0.5 } },
+  { name: "Greek yogurt (full fat)", cat: "protein", cal: 97, p: 9, c: 4, f: 5, micro: { calcium: 100, zinc: 0.5 } },
+  { name: "Whey protein powder", cat: "protein", cal: 375, p: 80, c: 8, f: 5, micro: { calcium: 400 } },
+  { name: "Deli turkey slices", cat: "protein", cal: 104, p: 17, c: 3, f: 2, micro: { selenium: 22, zinc: 1 } },
+  { name: "Deli ham slices", cat: "protein", cal: 145, p: 21, c: 1.5, f: 6, micro: { selenium: 25, zinc: 1.8, iron: 0.8 } },
   // Carbs
-  { name: "White rice", cat: "carb", cal: 130, p: 2.4, c: 28, f: 0.3 },
-  { name: "Brown rice", cat: "carb", cal: 123, p: 2.7, c: 26, f: 1 },
-  { name: "Quinoa", cat: "carb", cal: 120, p: 4.4, c: 21, f: 1.9 },
-  { name: "Pasta (cooked)", cat: "carb", cal: 131, p: 5, c: 25, f: 1.1 },
-  { name: "Potato", cat: "carb", cal: 87, p: 2, c: 20, f: 0.1 },
-  { name: "Sweet potato", cat: "carb", cal: 90, p: 2, c: 21, f: 0.1 },
-  { name: "Oats (dry)", cat: "carb", cal: 389, p: 17, c: 66, f: 7 },
-  { name: "Ezekiel bread", cat: "carb", cal: 235, p: 12, c: 44, f: 1.5 },
-  { name: "White bread", cat: "carb", cal: 265, p: 9, c: 49, f: 3.2 },
-  { name: "Whole wheat bread", cat: "carb", cal: 247, p: 13, c: 41, f: 3.4 },
-  { name: "Bagel", cat: "carb", cal: 257, p: 10, c: 50, f: 1.5 },
-  { name: "Tortilla (flour)", cat: "carb", cal: 310, p: 8, c: 51, f: 7 },
+  { name: "White rice", cat: "carb", cal: 130, p: 2.4, c: 28, f: 0.3, micro: { iron: 1.2 } },
+  { name: "Brown rice", cat: "carb", cal: 123, p: 2.7, c: 26, f: 1, micro: { selenium: 10, zinc: 0.6, iron: 0.5 } },
+  { name: "Quinoa", cat: "carb", cal: 120, p: 4.4, c: 21, f: 1.9, micro: { iron: 1.5, zinc: 1.1 } },
+  { name: "Pasta (cooked)", cat: "carb", cal: 131, p: 5, c: 25, f: 1.1, micro: { iron: 1.3, selenium: 26 } },
+  { name: "Potato", cat: "carb", cal: 87, p: 2, c: 20, f: 0.1, micro: { vitaminC: 13, iron: 0.9 } },
+  { name: "Sweet potato", cat: "carb", cal: 90, p: 2, c: 21, f: 0.1, micro: { vitaminC: 13, calcium: 30 } },
+  { name: "Oats (dry)", cat: "carb", cal: 389, p: 17, c: 66, f: 7, micro: { iron: 4.7, zinc: 4 } },
+  { name: "Ezekiel bread", cat: "carb", cal: 235, p: 12, c: 44, f: 1.5, micro: { iron: 2.5 } },
+  { name: "White bread", cat: "carb", cal: 265, p: 9, c: 49, f: 3.2, micro: { calcium: 150, iron: 3.6 } },
+  { name: "Whole wheat bread", cat: "carb", cal: 247, p: 13, c: 41, f: 3.4, micro: { iron: 2.4, zinc: 1.8, selenium: 26 } },
+  { name: "Bagel", cat: "carb", cal: 257, p: 10, c: 50, f: 1.5, micro: { iron: 3.5, calcium: 75 } },
+  { name: "Tortilla (flour)", cat: "carb", cal: 310, p: 8, c: 51, f: 7, micro: { calcium: 150, iron: 3.3 } },
   { name: "Corn", cat: "carb", cal: 96, p: 3.4, c: 21, f: 1.5 },
-  { name: "Black beans", cat: "carb", cal: 132, p: 8.9, c: 24, f: 0.5 },
-  { name: "Chickpeas", cat: "carb", cal: 164, p: 8.9, c: 27, f: 2.6 },
-  { name: "Lentils", cat: "carb", cal: 116, p: 9, c: 20, f: 0.4 },
+  { name: "Black beans", cat: "carb", cal: 132, p: 8.9, c: 24, f: 0.5, micro: { iron: 2.1, zinc: 1.1, calcium: 27 } },
+  { name: "Chickpeas", cat: "carb", cal: 164, p: 8.9, c: 27, f: 2.6, micro: { iron: 2.9, zinc: 1.5, calcium: 49 } },
+  { name: "Lentils", cat: "carb", cal: 116, p: 9, c: 20, f: 0.4, micro: { iron: 3.3, zinc: 1.3 } },
   { name: "Granola", cat: "carb", cal: 471, p: 10, c: 64, f: 20 },
-  { name: "Banana", cat: "carb", cal: 89, p: 1.1, c: 23, f: 0.3 },
+  { name: "Banana", cat: "carb", cal: 89, p: 1.1, c: 23, f: 0.3, micro: { vitaminC: 9 } },
   { name: "Apple", cat: "carb", cal: 52, p: 0.3, c: 14, f: 0.2 },
-  { name: "Orange", cat: "carb", cal: 47, p: 0.9, c: 12, f: 0.1 },
+  { name: "Orange", cat: "carb", cal: 47, p: 0.9, c: 12, f: 0.1, micro: { vitaminC: 53, calcium: 40 } },
   { name: "Grapes", cat: "carb", cal: 69, p: 0.7, c: 18, f: 0.2 },
-  { name: "Strawberries", cat: "carb", cal: 32, p: 0.7, c: 7.7, f: 0.3 },
+  { name: "Strawberries", cat: "carb", cal: 32, p: 0.7, c: 7.7, f: 0.3, micro: { vitaminC: 59 } },
   { name: "Watermelon", cat: "carb", cal: 30, p: 0.6, c: 8, f: 0.2 },
-  { name: "Berries (mixed)", cat: "carb", cal: 57, p: 0.7, c: 14, f: 0.3 },
-  { name: "Mango", cat: "carb", cal: 60, p: 0.8, c: 15, f: 0.4 },
-  { name: "Pineapple", cat: "carb", cal: 50, p: 0.5, c: 13, f: 0.1 },
+  { name: "Berries (mixed)", cat: "carb", cal: 57, p: 0.7, c: 14, f: 0.3, micro: { vitaminC: 30 } },
+  { name: "Mango", cat: "carb", cal: 60, p: 0.8, c: 15, f: 0.4, micro: { vitaminC: 36 } },
+  { name: "Pineapple", cat: "carb", cal: 50, p: 0.5, c: 13, f: 0.1, micro: { vitaminC: 48 } },
   // Fats
-  { name: "Peanut butter", cat: "fat", cal: 588, p: 25, c: 20, f: 50 },
-  { name: "Almond butter", cat: "fat", cal: 614, p: 21, c: 19, f: 56 },
-  { name: "Avocado", cat: "fat", cal: 160, p: 2, c: 9, f: 15 },
+  { name: "Peanut butter", cat: "fat", cal: 588, p: 25, c: 20, f: 50, micro: { zinc: 2.7, iron: 1.7 } },
+  { name: "Almond butter", cat: "fat", cal: 614, p: 21, c: 19, f: 56, micro: { calcium: 347, iron: 3.5, zinc: 3 } },
+  { name: "Avocado", cat: "fat", cal: 160, p: 2, c: 9, f: 15, micro: { vitaminC: 10 } },
   { name: "Olive oil", cat: "fat", cal: 884, p: 0, c: 0, f: 100 },
   { name: "Butter", cat: "fat", cal: 717, p: 0.9, c: 0.1, f: 81 },
   { name: "Coconut oil", cat: "fat", cal: 862, p: 0, c: 0, f: 100 },
   { name: "Mayonnaise", cat: "fat", cal: 680, p: 1, c: 0.6, f: 75 },
-  { name: "Cheddar cheese", cat: "fat", cal: 403, p: 25, c: 1.3, f: 33 },
-  { name: "Mozzarella cheese", cat: "fat", cal: 280, p: 28, c: 3.1, f: 17 },
-  { name: "Almonds", cat: "fat", cal: 579, p: 21, c: 22, f: 50 },
-  { name: "Walnuts", cat: "fat", cal: 654, p: 15, c: 14, f: 65 },
-  { name: "Cashews", cat: "fat", cal: 553, p: 18, c: 30, f: 44 },
-  { name: "Sunflower seeds", cat: "fat", cal: 584, p: 21, c: 20, f: 51 },
+  { name: "Cheddar cheese", cat: "fat", cal: 403, p: 25, c: 1.3, f: 33, micro: { calcium: 710, zinc: 3.6, selenium: 28 } },
+  { name: "Mozzarella cheese", cat: "fat", cal: 280, p: 28, c: 3.1, f: 17, micro: { calcium: 505, zinc: 2.9, selenium: 17 } },
+  { name: "Almonds", cat: "fat", cal: 579, p: 21, c: 22, f: 50, micro: { calcium: 269, iron: 3.7, zinc: 3.1 } },
+  { name: "Walnuts", cat: "fat", cal: 654, p: 15, c: 14, f: 65, micro: { zinc: 3.1, iron: 2.9, calcium: 98 } },
+  { name: "Cashews", cat: "fat", cal: 553, p: 18, c: 30, f: 44, micro: { zinc: 5.8, iron: 6.7 } },
+  { name: "Sunflower seeds", cat: "fat", cal: 584, p: 21, c: 20, f: 51, micro: { selenium: 53, zinc: 5, iron: 5.3 } },
   // Vegetables
-  { name: "Broccoli", cat: "veg", cal: 35, p: 2.4, c: 7, f: 0.4 },
-  { name: "Green beans", cat: "veg", cal: 35, p: 1.8, c: 7, f: 0.1 },
+  { name: "Broccoli", cat: "veg", cal: 35, p: 2.4, c: 7, f: 0.4, micro: { vitaminC: 89, calcium: 47 } },
+  { name: "Green beans", cat: "veg", cal: 35, p: 1.8, c: 7, f: 0.1, micro: { vitaminC: 12, calcium: 37, iron: 1 } },
   { name: "Carrots", cat: "veg", cal: 41, p: 0.9, c: 10, f: 0.2 },
-  { name: "Zucchini", cat: "veg", cal: 17, p: 1.2, c: 3.1, f: 0.3 },
-  { name: "Bell pepper", cat: "veg", cal: 31, p: 1, c: 6, f: 0.3 },
-  { name: "Spinach", cat: "veg", cal: 23, p: 2.9, c: 3.6, f: 0.4 },
-  { name: "Kale", cat: "veg", cal: 49, p: 4.3, c: 9, f: 0.9 },
-  { name: "Cauliflower", cat: "veg", cal: 25, p: 1.9, c: 5, f: 0.3 },
+  { name: "Zucchini", cat: "veg", cal: 17, p: 1.2, c: 3.1, f: 0.3, micro: { vitaminC: 18 } },
+  { name: "Bell pepper", cat: "veg", cal: 31, p: 1, c: 6, f: 0.3, micro: { vitaminC: 128 } },
+  { name: "Spinach", cat: "veg", cal: 23, p: 2.9, c: 3.6, f: 0.4, micro: { iron: 2.7, calcium: 99, vitaminC: 28, zinc: 0.5 } },
+  { name: "Kale", cat: "veg", cal: 49, p: 4.3, c: 9, f: 0.9, micro: { vitaminC: 120, calcium: 150 } },
+  { name: "Cauliflower", cat: "veg", cal: 25, p: 1.9, c: 5, f: 0.3, micro: { vitaminC: 48 } },
   { name: "Cucumber", cat: "veg", cal: 15, p: 0.7, c: 3.6, f: 0.1 },
-  { name: "Tomato", cat: "veg", cal: 18, p: 0.9, c: 3.9, f: 0.2 },
-  { name: "Mushrooms", cat: "veg", cal: 22, p: 3.1, c: 3.3, f: 0.3 },
+  { name: "Tomato", cat: "veg", cal: 18, p: 0.9, c: 3.9, f: 0.2, micro: { vitaminC: 14 } },
+  { name: "Mushrooms", cat: "veg", cal: 22, p: 3.1, c: 3.3, f: 0.3, micro: { selenium: 9 } },
   { name: "Onion", cat: "veg", cal: 40, p: 1.1, c: 9.3, f: 0.1 },
-  { name: "Asparagus", cat: "veg", cal: 20, p: 2.2, c: 3.9, f: 0.1 },
-  { name: "Cabbage", cat: "veg", cal: 25, p: 1.3, c: 5.8, f: 0.1 },
+  { name: "Asparagus", cat: "veg", cal: 20, p: 2.2, c: 3.9, f: 0.1, micro: { iron: 2.1 } },
+  { name: "Cabbage", cat: "veg", cal: 25, p: 1.3, c: 5.8, f: 0.1, micro: { vitaminC: 37 } },
   // Other (logging only — not used by the Custom Plan solver, which needs the 4 categories above)
-  { name: "Milk (2%)", cat: "other", cal: 50, p: 3.3, c: 4.8, f: 2 },
-  { name: "Milk (whole)", cat: "other", cal: 61, p: 3.2, c: 4.8, f: 3.3 },
+  { name: "Milk (2%)", cat: "other", cal: 50, p: 3.3, c: 4.8, f: 2, micro: { calcium: 120, vitaminD: 43 } },
+  { name: "Milk (whole)", cat: "other", cal: 61, p: 3.2, c: 4.8, f: 3.3, micro: { calcium: 113, vitaminD: 40 } },
   { name: "Protein bar (generic)", cat: "other", cal: 350, p: 30, c: 35, f: 12 },
-  { name: "Pizza (cheese, slice)", cat: "other", cal: 266, p: 11, c: 33, f: 10 },
+  { name: "Pizza (cheese, slice)", cat: "other", cal: 266, p: 11, c: 33, f: 10, micro: { calcium: 190 } },
   { name: "Potato chips", cat: "other", cal: 536, p: 7, c: 53, f: 35 },
   { name: "French fries", cat: "other", cal: 312, p: 3.4, c: 41, f: 15 },
-  { name: "Ice cream", cat: "other", cal: 207, p: 3.5, c: 24, f: 11 },
-  { name: "Chocolate (dark)", cat: "other", cal: 546, p: 4.9, c: 61, f: 31 },
+  { name: "Ice cream", cat: "other", cal: 207, p: 3.5, c: 24, f: 11, micro: { calcium: 128 } },
+  { name: "Chocolate (dark)", cat: "other", cal: 546, p: 4.9, c: 61, f: 31, micro: { iron: 12, zinc: 3.3 } },
   { name: "Soda (regular)", cat: "other", cal: 42, p: 0, c: 10.6, f: 0 },
   { name: "Beer (regular)", cat: "other", cal: 43, p: 0.5, c: 3.6, f: 0 },
   { name: "Wine (red)", cat: "other", cal: 85, p: 0.1, c: 2.6, f: 0 },
   { name: "Coffee (black)", cat: "other", cal: 2, p: 0.3, c: 0, f: 0 },
   { name: "Honey", cat: "other", cal: 304, p: 0.3, c: 82, f: 0 },
   { name: "Ketchup", cat: "other", cal: 101, p: 1.2, c: 26, f: 0.1 },
-  { name: "Hummus", cat: "other", cal: 166, p: 8, c: 14, f: 10 },
+  { name: "Hummus", cat: "other", cal: 166, p: 8, c: 14, f: 10, micro: { iron: 2.4, zinc: 1.8 } },
   { name: "Salsa", cat: "other", cal: 36, p: 1.6, c: 7.5, f: 0.2 },
 ];
 
@@ -1275,6 +1331,34 @@ function timeToMinutes(t) {
   const parts = t.split(":");
   return Number(parts[0]) * 60 + Number(parts[1]);
 }
+// Parses a display-format meal time ("4:00 AM", "12:00 PM", or a range like "5:45–7:00 AM" — ranges
+// use their start time) into minutes-from-midnight, for sorting meals and scheduled supplements
+// into one chronological day. Returns null for anything unparseable, which callers treat as
+// "no time known" rather than an error.
+function parseMealTimeToMinutes(str) {
+  if (!str) return null;
+  const m = String(str).match(/(\d{1,2}):(\d{2})/);
+  if (!m) return null;
+  let hh = Number(m[1]);
+  const mm = Number(m[2]);
+  const mer = String(str).match(/AM|PM/i);
+  if (mer) {
+    const isPM = mer[0].toUpperCase() === "PM";
+    if (isPM && hh !== 12) hh += 12;
+    if (!isPM && hh === 12) hh = 0;
+  }
+  return hh * 60 + mm;
+}
+// "18:30" -> "6:30 PM" (for displaying a stored 24h supplement time in the same style as meal times)
+function formatTimeHM(t) {
+  const p = String(t).split(":");
+  let hh = Number(p[0]);
+  const mm = p[1];
+  const ampm = hh >= 12 ? "PM" : "AM";
+  hh = hh % 12;
+  if (hh === 0) hh = 12;
+  return hh + ":" + mm + " " + ampm;
+}
 function sleepDurationHours(bedtime, wake) {
   const bed = timeToMinutes(bedtime);
   const wk = timeToMinutes(wake);
@@ -1282,6 +1366,47 @@ function sleepDurationHours(bedtime, wake) {
   let diff = wk - bed;
   if (diff <= 0) diff += 24 * 60; // wake time is "the next day" relative to bedtime
   return Math.round((diff / 60) * 10) / 10;
+}
+// Directional "readiness" signal — deliberately not a precise clinical score. Combines three things
+// already being self-reported (recent sleep, this week's exercise difficulty ratings, this week's
+// skipped exercises) into a simple flag. Returns null when there isn't enough logged data yet to say
+// anything meaningful; otherwise "normal" (nothing worth flagging) or "watch"/"low" depending on how
+// many of the three signals are tripped. This never touches programming automatically — it's a
+// suggestion surfaced in the UI, not an auto-adjustment.
+function computeReadinessSignal(prog) {
+  const nights = [];
+  for (let i = 0; i < 3; i++) {
+    const key = dateKeyDaysAgo(i);
+    const entry = prog.sleepLogs[key];
+    if (entry && entry.bedtime && entry.wake) {
+      nights.push({ duration: sleepDurationHours(entry.bedtime, entry.wake), quality: entry.quality });
+    }
+  }
+  if (nights.length < 2) return null; // not enough sleep data logged yet
+
+  const avgSleep = nights.reduce(function (a, n) { return a + (n.duration || 0); }, 0) / nights.length;
+  const poorCount = nights.filter(function (n) { return n.quality === "poor"; }).length;
+  const lowSleep = avgSleep < 6.5 || poorCount >= 2;
+
+  const weekDifficulty = prog.exerciseDifficulty[prog.currentWeek] || {};
+  const ratings = Object.keys(weekDifficulty).map(function (id) { return weekDifficulty[id]; });
+  const hardCount = ratings.filter(function (r) { return r === "hard"; }).length;
+  const hardRatio = ratings.length > 0 ? hardCount / ratings.length : 0;
+  const highDifficulty = ratings.length >= 4 && hardRatio >= 0.5;
+
+  const weekSkipped = prog.skipped[prog.currentWeek] || {};
+  const skippedCount = Object.keys(weekSkipped).filter(function (id) { return weekSkipped[id]; }).length;
+  const totalSeen = ratings.length + skippedCount;
+  const missedRatio = totalSeen > 0 ? skippedCount / totalSeen : 0;
+  const lowAdherence = totalSeen >= 4 && missedRatio >= 0.3;
+
+  const flagCount = [lowSleep, highDifficulty, lowAdherence].filter(Boolean).length;
+  const reasons = [];
+  if (lowSleep) reasons.push("recent sleep has been short or lower quality");
+  if (highDifficulty) reasons.push("several exercises have felt too difficult this week");
+  if (lowAdherence) reasons.push("some sets have been skipped this week");
+
+  return { level: flagCount === 0 ? "normal" : (flagCount >= 2 ? "low" : "watch"), reasons: reasons };
 }
 function nextWeightIncrement(w) {
   if (w == null) return null;
@@ -1323,6 +1448,53 @@ function allExercises(exercises) {
   return DAYS.flatMap((d) => exercises[d].exercises.map((ex) => Object.assign({}, ex, { day: d })));
 }
 
+// Returns the "top set" value for one exercise in one week: heaviest logged weight for a weighted
+// movement, or highest rep count for a bodyweight movement — the same value ProgressChart plots.
+// null when there are no valid logged sets that week.
+function topSetValueForWeek(weekLogs, exId, isBodyweight) {
+  const sets = ((weekLogs || {})[exId] || []).filter(function (s) { return s && s.reps != null; });
+  if (sets.length === 0) return null;
+  if (isBodyweight) return Math.max.apply(null, sets.map(function (s) { return s.reps || 0; }));
+  return Math.max.apply(null, sets.map(function (s) { return s.weight || 0; }));
+}
+
+// Looks at the last `window` weeks of top-set data for a single exercise and decides whether it's
+// stalled — i.e. the most recent value is no higher than the best value seen earlier in the window.
+// Needs the full window of consecutive logged weeks to say anything (a gap = not enough evidence).
+// A flat OR declining trend both count as a stall; only a genuine new high clears it.
+function exerciseIsStalled(logsByWeek, exId, isBodyweight, uptoWeek, windowSize) {
+  const vals = [];
+  for (let w = uptoWeek - windowSize + 1; w <= uptoWeek; w++) {
+    if (w < 1) return false; // not enough history yet
+    const v = topSetValueForWeek(logsByWeek[w], exId, isBodyweight);
+    if (v == null) return false; // a missing week breaks the run — don't guess
+    vals.push(v);
+  }
+  const latest = vals[vals.length - 1];
+  const bestEarlier = Math.max.apply(null, vals.slice(0, vals.length - 1));
+  return latest <= bestEarlier; // no new high across the window = stalled
+}
+
+// Scans every exercise for a multi-week performance stall. Returns a summary { stalledCount,
+// consideredCount, ratio } so the caller can decide whether the plateau is broad enough to suggest a
+// deload. Only exercises with a full window of consecutive logged weeks are "considered" — ones the
+// person hasn't trained enough to judge are excluded from both numerator and denominator, so a
+// half-logged program can't produce a misleading ratio.
+function computePerformanceStall(exercisesDef, logsByWeek, uptoWeek, windowSize) {
+  let stalled = 0, considered = 0;
+  allExercises(exercisesDef).forEach(function (ex) {
+    // "considered" = has a value in every week of the window
+    let hasFullWindow = true;
+    for (let w = uptoWeek - windowSize + 1; w <= uptoWeek; w++) {
+      if (w < 1 || topSetValueForWeek(logsByWeek[w], ex.id, ex.bodyweight) == null) { hasFullWindow = false; break; }
+    }
+    if (!hasFullWindow) return;
+    considered++;
+    if (exerciseIsStalled(logsByWeek, ex.id, ex.bodyweight, uptoWeek, windowSize)) stalled++;
+  });
+  return { stalledCount: stalled, consideredCount: considered, ratio: considered > 0 ? stalled / considered : 0 };
+}
+
 const STORAGE_KEY = "cutting-tracker-data-v2";
 function freshProgramState(exercises) {
   return {
@@ -1353,6 +1525,7 @@ function makeDefaultData() {
     customProgramConfig: null,
     supplementList: [],
     supplementLogs: {},
+    restTimerSettings: { enabled: false, seconds: 90 }, // client-side post-set rest reminder — no backend involved
     programs: {
       cutting: freshProgramState(EXERCISES_CUTTING),
       cruise: freshProgramState(EXERCISES_CRUISE),
@@ -1372,6 +1545,7 @@ function normalizeV2(parsed) {
     customProgramConfig: parsed.customProgramConfig || null,
     supplementList: parsed.supplementList || [],
     supplementLogs: parsed.supplementLogs || {},
+    restTimerSettings: Object.assign({ enabled: false, seconds: 90 }, parsed.restTimerSettings || {}),
     programs: {
       cutting: mergeProgramState((parsed.programs || {}).cutting, EXERCISES_CUTTING),
       cruise: mergeProgramState((parsed.programs || {}).cruise, EXERCISES_CRUISE),
@@ -1405,8 +1579,27 @@ function loadData() {
   }
 }
 
+// Fires the rest-over notification. Android Chrome requires notifications to go through the service
+// worker registration (calling `new Notification()` directly throws there); desktop and other
+// platforms accept the direct constructor — so try the registration path first and fall back.
+// Silently does nothing without permission: the in-app countdown bar is the primary surface, and the
+// notification is a bonus for when the screen is off or another app is up.
+function fireRestNotification(label) {
+  if (typeof Notification === "undefined" || Notification.permission !== "granted") return;
+  const title = "Rest over";
+  const opts = { body: "Time for your next set" + (label ? " — " + label : ""), tag: "rest-timer" };
+  if (navigator.serviceWorker) {
+    navigator.serviceWorker.getRegistration().then(function (reg) {
+      if (reg && reg.showNotification) reg.showNotification(title, opts);
+      else { try { new Notification(title, opts); } catch (e) {} }
+    }).catch(function () { try { new Notification(title, opts); } catch (e) {} });
+  } else {
+    try { new Notification(title, opts); } catch (e) {}
+  }
+}
+
 function App() {
-  const APP_VERSION = "2026-07-18T13:18:53";
+  const APP_VERSION = "2026-07-18T16:54:56";
   const [updateAvailable, setUpdateAvailable] = useState(false);
   useEffect(function () {
     function checkVersion() {
@@ -1448,6 +1641,50 @@ function App() {
   }, []);
 
   function showToast(msg) { setToast(msg); setTimeout(function () { setToast(""); }, 2200); }
+
+  // ---- Post-set rest timer (client-side only — deliberately no backend involvement) ----
+  // Timing is anchored to an absolute end timestamp, not a counted-down number, so a throttled
+  // background tab or a screen-off phone can't stretch the rest period: whenever the next tick
+  // does run, remaining time is recomputed from the wall clock.
+  const [restTimer, setRestTimer] = useState(null); // { endsAt, label } | null
+  const [restRemaining, setRestRemaining] = useState(0);
+  const restFiredRef = useRef(false);
+
+  useEffect(function () {
+    if (!restTimer) return;
+    function tick() {
+      const remaining = Math.max(0, Math.ceil((restTimer.endsAt - Date.now()) / 1000));
+      setRestRemaining(remaining);
+      if (remaining <= 0 && !restFiredRef.current) {
+        restFiredRef.current = true;
+        fireRestNotification(restTimer.label);
+        if (navigator.vibrate) { try { navigator.vibrate([200, 100, 200]); } catch (e) {} }
+        showToast("Rest over — next set!");
+        setRestTimer(null);
+      }
+    }
+    tick();
+    const iv = setInterval(tick, 1000);
+    return function () { clearInterval(iv); };
+  }, [restTimer]);
+
+  function startRestTimer(label) {
+    const settings = data.restTimerSettings || { enabled: false, seconds: 90 };
+    if (!settings.enabled) return;
+    restFiredRef.current = false;
+    setRestTimer({ endsAt: Date.now() + settings.seconds * 1000, label: label });
+  }
+  function skipRestTimer() { restFiredRef.current = true; setRestTimer(null); }
+  function updateRestTimerSettings(patch) {
+    const cur = data.restTimerSettings || { enabled: false, seconds: 90 };
+    const next = Object.assign({}, cur, patch);
+    save(Object.assign({}, data, { restTimerSettings: next }));
+    // Ask for notification permission at the moment the feature is switched on — the only point
+    // where the request has clear context. The in-app countdown works regardless of the answer.
+    if (patch.enabled && typeof Notification !== "undefined" && Notification.permission === "default") {
+      Notification.requestPermission();
+    }
+  }
 
   const def = data.activeProgram === "custom" ? buildCustomProgramDef(data.customProgramConfig) : PROGRAM_DEFS[data.activeProgram];
   const prog = data.programs[data.activeProgram];
@@ -1568,7 +1805,25 @@ function App() {
     const HARD_THRESHOLD = 0.4;
     let recommendation = null;
     if (!nextWeekAlreadyDeload && totalRated >= MIN_SAMPLE && hardRatio >= HARD_THRESHOLD) {
-      recommendation = { forWeek: week + 1, pct: Math.round(hardRatio * 100) };
+      recommendation = { forWeek: week + 1, reason: "difficulty", pct: Math.round(hardRatio * 100) };
+    }
+    // Second, independent trigger: a real performance plateau read from logged top-set data across the
+    // last several weeks (what ProgressChart already displays), rather than subjective difficulty
+    // ratings. Only checked if the difficulty path didn't already fire, and only once enough weeks of
+    // history exist to mean anything. This is the "read the data, don't trust the calendar" item.
+    const STALL_WINDOW = 3;        // weeks of consecutive data required to judge a stall
+    const STALL_RATIO_THRESHOLD = 0.6; // share of consistently-trained exercises that must be flat/declining
+    const STALL_MIN_CONSIDERED = 4;    // need enough exercises with full history to trust the ratio
+    if (!recommendation && !nextWeekAlreadyDeload && week >= STALL_WINDOW) {
+      const logsWithThisWeek = Object.assign({}, prog.logs, { [week]: weekLogs });
+      const stall = computePerformanceStall(def.exercises, logsWithThisWeek, week, STALL_WINDOW);
+      if (stall.consideredCount >= STALL_MIN_CONSIDERED && stall.ratio >= STALL_RATIO_THRESHOLD) {
+        recommendation = {
+          forWeek: week + 1, reason: "performance",
+          stalledCount: stall.stalledCount, consideredCount: stall.consideredCount,
+          weeks: STALL_WINDOW,
+        };
+      }
     }
     saveProgram({ currentWeek: week + 1, exerciseState: newState, undoSnapshot: snapshot, deloadRecommendation: recommendation });
     showToast("Week " + week + " complete — Week " + (week + 1) + " targets updated");
@@ -1776,6 +2031,7 @@ function App() {
       sleepHistory.push({ date: key, bedtime: entry.bedtime, wake: entry.wake, quality: entry.quality, duration: sleepDurationHours(entry.bedtime, entry.wake) });
     }
   }
+  const readinessSignal = computeReadinessSignal(prog);
 
   function setMilestoneActual(week, field, value) {
     const cur = prog.milestoneActuals[week] || {};
@@ -1793,8 +2049,11 @@ function App() {
     saveProgram({ dailyWeightLogs: newLogs });
   }
 
-  function addSupplement(name, timing, nutrients) {
-    const supp = { id: "supp_" + Date.now(), name: name, timing: timing, nutrients: nutrients };
+  function addSupplement(name, timing, nutrients, time) {
+    // `time` (24h "HH:MM") only applies to standalone supplements — it schedules them into the day's
+    // chronological meal plan. Meal-tagged supplements inherit their meal's time; untimed standalone
+    // ones land in the Unscheduled section. Existing entries without the field behave as untimed.
+    const supp = { id: "supp_" + Date.now(), name: name, timing: timing, nutrients: nutrients, time: (timing === "standalone" && time) ? time : null };
     save(Object.assign({}, data, { supplementList: data.supplementList.concat([supp]) }));
   }
   function removeSupplement(id) {
@@ -2090,6 +2349,13 @@ function App() {
       )
     ),
     toast && h("div", { className: "toast" }, h(Check, { size: 16 }), " " + toast),
+    restTimer && h("div", { className: "rest-timer-bar" },
+      h("div", null,
+        h("div", { style: { fontSize: 11, opacity: 0.8 } }, "Resting — " + restTimer.label),
+        h("div", { className: "rest-time" }, Math.floor(restRemaining / 60) + ":" + String(restRemaining % 60).padStart(2, "0"))
+      ),
+      h("button", { onClick: skipRestTimer }, "Skip")
+    ),
     data.activeProgram !== "custom"
       ? h("main", null, h(CoordinatorPlaceholder, { programLabel: def.label }))
       : def.needsSetup
@@ -2104,7 +2370,9 @@ function App() {
               targetHR: (data.customProgramConfig && data.customProgramConfig.age) ? Math.round((220 - data.customProgramConfig.age) * 0.65) : null,
               supersetGroups: prog.supersetGroups, createSuperset: createSuperset, removeSuperset: removeSuperset,
               deloadRecommendation: prog.deloadRecommendation, acceptDeloadRecommendation: acceptDeloadRecommendation,
-              dismissDeloadRecommendation: dismissDeloadRecommendation,
+              dismissDeloadRecommendation: dismissDeloadRecommendation, readinessSignal: readinessSignal,
+              restTimerSettings: data.restTimerSettings, updateRestTimerSettings: updateRestTimerSettings,
+              startRestTimer: startRestTimer,
             }),
             tab === "nutrition" && h(NutritionTab, {
               nToday: nToday, setMealStatus: setMealStatus, clearMealStatus: clearMealStatus, macroProgress: macroProgress, meals: meals, mealTotals: activeMealTotals,
@@ -2118,7 +2386,7 @@ function App() {
               isCustomProgram: data.activeProgram === "custom", swapIngredient: swapMealIngredient, likedFoods: data.likedFoods,
               supplementList: data.supplementList, supplementLogsToday: data.supplementLogs[nutritionSelectedDate] || {},
               addSupplement: addSupplement, removeSupplement: removeSupplement, toggleSupplementLog: toggleSupplementLog,
-              nutrientWarnings: checkNutrientOverlaps(data.supplementList),
+              nutrientWarnings: checkCombinedNutrientOverlaps(data.supplementList, prog.foodLog[nutritionSelectedDate] || [], allFoods),
             }),
             tab === "hydration" && h(HydrationTab, {
               hToday: hToday, toggleHydration: toggleHydration, ozLogged: ozLogged, hydrationHistory: hydrationHistory,
@@ -2317,6 +2585,7 @@ function WorkoutsTab(props) {
                 return h(SetLogger, {
                   key: props.data.currentWeek + "-" + i, setIdx: i, exercise: ex, state: state,
                   existing: logsForEx[i], onLog: function (reps, weight) { props.logSet(ex.id, i, reps, weight); },
+                  onSetCommitted: function () { if (props.startRestTimer) props.startRestTimer(displayName); },
                 });
               }),
               readyToRate && h("div", { className: "rate-panel" },
@@ -2362,12 +2631,45 @@ function WorkoutsTab(props) {
   });
 
   return h("div", null,
+    props.readinessSignal && props.readinessSignal.level !== "normal" && h("div", { className: "preview-banner", style: { marginBottom: 16 } },
+      h("p", { style: { margin: "0 0 4px", fontWeight: 600 } },
+        props.readinessSignal.level === "low" ? "Today might be a lighter day" : "Worth keeping an eye on today"),
+      h("p", { style: { margin: 0, fontSize: 13 } }, "Based on " + props.readinessSignal.reasons.join(" and ") + "."),
+      h("p", { style: { margin: "6px 0 0", fontSize: 11, color: "#737373" } },
+        "A directional flag from your own logged sleep, difficulty ratings, and skipped sets — not a diagnosis. You know your body better than this number does.")
+    ),
     props.deloadRecommendation && props.deloadRecommendation.forWeek === props.data.currentWeek && h("div", { className: "preview-banner", style: { marginBottom: 16 } },
       h("p", { style: { margin: "0 0 8px" } },
-        "Last week ran heavy — " + props.deloadRecommendation.pct + "% of rated exercises came back Too Difficult. Worth taking this week as a deload?"),
+        props.deloadRecommendation.reason === "performance"
+          ? ("Progress has stalled — " + props.deloadRecommendation.stalledCount + " of " + props.deloadRecommendation.consideredCount + " exercises you've trained consistently haven't set a new best in " + props.deloadRecommendation.weeks + " weeks. Worth taking this week as a deload?")
+          : ("Last week ran heavy — " + props.deloadRecommendation.pct + "% of rated exercises came back Too Difficult. Worth taking this week as a deload?")),
       h("div", { style: { display: "flex", gap: 8 } },
         h("button", { className: "swap-save-btn", style: { flex: 1 }, onClick: props.acceptDeloadRecommendation }, "Yes, deload this week"),
         h("button", { className: "ex-action-btn", onClick: props.dismissDeloadRecommendation }, "No, train normally")
+      )
+    ),
+    h("div", { className: "panel", style: { marginBottom: 16, padding: "10px 14px" } },
+      h("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "center" } },
+        h("span", { style: { fontSize: 13 } }, "Rest timer after each set"),
+        h("button", {
+          className: "ex-action-btn",
+          style: (props.restTimerSettings && props.restTimerSettings.enabled) ? { background: "#1d4ed8", color: "#fff" } : {},
+          onClick: function () { props.updateRestTimerSettings({ enabled: !(props.restTimerSettings && props.restTimerSettings.enabled) }); },
+        }, (props.restTimerSettings && props.restTimerSettings.enabled) ? "On" : "Off")
+      ),
+      props.restTimerSettings && props.restTimerSettings.enabled && h("div", { style: { marginTop: 10 } },
+        h("div", { className: "diff-row" },
+          [60, 90, 120, 180].map(function (s) {
+            return h("button", {
+              key: s, onClick: function () { props.updateRestTimerSettings({ seconds: s }); },
+              className: "diff-btn" + (props.restTimerSettings.seconds === s ? " easy" : ""),
+            }, s < 120 ? s + "s" : (s / 60) + "m");
+          })
+        ),
+        h("p", { style: { fontSize: 11, color: "#737373", margin: "8px 0 0" } },
+          "Starts when you tap away from a set's rep count. Runs entirely on this device — the countdown always shows here in the app; the extra notification needs permission granted" +
+          (typeof Notification !== "undefined" && Notification.permission === "denied" ? " (currently blocked in your browser settings)" : "") +
+          ", and on iPhone also requires iOS 16.4+ with the app added to your Home Screen.")
       )
     ),
     h("div", { className: "day-tabs" },
@@ -2689,6 +2991,16 @@ function SetLogger(props) {
   const [reps, setReps] = useState(existing && existing.reps != null ? existing.reps : "");
   const [weight, setWeight] = useState(existing && existing.weight != null ? existing.weight : (props.state.weight != null ? props.state.weight : ""));
   const prevDefaultWeight = useRef(props.state.weight);
+  // Rest timer fires on blur of the reps field, not on every keystroke (onLog fires per keystroke —
+  // typing "12" would otherwise start the timer at "1"). The ref guards against a focus-then-blur
+  // with no actual change restarting an in-progress rest period.
+  const lastCommittedReps = useRef(existing && existing.reps != null ? String(existing.reps) : "");
+
+  function commitSet() {
+    if (reps === "" || String(reps) === lastCommittedReps.current) return;
+    lastCommittedReps.current = String(reps);
+    if (props.onSetCommitted) props.onSetCommitted();
+  }
 
   useEffect(function () {
     // If the exercise's default weight changed (e.g., after a swap or manual adjustment) and this
@@ -2716,7 +3028,7 @@ function SetLogger(props) {
       }),
       h("input", {
         type: "number", inputMode: "numeric", value: reps,
-        onChange: function (e) { setReps(e.target.value); }, placeholder: "reps", className: "set-input",
+        onChange: function (e) { setReps(e.target.value); }, onBlur: commitSet, placeholder: "reps", className: "set-input",
       }),
       h("span", { className: "set-target" }, "target " + effectiveRepRange(props.exercise, props.state).repLow + "–" + effectiveRepRange(props.exercise, props.state).repHigh)
     )
@@ -3038,7 +3350,9 @@ function SupplementSection(props) {
 function SupplementManager(props) {
   const [name, setName] = useState("");
   const [timing, setTiming] = useState("m1");
+  const [time, setTime] = useState("");
   const [nutrientRows, setNutrientRows] = useState([{ nutrient: "", amount: "" }]);
+  const [listOpen, setListOpen] = useState(false); // entered list starts minimized — it can get long
 
   function updateRow(i, field, value) {
     const next = nutrientRows.slice();
@@ -3050,8 +3364,8 @@ function SupplementManager(props) {
   function submit() {
     if (!name.trim()) { window.alert("Enter a supplement name."); return; }
     const nutrients = nutrientRows.filter(function (r) { return r.nutrient && r.amount; }).map(function (r) { return { nutrient: r.nutrient, amount: Number(r.amount) }; });
-    props.addSupplement(name.trim(), timing, nutrients);
-    setName(""); setNutrientRows([{ nutrient: "", amount: "" }]);
+    props.addSupplement(name.trim(), timing, nutrients, timing === "standalone" ? (time || null) : null);
+    setName(""); setTime(""); setNutrientRows([{ nutrient: "", amount: "" }]);
   }
 
   const TIMING_LABELS = { m1: "With Meal 1", m2: "With Meal 2", m3: "With Meal 3", m4: "With Meal 4", standalone: "Standalone (pre-workout, bedtime, etc.)" };
@@ -3059,11 +3373,17 @@ function SupplementManager(props) {
   return h("div", { className: "panel", style: { marginTop: 16, marginBottom: 16 } },
     h("h3", null, "Supplements"),
     props.supplementList.length > 0 && h("div", { style: { marginBottom: 16 } },
-      props.supplementList.map(function (s) {
+      h("button", {
+        className: "ex-action-btn", style: { width: "100%", textAlign: "left" },
+        onClick: function () { setListOpen(!listOpen); },
+      }, (listOpen ? "▾ " : "▸ ") + "Your supplements (" + props.supplementList.length + ")"),
+      listOpen && props.supplementList.map(function (s) {
         return h("div", { key: s.id, style: { display: "flex", justifyContent: "space-between", alignItems: "center", padding: "6px 0", borderBottom: "1px solid #262626" } },
           h("div", null,
             h("div", { style: { fontSize: 13 } }, s.name),
-            h("div", { style: { fontSize: 11, color: "#737373" } }, TIMING_LABELS[s.timing] + (s.nutrients.length ? " · " + s.nutrients.map(function (n) { return (NUTRIENT_UL[n.nutrient] ? NUTRIENT_UL[n.nutrient].label : n.nutrient) + " " + n.amount + (NUTRIENT_UL[n.nutrient] ? NUTRIENT_UL[n.nutrient].unit : ""); }).join(", ") : ""))
+            h("div", { style: { fontSize: 11, color: "#737373" } },
+              (s.timing === "standalone" && s.time ? "Standalone · " + formatTimeHM(s.time) : TIMING_LABELS[s.timing]) +
+              (s.nutrients.length ? " · " + s.nutrients.map(function (n) { return (NUTRIENT_UL[n.nutrient] ? NUTRIENT_UL[n.nutrient].label : n.nutrient) + " " + n.amount + (NUTRIENT_UL[n.nutrient] ? NUTRIENT_UL[n.nutrient].unit : ""); }).join(", ") : ""))
           ),
           h("button", { className: "ex-action-btn", style: { flex: "0 0 auto" }, onClick: function () { props.removeSupplement(s.id); } }, "Remove")
         );
@@ -3076,6 +3396,11 @@ function SupplementManager(props) {
       onChange: function (e) { setTiming(e.target.value); },
     },
       Object.keys(TIMING_LABELS).map(function (k) { return h("option", { key: k, value: k }, TIMING_LABELS[k]); })
+    ),
+    timing === "standalone" && h("div", { style: { marginTop: 8 } },
+      h("p", { style: { fontSize: "11px", color: "#737373", margin: "0 0 4px" } },
+        "Optional — give it a time to slot it into the day's plan alongside your meals. Leave blank for as-needed items (they'll show in an Unscheduled section)."),
+      h("input", { type: "time", className: "search-input", value: time, onChange: function (e) { setTime(e.target.value); } })
     ),
     h("p", { style: { fontSize: "11px", color: "#737373", marginTop: 8 } },
       "Optional — tag which nutrients this provides, so overlaps with your other supplements can be flagged automatically:"),
@@ -3097,6 +3422,51 @@ function SupplementManager(props) {
   );
 }
 
+// Wraps the "Also take" checklist for one meal. Once every supplement tagged to that meal is
+// checked, collapses to a single tap-to-expand line instead of the full checklist — the meal card
+// falls back to looking like it did before any supplements existed. A manual "Minimize" link lets
+// it be collapsed again after re-expanding (e.g. to fix a mis-tap) without waiting for a re-render.
+function MealSupplementBlock(props) {
+  if (!props.supplements || props.supplements.length === 0) return null;
+  const allChecked = props.supplements.every(function (s) { return !!props.logsToday[s.id]; });
+  if (allChecked && !props.expanded) {
+    return h("div", { style: { marginTop: 8 } },
+      h("button", {
+        className: "ex-action-btn", style: { fontSize: 11, padding: "4px 8px" },
+        onClick: props.onToggleExpand,
+      }, "✓ Supplements taken — tap to view")
+    );
+  }
+  return h("div", { style: { marginTop: 8 } },
+    h(SupplementSection, {
+      title: "Also take", supplements: props.supplements, logsToday: props.logsToday,
+      toggleLog: props.toggleLog, disabled: props.disabled, compact: true,
+    }),
+    allChecked && h("button", {
+      className: "ex-action-btn", style: { fontSize: 11, padding: "2px 8px", marginTop: 2 },
+      onClick: props.onToggleExpand,
+    }, "▴ Minimize")
+  );
+}
+
+// Renders one time-scheduled standalone supplement as its own card, styled like a meal card so it
+// sits visually consistent with the meals it's interleaved among on the day's timeline.
+function StandaloneSupplementCard(props) {
+  const s = props.supplement;
+  const checked = !!props.checked;
+  return h("label", {
+    className: "meal-card" + (checked ? " done" : "") + (props.disabled ? " preview-disabled" : ""),
+    style: { cursor: props.disabled ? "default" : "pointer" },
+  },
+    h("div", { className: "check-circle" + (checked ? " done" : "") }, checked && h(Check, { size: 12 })),
+    h("input", { type: "checkbox", checked: checked, disabled: props.disabled, onChange: props.onToggle, style: { display: "none" } }),
+    h("div", { style: { flex: 1 } },
+      h("div", { className: "meal-top" }, h("span", null, s.name), h("span", null, formatTimeHM(s.time))),
+      h("div", { className: "meal-food", style: { fontSize: 11, color: "#8a8a8a" } }, "Supplement")
+    )
+  );
+}
+
 function NutritionTab(props) {
   const STATUS_OPTS = [
     { id: "full", label: "Full" }, { id: "three_quarter", label: "¾", pct: 75 },
@@ -3106,6 +3476,26 @@ function NutritionTab(props) {
   const todayOffset = 0, todayIdx = todayDayIdx();
   const isFutureWeek = props.weekOffset < 0;
   const isFutureDay = isFutureWeek || (props.weekOffset === 0 && props.dayIdx > todayIdx);
+  const [suppExpanded, setSuppExpanded] = useState({}); // per-meal-id manual expand override
+  function toggleSuppExpanded(mealId) {
+    setSuppExpanded(Object.assign({}, suppExpanded, { [mealId]: !suppExpanded[mealId] }));
+  }
+
+  // Timed standalone supplements get slotted into the day's timeline alongside meals, sorted by
+  // clock time; ones with no time stay in a separate Unscheduled section (rendered above). Building
+  // one combined, sorted list — rather than rendering meals and supplements as two separate loops —
+  // is what actually achieves "integrated into the meal plan" instead of just improved styling.
+  const timedStandalone = props.supplementList.filter(function (s) { return s.timing === "standalone" && s.time; });
+  const unscheduledStandalone = props.supplementList.filter(function (s) { return s.timing === "standalone" && !s.time; });
+  const timelineItems = props.meals.map(function (m, idx) {
+    return { kind: "meal", sortMin: parseMealTimeToMinutes(m.time), meal: m, mealIdx: idx };
+  }).concat(timedStandalone.map(function (s) {
+    return { kind: "supplement", sortMin: timeToMinutes(s.time), supplement: s };
+  })).sort(function (a, b) {
+    const av = a.sortMin == null ? Infinity : a.sortMin;
+    const bv = b.sortMin == null ? Infinity : b.sortMin;
+    return av - bv;
+  });
 
   function jumpToDate(dateKey) {
     const targetMonday = mondayKeyForDate(new Date(dateKey + "T00:00:00"));
@@ -3150,21 +3540,36 @@ function NutritionTab(props) {
     !isFutureWeek && isFutureDay && h("div", { className: "preview-banner" }, "That's a future day — nothing to log yet."),
 
     props.nutrientWarnings && props.nutrientWarnings.length > 0 && h("div", { className: "plan-error", style: { marginBottom: 16 } },
-      h("strong", null, "Supplement overlap — worth a look:"),
+      h("strong", null, "Nutrient overlap — worth a look:"),
       props.nutrientWarnings.map(function (w) {
         return h("p", { key: w.nutrient, style: { margin: "4px 0 0", fontSize: "12px" } },
-          "Your entered supplements total " + w.total + w.unit + " of " + w.nutrient + " — at or above the commonly-cited " + w.limit + w.unit + " adult upper limit.");
-      })
+          w.nutrient + " totals " + w.total + w.unit +
+          (w.fromFood > 0
+            ? " (" + w.fromSupp + w.unit + " from supplements + " + w.fromFood + w.unit + " from this day's logged food)"
+            : " from your entered supplements") +
+          " — at or above the commonly-cited " + w.limit + w.unit + " adult upper limit.");
+      }),
+      h("p", { style: { margin: "6px 0 0", fontSize: "11px", opacity: 0.75 } },
+        "Food amounts come only from built-in foods with micronutrient data, for the day shown. Magnesium, folate, and vitamin A from food are deliberately not counted — their upper limits apply to supplemental or synthetic forms, not food.")
     ),
 
     h(SupplementSection, {
-      title: "Other Supplements", timing: "standalone",
-      supplements: props.supplementList.filter(function (s) { return s.timing === "standalone"; }),
+      title: "Unscheduled Supplements", timing: "standalone",
+      supplements: unscheduledStandalone,
       logsToday: props.supplementLogsToday, toggleLog: props.toggleSupplementLog, disabled: isFutureDay,
     }),
 
     h("div", { style: { marginBottom: 24 } },
-      props.meals.map(function (m, idx) {
+      timelineItems.map(function (item) {
+        if (item.kind === "supplement") {
+          const s = item.supplement;
+          return h(StandaloneSupplementCard, {
+            key: s.id, supplement: s, disabled: isFutureDay,
+            checked: !!props.supplementLogsToday[s.id],
+            onToggle: function () { props.toggleSupplementLog(s.id); },
+          });
+        }
+        const m = item.meal, idx = item.mealIdx;
         const entry = props.nToday[m.id];
         const status = entry ? (entry.status === "partial" ? (entry.pct === 75 ? "three_quarter" : "half") : entry.status) : null;
         return h("div", { key: m.id, className: "meal-card" + (status && status !== "skip" ? " done" : "") + (isFutureDay ? " preview-disabled" : "") },
@@ -3188,11 +3593,10 @@ function NutritionTab(props) {
               allFoods: props.allFoods, likedFoods: props.likedFoods,
               onSwap: function (role, foodName) { props.swapIngredient(idx, role, foodName); },
             }),
-            h(SupplementSection, {
-              title: "Also take", timing: m.id,
+            h(MealSupplementBlock, {
               supplements: props.supplementList.filter(function (s) { return s.timing === m.id; }),
               logsToday: props.supplementLogsToday, toggleLog: props.toggleSupplementLog, disabled: isFutureDay,
-              compact: true,
+              expanded: !!suppExpanded[m.id], onToggleExpand: function () { toggleSuppExpanded(m.id); },
             })
           )
         );
