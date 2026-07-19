@@ -1292,19 +1292,25 @@ function computeCustomGrocery(override, source) {
   return list;
 }
 
-function generateCustomPlan(likedNames, source, slots) {
+function generateCustomPlan(likedFoodsByMeal, source, slots) {
   const db = source || FOOD_DB;
   const useSlots = slots || SLOTS_CUTTING;
-  const liked = db.filter((f) => likedNames.indexOf(f.name) !== -1);
-  const proteins = liked.filter((f) => f.cat === "protein");
-  const carbs = liked.filter((f) => f.cat === "carb");
-  const fats = liked.filter((f) => f.cat === "fat");
-  const veg = liked.filter((f) => f.cat === "veg");
-  if (proteins.length === 0 || carbs.length === 0 || fats.length === 0) {
-    return { error: "Pick at least one liked food in each of Protein, Carb, and Fat to generate a plan." };
-  }
   const results = [];
+  let anyMealHasFoods = false;
   useSlots.forEach(function (slot, i) {
+    const mealKey = "m" + (i + 1);
+    const likedNames = (likedFoodsByMeal && likedFoodsByMeal[mealKey]) || [];
+    const liked = db.filter((f) => likedNames.indexOf(f.name) !== -1);
+    const proteins = liked.filter((f) => f.cat === "protein");
+    const carbs = liked.filter((f) => f.cat === "carb");
+    const fats = liked.filter((f) => f.cat === "fat");
+    const veg = liked.filter((f) => f.cat === "veg");
+    if (proteins.length === 0 || carbs.length === 0 || fats.length === 0) {
+      results.push({ slot: slot.label, error: "Pick at least one liked Protein, Carb, and Fat for " + slot.label + " to generate this meal." });
+      return;
+    }
+    anyMealHasFoods = true;
+
     const vegFood = veg.length > 0 ? veg[i % veg.length] : null;
     let target = [slot.p, slot.c, slot.f];
     let vegNote = null;
@@ -1339,7 +1345,7 @@ function generateCustomPlan(likedNames, source, slots) {
     }
 
     if (!solved) {
-      results.push({ slot: slot.label, error: "None of your liked foods (in any combination) can hit this meal's targets — try liking a different fat or carb source." });
+      results.push({ slot: slot.label, error: "None of your liked foods for " + slot.label + " (in any combination) can hit this meal's targets — try liking a different fat or carb source for this meal." });
       return;
     }
     const items = [
@@ -1356,6 +1362,9 @@ function generateCustomPlan(likedNames, source, slots) {
     });
     results.push({ slot: slot.label, items: items, cal: cal, p: p, c: c, f: f, target: slot });
   });
+  if (!anyMealHasFoods) {
+    return { error: "Pick at least one liked food in each of Protein, Carb, and Fat for at least one meal to generate a plan." };
+  }
   return { results: results };
 }
 const DIFFICULTIES = [
@@ -1606,7 +1615,7 @@ function mergeProgramState(saved, exercises) {
 function makeDefaultData() {
   return {
     activeProgram: "custom",
-    likedFoods: [],
+    likedFoodsByMeal: { m1: [], m2: [], m3: [], m4: [] }, // which liked foods apply to which meal slot — a breakfast-only protein shouldn't get picked for dinner
     customFoods: [],
     customProgramConfig: null,
     supplementList: [],
@@ -1634,9 +1643,16 @@ function normalizeV2(parsed) {
     const existing = (saved && saved.supplementLogs) || {};
     return Object.assign({}, saved, { supplementLogs: Object.assign({}, legacySupplementLogs, existing) });
   }
+  // One-time migration: liked foods used to be one flat list shared by every meal slot. Copied into
+  // ALL 4 slots below so nothing looks lost on first load — from here forward each meal slot tracks
+  // its own liked foods independently (so a breakfast-only protein doesn't get picked for dinner).
+  const legacyLikedFoods = parsed.likedFoods || null;
+  const likedFoodsByMeal = parsed.likedFoodsByMeal
+    ? Object.assign({ m1: [], m2: [], m3: [], m4: [] }, parsed.likedFoodsByMeal)
+    : { m1: legacyLikedFoods || [], m2: legacyLikedFoods || [], m3: legacyLikedFoods || [], m4: legacyLikedFoods || [] };
   return {
     activeProgram: validPrograms.indexOf(parsed.activeProgram) !== -1 ? parsed.activeProgram : "custom",
-    likedFoods: parsed.likedFoods || [],
+    likedFoodsByMeal: likedFoodsByMeal,
     customFoods: parsed.customFoods || [],
     customProgramConfig: parsed.customProgramConfig || null,
     supplementList: parsed.supplementList || [],
@@ -1652,7 +1668,8 @@ function normalizeV2(parsed) {
 }
 function migrateV1(old) {
   const migrated = makeDefaultData();
-  migrated.likedFoods = old.likedFoods || [];
+  const legacyLikedFoods = old.likedFoods || [];
+  migrated.likedFoodsByMeal = { m1: legacyLikedFoods, m2: legacyLikedFoods, m3: legacyLikedFoods, m4: legacyLikedFoods };
   migrated.customFoods = old.customFoods || [];
   migrated.programs.cutting = mergeProgramState({
     currentWeek: old.currentWeek, exerciseState: old.exerciseState, logs: old.logs,
@@ -1695,7 +1712,7 @@ function fireRestNotification(label) {
 }
 
 function App() {
-  const APP_VERSION = "2026-07-19T08:34:04";
+  const APP_VERSION = "2026-07-19T10:26:09";
   const [updateAvailable, setUpdateAvailable] = useState(false);
   useEffect(function () {
     function checkVersion() {
@@ -2291,10 +2308,11 @@ function App() {
     saveProgram({ supersetGroups: newGroups });
   }
 
-  function toggleLikedFood(name) {
-    const cur = data.likedFoods || [];
+  function toggleLikedFood(mealKey, name) {
+    const byMeal = data.likedFoodsByMeal || { m1: [], m2: [], m3: [], m4: [] };
+    const cur = byMeal[mealKey] || [];
     const next = cur.indexOf(name) !== -1 ? cur.filter(function (n) { return n !== name; }) : cur.concat([name]);
-    save(Object.assign({}, data, { likedFoods: next }));
+    save(Object.assign({}, data, { likedFoodsByMeal: Object.assign({}, byMeal, { [mealKey]: next }) }));
   }
 
   function addCustomFood(name, cat, per100) {
@@ -2389,7 +2407,9 @@ function App() {
       // Direct substitution didn't solve — search the person's other liked foods for the two
       // roles NOT being swapped, keeping the new food fixed in its role. Same fallback logic
       // already proven in the initial plan generator.
-      const likedObjs = data.likedFoods.map(function (n) { return allFoods.filter(function (f) { return f.name === n; })[0]; }).filter(Boolean);
+      const mealKey = "m" + (mealIndex + 1);
+      const likedForThisMeal = (data.likedFoodsByMeal && data.likedFoodsByMeal[mealKey]) || [];
+      const likedObjs = likedForThisMeal.map(function (n) { return allFoods.filter(function (f) { return f.name === n; })[0]; }).filter(Boolean);
       const pool = { protein: likedObjs.filter(function (f) { return f.cat === "protein"; }), carb: likedObjs.filter(function (f) { return f.cat === "carb"; }), fat: likedObjs.filter(function (f) { return f.cat === "fat"; }) };
       const roles = ["protein", "carb", "fat"];
       const options = roles.map(function (r, i) { return i === roleIdx ? [newFood] : pool[r]; });
@@ -2499,7 +2519,7 @@ function App() {
               weekOffset: nutritionWeekOffset, setWeekOffset: setNutritionWeekOffset,
               dayIdx: nutritionDayIdx, setDayIdx: setNutritionDayIdx,
               selectedDate: nutritionSelectedDate, isToday: nutritionIsToday,
-              isCustomProgram: data.activeProgram === "custom", swapIngredient: swapMealIngredient, likedFoods: data.likedFoods,
+              isCustomProgram: data.activeProgram === "custom", swapIngredient: swapMealIngredient, likedFoods: data.likedFoodsByMeal,
               supplementList: data.supplementList, supplementLogsToday: prog.supplementLogs[nutritionSelectedDate] || {},
               addSupplement: addSupplement, removeSupplement: removeSupplement, toggleSupplementLog: toggleSupplementLog,
               nutrientWarnings: checkCombinedNutrientOverlaps(data.supplementList, prog.foodLog[nutritionSelectedDate] || [], allFoods),
@@ -2526,7 +2546,7 @@ function App() {
               hasOverride: groceryHasOverride,
             }),
             tab === "custom" && h(CustomPlanTab, {
-              likedFoods: data.likedFoods, toggleLiked: toggleLikedFood,
+              likedFoods: data.likedFoodsByMeal, toggleLiked: toggleLikedFood,
               applyToWeek: applyPlanToWeek, revertWeek: revertWeekOverride, overrides: prog.customMealOverrides,
               plan: customPlan, setPlan: setCustomPlan, slots: def.slots,
               allFoods: allFoods, customFoods: data.customFoods || [], addCustomFood: addCustomFood, removeCustomFood: removeCustomFood,
@@ -3786,7 +3806,7 @@ function NutritionTab(props) {
         const status = entry ? (entry.status === "partial" ? (entry.pct === 75 ? "three_quarter" : "half") : entry.status) : null;
         const mealSwapControl = props.isCustomProgram && !isFutureWeek && !isFutureDay
           ? h(MealSwapControl, {
-              allFoods: props.allFoods, likedFoods: props.likedFoods,
+              allFoods: props.allFoods, likedFoods: (props.likedFoods && props.likedFoods[m.id]) || [],
               onSwap: function (role, foodName) { props.swapIngredient(idx, role, foodName); },
             })
           : null;
@@ -4195,13 +4215,15 @@ function CustomSetupWizard(props) {
   const [trainingDays, setTrainingDays] = useState([]);
   const [cardioDays, setCardioDays] = useState([]);
   const [equipmentAvailable, setEquipmentAvailable] = useState(["bodyweight"]);
-  const [likedFoodsCustom, setLikedFoodsCustom] = useState([]);
+  const [likedFoodsByMealCustom, setLikedFoodsByMealCustom] = useState({ m1: [], m2: [], m3: [], m4: [] });
   const [plan, setPlan] = useState(null);
   const [computed, setComputed] = useState(null);
 
-  function toggleLiked(name) {
-    setLikedFoodsCustom(function (cur) {
-      return cur.indexOf(name) !== -1 ? cur.filter(function (n) { return n !== name; }) : cur.concat([name]);
+  function toggleLiked(mealKey, name) {
+    setLikedFoodsByMealCustom(function (cur) {
+      const list = cur[mealKey] || [];
+      const next = list.indexOf(name) !== -1 ? list.filter(function (n) { return n !== name; }) : list.concat([name]);
+      return Object.assign({}, cur, { [mealKey]: next });
     });
   }
   function toggleDay(list, setList, day, maxCount) {
@@ -4261,7 +4283,7 @@ function CustomSetupWizard(props) {
   }
 
   function generate() {
-    const result = generateCustomPlan(likedFoodsCustom, props.allFoods, computed.slots);
+    const result = generateCustomPlan(likedFoodsByMealCustom, props.allFoods, computed.slots);
     setPlan(result);
     if (!result.error && !result.results.some(function (r) { return r.error; })) setStep("preview");
   }
@@ -4412,21 +4434,28 @@ function CustomSetupWizard(props) {
   if (step === "foods") {
     return h("div", null,
       h("h2", { className: "section-title" }, "Pick Your Foods"),
-      h("p", { className: "section-sub" }, "Choose foods you actually eat — the same solver used throughout this app will fit exact quantities to your computed macros."),
-      FOOD_CATS.map(function (cat) {
-        return h("div", { key: cat.key },
-          h("div", { className: "food-cat-title" }, cat.label),
-          h("div", { className: "food-chip-grid" },
-            props.allFoods.filter(function (f) { return f.cat === cat.key; }).map(function (f) {
-              const liked = likedFoodsCustom.indexOf(f.name) !== -1;
-              return h("button", { key: f.name, className: "food-chip" + (liked ? " liked" : ""), onClick: function () { toggleLiked(f.name); } }, f.name);
-            })
-          )
+      h("p", { className: "section-sub" }, "Choose foods you actually eat, meal by meal — the same solver used throughout this app will fit exact quantities to your computed macros. Different meals can have different foods, so your morning options don't have to be dinner food."),
+      computed.slots.map(function (slot, idx) {
+        const mealKey = "m" + (idx + 1);
+        const likedForMeal = likedFoodsByMealCustom[mealKey] || [];
+        return h("div", { key: mealKey, style: { marginBottom: 20, paddingBottom: 16, borderBottom: "1px solid #262626" } },
+          h("h3", { style: { fontSize: 15, margin: "0 0 8px" } }, slot.label + " — " + slot.time),
+          FOOD_CATS.map(function (cat) {
+            return h("div", { key: cat.key },
+              h("div", { className: "food-cat-title" }, cat.label),
+              h("div", { className: "food-chip-grid" },
+                props.allFoods.filter(function (f) { return f.cat === cat.key; }).map(function (f) {
+                  const liked = likedForMeal.indexOf(f.name) !== -1;
+                  return h("button", { key: f.name, className: "food-chip" + (liked ? " liked" : ""), onClick: function () { toggleLiked(mealKey, f.name); } }, f.name);
+                })
+              )
+            );
+          })
         );
       }),
       plan && plan.error && h("div", { className: "plan-error" }, plan.error),
       plan && plan.results && plan.results.some(function (r) { return r.error; }) && h("div", { className: "plan-error" },
-        "Some meals couldn't hit their targets with this food combination — try adding a different fat or carb source. Details: " +
+        "Some meals couldn't hit their targets with this food combination — try adding a different fat or carb source for that meal. Details: " +
         plan.results.filter(function (r) { return r.error; }).map(function (r) { return r.slot; }).join(", ")),
       h("div", { style: { display: "flex", gap: 8, marginTop: 16 } },
         h("button", { className: "ex-action-btn", onClick: function () { setStep("goals"); } }, "Back"),
@@ -4485,7 +4514,7 @@ function CustomPlanTab(props) {
   return h("div", null,
     h("h2", { className: "section-title" }, "Build a Custom Plan"),
     h("p", { className: "section-sub" },
-      "Pick foods you actually like to eat. The math (same solver used for every meal in this program) fits exact quantities to hit each meal's real macro targets — no guessing, no AI-invented numbers."),
+      "Pick foods you actually like to eat, meal by meal — different meals can have different foods, so your morning options don't have to be dinner food. The math (same solver used for every meal in this program) fits exact quantities to hit each meal's real macro targets — no guessing, no AI-invented numbers."),
     activeOverrideWeeks.length > 0 && h("div", { className: "plan-error" },
       "Custom plan currently active on: Week " + activeOverrideWeeks.join(", Week ") +
       ". That week's grocery list has been recalculated to match automatically."),
@@ -4499,19 +4528,26 @@ function CustomPlanTab(props) {
         );
       })
     ),
-    categories.map(function (cat) {
-      return h("div", { key: cat.key },
-        h("div", { className: "food-cat-title" }, cat.label),
-        h("div", { className: "food-chip-grid" },
-          props.allFoods.filter(function (f) { return f.cat === cat.key; }).map(function (f) {
-            const liked = props.likedFoods.indexOf(f.name) !== -1;
-            const isCustom = props.customFoods.some(function (c) { return c.name === f.name; });
-            return h("button", {
-              key: f.name, onClick: function () { props.toggleLiked(f.name); },
-              className: "food-chip" + (liked ? " liked" : ""),
-            }, f.name + (isCustom ? " 📷" : ""));
-          })
-        )
+    props.slots.map(function (slot, idx) {
+      const mealKey = "m" + (idx + 1);
+      const likedForMeal = (props.likedFoods && props.likedFoods[mealKey]) || [];
+      return h("div", { key: mealKey, style: { marginBottom: 20, paddingBottom: 16, borderBottom: "1px solid #262626" } },
+        h("h3", { style: { fontSize: 15, margin: "0 0 8px" } }, slot.label + " — " + slot.time),
+        categories.map(function (cat) {
+          return h("div", { key: cat.key },
+            h("div", { className: "food-cat-title" }, cat.label),
+            h("div", { className: "food-chip-grid" },
+              props.allFoods.filter(function (f) { return f.cat === cat.key; }).map(function (f) {
+                const liked = likedForMeal.indexOf(f.name) !== -1;
+                const isCustom = props.customFoods.some(function (c) { return c.name === f.name; });
+                return h("button", {
+                  key: f.name, onClick: function () { props.toggleLiked(mealKey, f.name); },
+                  className: "food-chip" + (liked ? " liked" : ""),
+                }, f.name + (isCustom ? " 📷" : ""));
+              })
+            )
+          );
+        })
       );
     }),
     h("button", {
