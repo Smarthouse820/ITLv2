@@ -878,6 +878,16 @@ function buildRequirementDay(label, requirements, equipmentAvailable) {
 }
 
 const EXPERIENCE_DAY_COUNT = { beginner: 3, intermediate: 4, advanced: 5 };
+// Default intra-workout drink composition by experience tier — scales with typical session length/
+// volume (Beginner's 3-day full-body sessions are shorter than Advanced's 5-day split), not gated
+// by tier entirely, since some people want one regardless. Minimal fat by design — fast protein and
+// carbs digest better during training. Reserved from the day's computed total (not added on top), so
+// the wizard's stated macros stay accurate to the actual goal pace.
+const INTRA_WORKOUT_DEFAULTS = {
+  beginner: { p: 20, c: 10, f: 0 },
+  intermediate: { p: 30, c: 20, f: 0 },
+  advanced: { p: 40, c: 30, f: 0 },
+};
 
 function experienceTemplates(experience, equipmentAvailable) {
   if (experience === "beginner") {
@@ -1620,7 +1630,7 @@ function makeDefaultData() {
     customProgramConfig: null,
     supplementList: [],
     restTimerSettings: { enabled: false, seconds: 90 }, // client-side post-set rest reminder — no backend involved
-    uiPrefs: { sleepExpanded: true, supplementsBoxExpanded: true, yourSupplementsOpen: false, unscheduledSupplementsOpen: false }, // manual collapse/expand toggles — persisted so they stay as left across tab switches
+    uiPrefs: { sleepExpanded: true, supplementsBoxExpanded: true, yourSupplementsOpen: false, unscheduledSupplementsOpen: false, foodPlanExpandedMeals: { m1: false, m2: false, m3: false, m4: false } }, // manual collapse/expand toggles — persisted so they stay as left across tab switches
     programs: {
       cutting: freshProgramState(EXERCISES_CUTTING),
       cruise: freshProgramState(EXERCISES_CRUISE),
@@ -1657,7 +1667,7 @@ function normalizeV2(parsed) {
     customProgramConfig: parsed.customProgramConfig || null,
     supplementList: parsed.supplementList || [],
     restTimerSettings: Object.assign({ enabled: false, seconds: 90 }, parsed.restTimerSettings || {}),
-    uiPrefs: Object.assign({ sleepExpanded: true, supplementsBoxExpanded: true, yourSupplementsOpen: false, unscheduledSupplementsOpen: false }, parsed.uiPrefs || {}),
+    uiPrefs: Object.assign({ sleepExpanded: true, supplementsBoxExpanded: true, yourSupplementsOpen: false, unscheduledSupplementsOpen: false, foodPlanExpandedMeals: { m1: false, m2: false, m3: false, m4: false } }, parsed.uiPrefs || {}),
     programs: {
       cutting: mergeProgramState(withLegacySupplementLogs((parsed.programs || {}).cutting), EXERCISES_CUTTING),
       cruise: mergeProgramState(withLegacySupplementLogs((parsed.programs || {}).cruise), EXERCISES_CRUISE),
@@ -1712,7 +1722,7 @@ function fireRestNotification(label) {
 }
 
 function App() {
-  const APP_VERSION = "2026-07-19T10:26:09";
+  const APP_VERSION = "2026-07-19T11:21:28";
   const [updateAvailable, setUpdateAvailable] = useState(false);
   useEffect(function () {
     function checkVersion() {
@@ -1867,11 +1877,16 @@ function App() {
   // Training-time macro bias: only for the Custom program, only when a training time was entered in
   // the wizard, only on days that actually have a lifting session, and only when nothing on this
   // week has been manually overridden (an override means the person already customized that meal
-  // themselves — the automatic bias shouldn't second-guess it).
+  // themselves — the automatic bias shouldn't second-guess it). The intra-workout drink (if any) is
+  // excluded from this entirely — its macros were already reserved off the top at setup time, so it
+  // never participates in redistribution between the 4 solved meals.
+  const solverMeals = baseMeals.filter(function (m) { return m.id !== "iw"; });
+  const intraWorkoutMeal = baseMeals.filter(function (m) { return m.id === "iw"; })[0] || null;
   const viewedDayIsTrainingDay = !!(def.exercises && def.exercises[DAYS[nutritionDayIdx]] && def.exercises[DAYS[nutritionDayIdx]].exercises && def.exercises[DAYS[nutritionDayIdx]].exercises.length > 0);
-  const meals = (data.activeProgram === "custom" && def.trainingTime && viewedDayIsTrainingDay && !hasWeekOverride)
-    ? applyTrainingTimeBias(baseMeals, allFoods, findNearestMealIndex(baseMeals.map(function (m) { return m.time; }), def.trainingTime))
-    : baseMeals;
+  const biasedSolverMeals = (data.activeProgram === "custom" && def.trainingTime && viewedDayIsTrainingDay && !hasWeekOverride)
+    ? applyTrainingTimeBias(solverMeals, allFoods, findNearestMealIndex(solverMeals.map(function (m) { return m.time; }), def.trainingTime))
+    : solverMeals;
+  const meals = intraWorkoutMeal ? biasedSolverMeals.concat([intraWorkoutMeal]) : biasedSolverMeals;
   const mealTotals = meals.reduce((a, m) => ({ cal: a.cal + m.cal, p: a.p + m.p, c: a.c + m.c, f: a.f + m.f }), { cal: 0, p: 0, c: 0, f: 0 });
   const groceryOverride = prog.customMealOverrides[groceryDisplayWeek];
   const groceryHasOverride = !!(groceryOverride && Object.keys(groceryOverride).length);
@@ -2314,6 +2329,19 @@ function App() {
     const next = cur.indexOf(name) !== -1 ? cur.filter(function (n) { return n !== name; }) : cur.concat([name]);
     save(Object.assign({}, data, { likedFoodsByMeal: Object.assign({}, byMeal, { [mealKey]: next }) }));
   }
+  // Copies one meal's liked foods into every OTHER meal slot that's still completely empty — saves
+  // re-picking the same foods 3 more times when someone eats similarly across meals, without
+  // clobbering a different meal that's already been deliberately customized.
+  function copyLikedFoodsToEmptyMeals(sourceMealKey) {
+    const byMeal = data.likedFoodsByMeal || { m1: [], m2: [], m3: [], m4: [] };
+    const sourceList = byMeal[sourceMealKey] || [];
+    if (sourceList.length === 0) return;
+    const next = Object.assign({}, byMeal);
+    ["m1", "m2", "m3", "m4"].forEach(function (k) {
+      if (k !== sourceMealKey && (!byMeal[k] || byMeal[k].length === 0)) next[k] = sourceList.slice();
+    });
+    save(Object.assign({}, data, { likedFoodsByMeal: next }));
+  }
 
   function addCustomFood(name, cat, per100) {
     const filtered = (data.customFoods || []).filter(function (f) { return f.name !== name; });
@@ -2333,7 +2361,20 @@ function App() {
       const foodStr = r.items.map(function (it) { return formatMealItem(it, allFoods); }).join(" + ");
       return { id: id, time: setup.slots[i].time, name: nameMap[id], food: foodStr, cal: Math.round(r.cal), p: Math.round(r.p), c: Math.round(r.c), f: Math.round(r.f), items: r.items };
     });
-    const mealsByWeek = { 1: mealsWeek, 2: mealsWeek, 3: mealsWeek, 4: mealsWeek };
+    // Intra-workout drink: a fixed functional item (not solved from liked foods, like Meal 1-4 are) —
+    // same treatment as a hand-built personal plan's intra-workout shake. Slotted at the entered
+    // training time if there is one; otherwise it has no parseable time, which the day's chronological
+    // timeline already sorts to the bottom, with a note explaining why right in its description.
+    const intraWorkoutEntry = setup.intraWorkout ? {
+      id: "iw", name: "Intra-Workout",
+      time: setup.trainingTime ? formatTimeHM(setup.trainingTime) : "",
+      food: setup.intraWorkout.p + "g protein isolate + " + setup.intraWorkout.c + "g fast carbs (e.g. Cluster Dextrin) + electrolytes" +
+        (setup.trainingTime ? "" : " — add a Training Time in your program settings to slot this into your workout window"),
+      cal: Math.round(setup.intraWorkout.p * 4 + setup.intraWorkout.c * 4 + setup.intraWorkout.f * 9),
+      p: setup.intraWorkout.p, c: setup.intraWorkout.c, f: setup.intraWorkout.f,
+    } : null;
+    const fullMealsWeek = intraWorkoutEntry ? mealsWeek.concat([intraWorkoutEntry]) : mealsWeek;
+    const mealsByWeek = { 1: fullMealsWeek, 2: fullMealsWeek, 3: fullMealsWeek, 4: fullMealsWeek };
     const overrideForGrocery = {};
     idMap.forEach(function (id, i) { overrideForGrocery[id] = mealsWeek[i]; });
     const groceryList = computeCustomGrocery(overrideForGrocery, allFoods);
@@ -2391,6 +2432,7 @@ function App() {
     if (!newFood) return;
     const slot = def.slots[mealIndex];
     const currentMeal = meals[mealIndex];
+    if (!slot || !currentMeal || !currentMeal.items) return; // e.g. the intra-workout entry, which isn't one of the 4 solver slots
     const items = currentMeal.items;
     const roleIdx = { protein: 0, carb: 1, fat: 2 }[role];
     const vegItem = items[3] || null;
@@ -2546,10 +2588,11 @@ function App() {
               hasOverride: groceryHasOverride,
             }),
             tab === "custom" && h(CustomPlanTab, {
-              likedFoods: data.likedFoodsByMeal, toggleLiked: toggleLikedFood,
+              likedFoods: data.likedFoodsByMeal, toggleLiked: toggleLikedFood, copyLikedToEmptyMeals: copyLikedFoodsToEmptyMeals,
               applyToWeek: applyPlanToWeek, revertWeek: revertWeekOverride, overrides: prog.customMealOverrides,
               plan: customPlan, setPlan: setCustomPlan, slots: def.slots,
               allFoods: allFoods, customFoods: data.customFoods || [], addCustomFood: addCustomFood, removeCustomFood: removeCustomFood,
+              uiPrefs: data.uiPrefs, updateUiPrefs: updateUiPrefs,
             }),
             def.needsSetup === false && data.activeProgram === "custom" && h("button", { className: "reset-list-btn", style: { margin: "16px" }, onClick: resetCustomSetup }, "Redo Custom program setup")
           ),
@@ -3804,7 +3847,7 @@ function NutritionTab(props) {
         const m = item.meal, idx = item.mealIdx;
         const entry = props.nToday[m.id];
         const status = entry ? (entry.status === "partial" ? (entry.pct === 75 ? "three_quarter" : "half") : entry.status) : null;
-        const mealSwapControl = props.isCustomProgram && !isFutureWeek && !isFutureDay
+        const mealSwapControl = props.isCustomProgram && !isFutureWeek && !isFutureDay && m.id !== "iw"
           ? h(MealSwapControl, {
               allFoods: props.allFoods, likedFoods: (props.likedFoods && props.likedFoods[m.id]) || [],
               onSwap: function (role, foodName) { props.swapIngredient(idx, role, foodName); },
@@ -4206,6 +4249,7 @@ function CustomSetupWizard(props) {
   const [eatingStart, setEatingStart] = useState("08:00");
   const [eatingEnd, setEatingEnd] = useState("18:00");
   const [trainingTime, setTrainingTime] = useState(""); // optional — empty means no bias applied
+  const [wantsIntraWorkout, setWantsIntraWorkout] = useState(false);
   const [dietStyle, setDietStyle] = useState("standard");
   const [targetWeight, setTargetWeight] = useState("");
   const [currentBF, setCurrentBF] = useState("");
@@ -4216,6 +4260,7 @@ function CustomSetupWizard(props) {
   const [cardioDays, setCardioDays] = useState([]);
   const [equipmentAvailable, setEquipmentAvailable] = useState(["bodyweight"]);
   const [likedFoodsByMealCustom, setLikedFoodsByMealCustom] = useState({ m1: [], m2: [], m3: [], m4: [] });
+  const [expandedMeals, setExpandedMeals] = useState({}); // absent/false = collapsed; each meal's food section starts closed
   const [plan, setPlan] = useState(null);
   const [computed, setComputed] = useState(null);
 
@@ -4224,6 +4269,20 @@ function CustomSetupWizard(props) {
       const list = cur[mealKey] || [];
       const next = list.indexOf(name) !== -1 ? list.filter(function (n) { return n !== name; }) : list.concat([name]);
       return Object.assign({}, cur, { [mealKey]: next });
+    });
+  }
+  // Copies one meal's liked foods into every OTHER meal slot that's still completely empty — saves
+  // re-picking the same foods 3 more times when someone eats similarly across meals, without
+  // clobbering a different meal you've already deliberately customized.
+  function copyLikedToEmptyMeals(sourceMealKey) {
+    setLikedFoodsByMealCustom(function (cur) {
+      const sourceList = cur[sourceMealKey] || [];
+      if (sourceList.length === 0) return cur;
+      const next = Object.assign({}, cur);
+      ["m1", "m2", "m3", "m4"].forEach(function (k) {
+        if (k !== sourceMealKey && (!cur[k] || cur[k].length === 0)) next[k] = sourceList.slice();
+      });
+      return next;
     });
   }
   function toggleDay(list, setList, day, maxCount) {
@@ -4269,7 +4328,14 @@ function CustomSetupWizard(props) {
     const weeksNeeded = computeWeeksNeeded(cw, tw, goal, macros.maintenance, macros.cal);
     const exercises = buildCustomExercises(goal, experience, trainingDays, cardioDays, equipmentAvailable);
     const milestones = buildCustomMilestones(cw, tw, weeksNeeded, cbf, tbf);
-    const perMeal = { p: macros.p / 4, c: macros.c / 4, f: macros.f / 4 };
+    // Reserved, not added on top: the drink's macros come OUT of the day's computed total before the
+    // remaining 4 meals split it evenly, so the day's real total still matches what the wizard shows
+    // and promises for the goal pace — nothing extra silently added.
+    const intraWorkoutMacros = wantsIntraWorkout ? INTRA_WORKOUT_DEFAULTS[experience] : null;
+    const remaining = intraWorkoutMacros
+      ? { p: macros.p - intraWorkoutMacros.p, c: macros.c - intraWorkoutMacros.c, f: macros.f - intraWorkoutMacros.f }
+      : { p: macros.p, c: macros.c, f: macros.f };
+    const perMeal = { p: remaining.p / 4, c: remaining.c / 4, f: remaining.f / 4 };
     const mealTimes = interpolateMealTimes(eatingStart, eatingEnd, 4);
     const slots = [1, 2, 3, 4].map(function (i) {
       return { id: "cm" + i, label: "Meal " + i, time: mealTimes[i - 1], p: Math.round(perMeal.p), c: Math.round(perMeal.c), f: Math.round(perMeal.f) };
@@ -4278,6 +4344,7 @@ function CustomSetupWizard(props) {
       currentWeight: cw, targetWeight: Math.round(tw * 10) / 10, currentBF: cbf, targetBF: tbf,
       usedBFMethod: goalMethod === "bodyfat" && goal !== "maintain", age: ageNum, gender: gender, heightCm: heightCm,
       macros: macros, weeksNeeded: weeksNeeded, exercises: exercises, milestones: milestones, slots: slots,
+      intraWorkout: intraWorkoutMacros,
     });
     setStep("foods");
   }
@@ -4293,7 +4360,7 @@ function CustomSetupWizard(props) {
       goal: goal, currentWeight: computed.currentWeight, targetWeight: computed.targetWeight,
       activity: activity, weeksNeeded: computed.weeksNeeded, macros: computed.macros, age: computed.age,
       exercises: computed.exercises, slots: computed.slots, milestones: computed.milestones,
-      planResults: plan.results, trainingTime: trainingTime || null,
+      planResults: plan.results, trainingTime: trainingTime || null, intraWorkout: computed.intraWorkout || null,
     });
   }
 
@@ -4427,6 +4494,18 @@ function CustomSetupWizard(props) {
           }, d.slice(0, 3));
         })
       ),
+      h("div", { className: "food-cat-title" }, "Intra-Workout Drink (optional)"),
+      h("p", { style: { fontSize: "11px", color: "#737373", marginTop: 0, marginBottom: 8 } },
+        "A protein + fast-carb drink sipped during training — genuinely useful for longer, higher-volume sessions, less necessary for shorter ones. Its calories are reserved from your daily total, not added on top, so the rest of your macros adjust automatically to make room."),
+      h("div", { className: "food-chip-grid" },
+        h("button", { className: "food-chip" + (wantsIntraWorkout ? " liked" : ""), onClick: function () { setWantsIntraWorkout(true); } }, "Yes, add one"),
+        h("button", { className: "food-chip" + (!wantsIntraWorkout ? " liked" : ""), onClick: function () { setWantsIntraWorkout(false); } }, "No")
+      ),
+      wantsIntraWorkout && h("p", { style: { fontSize: "11px", color: "#737373", marginTop: 4 } },
+        "Default for " + EXPERIENCES.filter(function (ex) { return ex.id === experience; })[0].label + ": " +
+        INTRA_WORKOUT_DEFAULTS[experience].p + "g protein isolate + " + INTRA_WORKOUT_DEFAULTS[experience].c + "g fast carbs (~" +
+        Math.round(INTRA_WORKOUT_DEFAULTS[experience].p * 4 + INTRA_WORKOUT_DEFAULTS[experience].c * 4) + " cal). " +
+        (trainingTime ? "Will be slotted at your training time." : "No training time entered yet — it'll sit at the bottom of your meal plan until you add one above.")),
       h("button", { className: "generate-btn", onClick: goToFoods }, "Next: Pick Your Foods")
     );
   }
@@ -4438,19 +4517,35 @@ function CustomSetupWizard(props) {
       computed.slots.map(function (slot, idx) {
         const mealKey = "m" + (idx + 1);
         const likedForMeal = likedFoodsByMealCustom[mealKey] || [];
+        const isOpen = !!expandedMeals[mealKey];
         return h("div", { key: mealKey, style: { marginBottom: 20, paddingBottom: 16, borderBottom: "1px solid #262626" } },
-          h("h3", { style: { fontSize: 15, margin: "0 0 8px" } }, slot.label + " — " + slot.time),
-          FOOD_CATS.map(function (cat) {
-            return h("div", { key: cat.key },
-              h("div", { className: "food-cat-title" }, cat.label),
-              h("div", { className: "food-chip-grid" },
-                props.allFoods.filter(function (f) { return f.cat === cat.key; }).map(function (f) {
-                  const liked = likedForMeal.indexOf(f.name) !== -1;
-                  return h("button", { key: f.name, className: "food-chip" + (liked ? " liked" : ""), onClick: function () { toggleLiked(mealKey, f.name); } }, f.name);
-                })
-              )
-            );
-          })
+          h("button", {
+            onClick: function () { setExpandedMeals(Object.assign({}, expandedMeals, { [mealKey]: !isOpen })); },
+            style: { display: "flex", width: "100%", justifyContent: "space-between", alignItems: "center", background: "none", border: "none", padding: 0, color: "inherit", cursor: "pointer" },
+          },
+            h("h3", { style: { fontSize: 15, margin: 0 } },
+              slot.label + " — " + slot.time + (likedForMeal.length > 0 ? " (" + likedForMeal.length + " liked)" : "")),
+            isOpen ? h(ChevronUp, { size: 16 }) : h(ChevronDown, { size: 16 })
+          ),
+          isOpen && h(React.Fragment, null,
+            h("div", { style: { marginTop: 8 } },
+              FOOD_CATS.map(function (cat) {
+                return h("div", { key: cat.key },
+                  h("div", { className: "food-cat-title" }, cat.label),
+                  h("div", { className: "food-chip-grid" },
+                    props.allFoods.filter(function (f) { return f.cat === cat.key; }).map(function (f) {
+                      const liked = likedForMeal.indexOf(f.name) !== -1;
+                      return h("button", { key: f.name, className: "food-chip" + (liked ? " liked" : ""), onClick: function () { toggleLiked(mealKey, f.name); } }, f.name);
+                    })
+                  )
+                );
+              })
+            ),
+            likedForMeal.length > 0 && h("button", {
+              className: "ex-action-btn", style: { marginTop: 8 },
+              onClick: function () { copyLikedToEmptyMeals(mealKey); },
+            }, "Copy these foods to other empty meals")
+          )
         );
       }),
       plan && plan.error && h("div", { className: "plan-error" }, plan.error),
@@ -4531,23 +4626,40 @@ function CustomPlanTab(props) {
     props.slots.map(function (slot, idx) {
       const mealKey = "m" + (idx + 1);
       const likedForMeal = (props.likedFoods && props.likedFoods[mealKey]) || [];
+      const expandedMeals = (props.uiPrefs && props.uiPrefs.foodPlanExpandedMeals) || { m1: false, m2: false, m3: false, m4: false };
+      const isOpen = !!expandedMeals[mealKey];
       return h("div", { key: mealKey, style: { marginBottom: 20, paddingBottom: 16, borderBottom: "1px solid #262626" } },
-        h("h3", { style: { fontSize: 15, margin: "0 0 8px" } }, slot.label + " — " + slot.time),
-        categories.map(function (cat) {
-          return h("div", { key: cat.key },
-            h("div", { className: "food-cat-title" }, cat.label),
-            h("div", { className: "food-chip-grid" },
-              props.allFoods.filter(function (f) { return f.cat === cat.key; }).map(function (f) {
-                const liked = likedForMeal.indexOf(f.name) !== -1;
-                const isCustom = props.customFoods.some(function (c) { return c.name === f.name; });
-                return h("button", {
-                  key: f.name, onClick: function () { props.toggleLiked(mealKey, f.name); },
-                  className: "food-chip" + (liked ? " liked" : ""),
-                }, f.name + (isCustom ? " 📷" : ""));
-              })
-            )
-          );
-        })
+        h("button", {
+          onClick: function () { props.updateUiPrefs({ foodPlanExpandedMeals: Object.assign({}, expandedMeals, { [mealKey]: !isOpen }) }); },
+          style: { display: "flex", width: "100%", justifyContent: "space-between", alignItems: "center", background: "none", border: "none", padding: 0, color: "inherit", cursor: "pointer" },
+        },
+          h("h3", { style: { fontSize: 15, margin: 0 } },
+            slot.label + " — " + slot.time + (likedForMeal.length > 0 ? " (" + likedForMeal.length + " liked)" : "")),
+          isOpen ? h(ChevronUp, { size: 16 }) : h(ChevronDown, { size: 16 })
+        ),
+        isOpen && h(React.Fragment, null,
+          h("div", { style: { marginTop: 8 } },
+            categories.map(function (cat) {
+              return h("div", { key: cat.key },
+                h("div", { className: "food-cat-title" }, cat.label),
+                h("div", { className: "food-chip-grid" },
+                  props.allFoods.filter(function (f) { return f.cat === cat.key; }).map(function (f) {
+                    const liked = likedForMeal.indexOf(f.name) !== -1;
+                    const isCustom = props.customFoods.some(function (c) { return c.name === f.name; });
+                    return h("button", {
+                      key: f.name, onClick: function () { props.toggleLiked(mealKey, f.name); },
+                      className: "food-chip" + (liked ? " liked" : ""),
+                    }, f.name + (isCustom ? " 📷" : ""));
+                  })
+                )
+              );
+            })
+          ),
+          likedForMeal.length > 0 && h("button", {
+            className: "ex-action-btn", style: { marginTop: 8 },
+            onClick: function () { props.copyLikedToEmptyMeals(mealKey); },
+          }, "Copy these foods to other empty meals")
+        )
       );
     }),
     h("button", {
