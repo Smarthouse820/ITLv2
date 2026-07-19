@@ -951,6 +951,7 @@ function buildCustomProgramDef(config) {
     goalLine: "Goal: " + config.goal + " to " + config.targetWeight + " lb over " + config.weeksNeeded + " weeks.",
     exercises: config.exercises, mealsByWeek: config.mealsByWeek, groceryByWeek: config.groceryByWeek,
     slots: config.slots, hasMilestoneTargets: true, customMilestones: config.milestones, needsSetup: false, totalWeeks: config.weeksNeeded,
+    trainingTime: config.trainingTime || null,
   };
 }
 
@@ -1179,6 +1180,89 @@ function formatMealItem(item, source) {
   const food = db.filter(function (f) { return f.name === item.name; })[0];
   if (food && food.cat === "protein") return ozOf(item.grams).toFixed(1) + "oz " + item.name;
   return Math.round(item.grams) + "g " + item.name;
+}
+
+// Finds whichever meal's clock time falls closest (before or after) to the entered training time.
+// mealTimes are display strings like "8:00 AM" (parsed via parseMealTimeToMinutes); trainingTimeStr
+// is the 24h "HH:MM" the wizard's <input type="time"> stores. Returns null if nothing is parseable.
+function findNearestMealIndex(mealTimes, trainingTimeStr) {
+  const trainMin = timeToMinutes(trainingTimeStr);
+  if (trainMin == null) return null;
+  let bestIdx = null, bestDiff = Infinity;
+  mealTimes.forEach(function (t, i) {
+    const mealMin = parseMealTimeToMinutes(t);
+    if (mealMin == null) return;
+    const diff = Math.abs(mealMin - trainMin);
+    if (diff < bestDiff) { bestDiff = diff; bestIdx = i; }
+  });
+  return bestIdx;
+}
+
+const TRAINING_CARB_SHIFT_FRACTION = 0.25; // share of the OTHER meals' combined carbs moved in
+const TRAINING_FAT_SHIFT_FRACTION = 0.10;  // a smaller fat shift — carbs matter more around training
+
+// Shifts carbs (and a smaller share of fat) out of every OTHER meal into the one nearest the entered
+// training time, then re-solves each affected meal's EXISTING foods (same items, new gram amounts)
+// to hit its adjusted target — reusing the same solve3x3 the plan was originally built with, the
+// same way a manual ingredient swap does. Protein is never touched. The day's total carbs/fat stay
+// exactly what they were — this only redistributes between meals, it doesn't add or remove anything.
+// Falls back to the unmodified meals untouched if nearestIdx is unknown, or if any affected meal's
+// existing foods can't be re-solved at the new target (e.g. would need a negative gram amount).
+function applyTrainingTimeBias(mealsWeek, allFoods, nearestIdx) {
+  if (nearestIdx == null || mealsWeek.length < 2) return mealsWeek;
+  const otherIdxs = mealsWeek.map(function (_, i) { return i; }).filter(function (i) { return i !== nearestIdx; });
+  const carbPool = otherIdxs.reduce(function (sum, i) { return sum + mealsWeek[i].c; }, 0);
+  const fatPool = otherIdxs.reduce(function (sum, i) { return sum + mealsWeek[i].f; }, 0);
+  if (carbPool <= 0) return mealsWeek;
+  const carbShift = carbPool * TRAINING_CARB_SHIFT_FRACTION;
+  const fatShift = fatPool * TRAINING_FAT_SHIFT_FRACTION;
+
+  const newTargets = {};
+  mealsWeek.forEach(function (m, i) { newTargets[i] = { p: m.p, c: m.c, f: m.f }; });
+  otherIdxs.forEach(function (i) {
+    const carbShare = mealsWeek[i].c / carbPool;
+    const fatShare = fatPool > 0 ? mealsWeek[i].f / fatPool : 0;
+    newTargets[i].c -= carbShift * carbShare;
+    newTargets[i].f -= fatShift * fatShare;
+  });
+  newTargets[nearestIdx].c += carbShift;
+  newTargets[nearestIdx].f += fatShift;
+
+  let failed = false;
+  const resolved = mealsWeek.map(function (m, i) {
+    const t = newTargets[i];
+    if (Math.abs(t.c - m.c) < 0.5 && Math.abs(t.f - m.f) < 0.5) return m; // negligible change — skip re-solving
+    if (!m.items || m.items.length < 3) { failed = true; return m; }
+    const proteinFood = allFoods.filter(function (f) { return f.name === m.items[0].name; })[0];
+    const carbFood = allFoods.filter(function (f) { return f.name === m.items[1].name; })[0];
+    const fatFood = allFoods.filter(function (f) { return f.name === m.items[2].name; })[0];
+    if (!proteinFood || !carbFood || !fatFood) { failed = true; return m; }
+    const vegItem = m.items[3] || null;
+    const vegFood = vegItem ? allFoods.filter(function (f) { return f.name === vegItem.name; })[0] : null;
+    const target = vegFood
+      ? [t.p - (vegFood.p * vegItem.grams) / 100, t.c - (vegFood.c * vegItem.grams) / 100, t.f - (vegFood.f * vegItem.grams) / 100]
+      : [t.p, t.c, t.f];
+    const solved = solve3x3([proteinFood, carbFood, fatFood], target);
+    if (!solved) { failed = true; return m; }
+    const items = [
+      { name: proteinFood.name, grams: solved[0] },
+      { name: carbFood.name, grams: solved[1] },
+      { name: fatFood.name, grams: solved[2] },
+    ];
+    if (vegItem) items.push(vegItem);
+    let cal = 0, p = 0, c = 0, f = 0;
+    items.forEach(function (it) {
+      const food = allFoods.filter(function (x) { return x.name === it.name; })[0];
+      cal += (food.cal * it.grams) / 100; p += (food.p * it.grams) / 100;
+      c += (food.c * it.grams) / 100; f += (food.f * it.grams) / 100;
+    });
+    return Object.assign({}, m, {
+      items: items, cal: Math.round(cal), p: Math.round(p), c: Math.round(c), f: Math.round(f),
+      food: items.map(function (it) { return formatMealItem(it, allFoods); }).join(" + "),
+      trainingAdjusted: i === nearestIdx,
+    });
+  });
+  return failed ? mealsWeek : resolved;
 }
 
 function computeCustomGrocery(override, source) {
@@ -1504,6 +1588,8 @@ function freshProgramState(exercises) {
     skipped: {}, customMealOverrides: {}, undoSnapshot: null, exerciseDifficulty: {}, foodLog: {},
     sleepLogs: {},
     dailyWeightLogs: {},
+    supplementLogs: {}, // { [dateKey]: { [supplementId]: true } } — per-program: checking a supplement
+    // off while following one program doesn't mark it checked while viewing another's Nutrition tab.
     supersetGroups: {}, // { [day]: [[exId, exId, ...], ...] } — persists per day, independent of week
     extraDeloadWeeks: [], deloadRecommendation: null,
     nutritionDayComplete: {},
@@ -1524,7 +1610,6 @@ function makeDefaultData() {
     customFoods: [],
     customProgramConfig: null,
     supplementList: [],
-    supplementLogs: {},
     restTimerSettings: { enabled: false, seconds: 90 }, // client-side post-set rest reminder — no backend involved
     uiPrefs: { sleepExpanded: true, supplementsBoxExpanded: true, yourSupplementsOpen: false, unscheduledSupplementsOpen: false }, // manual collapse/expand toggles — persisted so they stay as left across tab switches
     programs: {
@@ -1539,20 +1624,29 @@ function makeDefaultData() {
 function normalizeV2(parsed) {
   const validPrograms = ["cutting", "cruise", "hypertrophy", "custom"];
   const customExercises = (parsed.customProgramConfig && parsed.customProgramConfig.exercises) || EMPTY_CUSTOM_EXERCISES;
+  // One-time migration: supplement checked-state used to live at the top level, shared across every
+  // program. Carried into each program's own state below so nothing appears to vanish on the first
+  // load after the per-program change — from here forward each program tracks its own checks
+  // independently, and this legacy field is no longer read once migrated.
+  const legacySupplementLogs = parsed.supplementLogs || null;
+  function withLegacySupplementLogs(saved) {
+    if (!legacySupplementLogs) return saved;
+    const existing = (saved && saved.supplementLogs) || {};
+    return Object.assign({}, saved, { supplementLogs: Object.assign({}, legacySupplementLogs, existing) });
+  }
   return {
     activeProgram: validPrograms.indexOf(parsed.activeProgram) !== -1 ? parsed.activeProgram : "custom",
     likedFoods: parsed.likedFoods || [],
     customFoods: parsed.customFoods || [],
     customProgramConfig: parsed.customProgramConfig || null,
     supplementList: parsed.supplementList || [],
-    supplementLogs: parsed.supplementLogs || {},
     restTimerSettings: Object.assign({ enabled: false, seconds: 90 }, parsed.restTimerSettings || {}),
     uiPrefs: Object.assign({ sleepExpanded: true, supplementsBoxExpanded: true, yourSupplementsOpen: false, unscheduledSupplementsOpen: false }, parsed.uiPrefs || {}),
     programs: {
-      cutting: mergeProgramState((parsed.programs || {}).cutting, EXERCISES_CUTTING),
-      cruise: mergeProgramState((parsed.programs || {}).cruise, EXERCISES_CRUISE),
-      hypertrophy: mergeProgramState((parsed.programs || {}).hypertrophy, EXERCISES_HYPERTROPHY),
-      custom: mergeProgramState((parsed.programs || {}).custom, customExercises),
+      cutting: mergeProgramState(withLegacySupplementLogs((parsed.programs || {}).cutting), EXERCISES_CUTTING),
+      cruise: mergeProgramState(withLegacySupplementLogs((parsed.programs || {}).cruise), EXERCISES_CRUISE),
+      hypertrophy: mergeProgramState(withLegacySupplementLogs((parsed.programs || {}).hypertrophy), EXERCISES_HYPERTROPHY),
+      custom: mergeProgramState(withLegacySupplementLogs((parsed.programs || {}).custom), customExercises),
     },
   };
 }
@@ -1601,7 +1695,7 @@ function fireRestNotification(label) {
 }
 
 function App() {
-  const APP_VERSION = "2026-07-18T20:53:27";
+  const APP_VERSION = "2026-07-19T08:34:04";
   const [updateAvailable, setUpdateAvailable] = useState(false);
   useEffect(function () {
     function checkVersion() {
@@ -1747,12 +1841,21 @@ function App() {
   const nutritionPreviewRotationWeek = ((rotationWeek - 1 - nutritionWeekOffset) % 4 + 4) % 4 + 1;
   const nutritionDisplayWeek = nutritionViewWeek || nutritionPreviewRotationWeek;
   const groceryDisplayWeek = groceryViewWeek || rotationWeek;
-  const meals = def.mealsByWeek[nutritionDisplayWeek].map(function (m) {
-    const override = prog.customMealOverrides[nutritionDisplayWeek];
-    return (override && override[m.id]) ? override[m.id] : m;
-  });
-  const mealTotals = meals.reduce((a, m) => ({ cal: a.cal + m.cal, p: a.p + m.p, c: a.c + m.c, f: a.f + m.f }), { cal: 0, p: 0, c: 0, f: 0 });
   const allFoods = FOOD_DB.concat(data.customFoods || []);
+  const weekOverride = prog.customMealOverrides[nutritionDisplayWeek];
+  const hasWeekOverride = !!(weekOverride && Object.keys(weekOverride).length);
+  const baseMeals = def.mealsByWeek[nutritionDisplayWeek].map(function (m) {
+    return (weekOverride && weekOverride[m.id]) ? weekOverride[m.id] : m;
+  });
+  // Training-time macro bias: only for the Custom program, only when a training time was entered in
+  // the wizard, only on days that actually have a lifting session, and only when nothing on this
+  // week has been manually overridden (an override means the person already customized that meal
+  // themselves — the automatic bias shouldn't second-guess it).
+  const viewedDayIsTrainingDay = !!(def.exercises && def.exercises[DAYS[nutritionDayIdx]] && def.exercises[DAYS[nutritionDayIdx]].exercises && def.exercises[DAYS[nutritionDayIdx]].exercises.length > 0);
+  const meals = (data.activeProgram === "custom" && def.trainingTime && viewedDayIsTrainingDay && !hasWeekOverride)
+    ? applyTrainingTimeBias(baseMeals, allFoods, findNearestMealIndex(baseMeals.map(function (m) { return m.time; }), def.trainingTime))
+    : baseMeals;
+  const mealTotals = meals.reduce((a, m) => ({ cal: a.cal + m.cal, p: a.p + m.p, c: a.c + m.c, f: a.f + m.f }), { cal: 0, p: 0, c: 0, f: 0 });
   const groceryOverride = prog.customMealOverrides[groceryDisplayWeek];
   const groceryHasOverride = !!(groceryOverride && Object.keys(groceryOverride).length);
   const groceryList = groceryHasOverride ? computeCustomGrocery(groceryOverride, allFoods) : def.groceryByWeek[groceryDisplayWeek];
@@ -2070,12 +2173,14 @@ function App() {
   function toggleSupplementLog(id) {
     // Keyed by whichever day is currently being viewed (matching how the checked-state is read
     // elsewhere), not hardcoded to today — otherwise checking a box while viewing a different day
-    // would silently write into today's log instead of the day actually on screen.
+    // would silently write into today's log instead of the day actually on screen. Saved via
+    // saveProgram (not save) so the checked state lives on the active program only — checking a
+    // supplement off while following Cutting doesn't mark it checked while viewing Cruise's tab.
     const key = nutritionSelectedDate;
-    const dayLog = Object.assign({}, data.supplementLogs[key] || {});
+    const dayLog = Object.assign({}, prog.supplementLogs[key] || {});
     dayLog[id] = !dayLog[id];
-    const newLogs = Object.assign({}, data.supplementLogs, { [key]: dayLog });
-    save(Object.assign({}, data, { supplementLogs: newLogs }));
+    const newLogs = Object.assign({}, prog.supplementLogs, { [key]: dayLog });
+    saveProgram({ supplementLogs: newLogs });
   }
 
   // Calories actually logged for a given real calendar date — deliberately reads only the free-form
@@ -2221,7 +2326,7 @@ function App() {
       goal: setup.goal, currentWeight: setup.currentWeight, targetWeight: setup.targetWeight,
       activity: setup.activity, weeksNeeded: setup.weeksNeeded, macros: setup.macros, age: setup.age,
       exercises: setup.exercises, slots: setup.slots, milestones: setup.milestones,
-      mealsByWeek: mealsByWeek, groceryByWeek: groceryByWeek,
+      mealsByWeek: mealsByWeek, groceryByWeek: groceryByWeek, trainingTime: setup.trainingTime || null,
     };
     const newPrograms = Object.assign({}, data.programs, { custom: freshProgramState(setup.exercises) });
     save(Object.assign({}, data, { customProgramConfig: config, programs: newPrograms, activeProgram: "custom" }));
@@ -2395,7 +2500,7 @@ function App() {
               dayIdx: nutritionDayIdx, setDayIdx: setNutritionDayIdx,
               selectedDate: nutritionSelectedDate, isToday: nutritionIsToday,
               isCustomProgram: data.activeProgram === "custom", swapIngredient: swapMealIngredient, likedFoods: data.likedFoods,
-              supplementList: data.supplementList, supplementLogsToday: data.supplementLogs[nutritionSelectedDate] || {},
+              supplementList: data.supplementList, supplementLogsToday: prog.supplementLogs[nutritionSelectedDate] || {},
               addSupplement: addSupplement, removeSupplement: removeSupplement, toggleSupplementLog: toggleSupplementLog,
               nutrientWarnings: checkCombinedNutrientOverlaps(data.supplementList, prog.foodLog[nutritionSelectedDate] || [], allFoods),
               uiPrefs: data.uiPrefs, updateUiPrefs: updateUiPrefs,
@@ -3538,7 +3643,9 @@ function MealCard(props) {
         )
       ),
       h("div", { className: "meal-food" }, m.food),
-      h("div", { className: "meal-macro" }, m.cal + " cal · " + m.p + "p / " + m.c + "c / " + m.f + "f"),
+      h("div", { className: "meal-macro" },
+        m.cal + " cal · " + m.p + "p / " + m.c + "c / " + m.f + "f",
+        m.trainingAdjusted && h("span", { style: { color: "#3d97d3" } }, " · shifted for training time")),
       h("div", { className: "diff-row", style: { marginTop: 8 } },
         props.statusOpts.map(function (opt) {
           const isPartial = opt.id === "three_quarter" || opt.id === "half";
@@ -4078,6 +4185,7 @@ function CustomSetupWizard(props) {
   const [heightInches, setHeightInches] = useState("");
   const [eatingStart, setEatingStart] = useState("08:00");
   const [eatingEnd, setEatingEnd] = useState("18:00");
+  const [trainingTime, setTrainingTime] = useState(""); // optional — empty means no bias applied
   const [dietStyle, setDietStyle] = useState("standard");
   const [targetWeight, setTargetWeight] = useState("");
   const [currentBF, setCurrentBF] = useState("");
@@ -4163,7 +4271,7 @@ function CustomSetupWizard(props) {
       goal: goal, currentWeight: computed.currentWeight, targetWeight: computed.targetWeight,
       activity: activity, weeksNeeded: computed.weeksNeeded, macros: computed.macros, age: computed.age,
       exercises: computed.exercises, slots: computed.slots, milestones: computed.milestones,
-      planResults: plan.results,
+      planResults: plan.results, trainingTime: trainingTime || null,
     });
   }
 
@@ -4214,6 +4322,10 @@ function CustomSetupWizard(props) {
       ),
       h("p", { style: { fontSize: "11px", color: "#737373", marginTop: 4 } },
         "Your 4 meals will be spaced evenly across this window — also what meal-time reminders will be based on."),
+      h("div", { className: "food-cat-title" }, "Training Time (optional)"),
+      h("input", { type: "time", className: "search-input", value: trainingTime, onChange: function (e) { setTrainingTime(e.target.value); } }),
+      h("p", { style: { fontSize: "11px", color: "#737373", marginTop: 4 } },
+        "On training days, shifts some carbs (and a little fat) from your other meals into whichever meal falls closest to this time — your day's total macros stay exactly the same, just redistributed. Leave blank to skip this and keep every meal even, same as rest days."),
       goal !== "maintain" && h(React.Fragment, null,
         h("div", { className: "food-cat-title" }, "Set goal by"),
         h("div", { className: "food-chip-grid" },
