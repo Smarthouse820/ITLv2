@@ -1822,7 +1822,7 @@ function makeDefaultData() {
     customProgramConfig: null,
     supplementList: [],
     restTimerSettings: { enabled: false, seconds: 90 }, // client-side post-set rest reminder — no backend involved
-    uiPrefs: { sleepExpanded: true, supplementsBoxExpanded: false, yourSupplementsOpen: false, unscheduledSupplementsOpen: false, foodPlanExpandedMeals: { m1: false, m2: false, m3: false, m4: false }, milestonesCardExpanded: false }, // manual collapse/expand toggles — persisted so they stay as left across tab switches
+    uiPrefs: { sleepExpanded: true, supplementsBoxExpanded: false, yourSupplementsOpen: false, unscheduledSupplementsOpen: false, foodPlanExpandedMeals: { m1: false, m2: false, m3: false, m4: false }, milestonesCardExpanded: false, customFoodsExpanded: false }, // manual collapse/expand toggles — persisted so they stay as left across tab switches
     programs: {
       cutting: freshProgramState(EXERCISES_CUTTING),
       cruise: freshProgramState(EXERCISES_CRUISE),
@@ -1859,7 +1859,7 @@ function normalizeV2(parsed) {
     customProgramConfig: parsed.customProgramConfig || null,
     supplementList: parsed.supplementList || [],
     restTimerSettings: Object.assign({ enabled: false, seconds: 90 }, parsed.restTimerSettings || {}),
-    uiPrefs: Object.assign({ sleepExpanded: true, supplementsBoxExpanded: false, yourSupplementsOpen: false, unscheduledSupplementsOpen: false, foodPlanExpandedMeals: { m1: false, m2: false, m3: false, m4: false }, milestonesCardExpanded: false }, parsed.uiPrefs || {}),
+    uiPrefs: Object.assign({ sleepExpanded: true, supplementsBoxExpanded: false, yourSupplementsOpen: false, unscheduledSupplementsOpen: false, foodPlanExpandedMeals: { m1: false, m2: false, m3: false, m4: false }, milestonesCardExpanded: false, customFoodsExpanded: false }, parsed.uiPrefs || {}),
     programs: {
       cutting: mergeProgramState(withLegacySupplementLogs((parsed.programs || {}).cutting), EXERCISES_CUTTING),
       cruise: mergeProgramState(withLegacySupplementLogs((parsed.programs || {}).cruise), EXERCISES_CRUISE),
@@ -1914,7 +1914,7 @@ function fireRestNotification(label) {
 }
 
 function App() {
-  const APP_VERSION = "2026-07-19T23:30:23";
+  const APP_VERSION = "2026-07-20T02:31:08";
   const [updateAvailable, setUpdateAvailable] = useState(false);
   useEffect(function () {
     function checkVersion() {
@@ -1939,7 +1939,6 @@ function App() {
   const [expanded, setExpanded] = useState({});
   const [toast, setToast] = useState("");
   const [nutritionViewWeek, setNutritionViewWeek] = useState(null);
-  const [customPlan, setCustomPlan] = useState(null);
   const [groceryViewWeek, setGroceryViewWeek] = useState(null);
   const [nutritionWeekOffset, setNutritionWeekOffset] = useState(0);
   const [nutritionDayIdx, setNutritionDayIdx] = useState(todayDayIdx());
@@ -2487,7 +2486,7 @@ function App() {
       return Object.assign({}, slot, { p: Math.round(perMeal.p), c: Math.round(perMeal.c), f: Math.round(perMeal.f) });
     });
     save(Object.assign({}, data, { customProgramConfig: Object.assign({}, config, { macros: newMacros, slots: newSlots, currentWeight: latestWeight }) }));
-    showToast("Target updated to " + newMacros.cal + " cal — regenerate your meals in the Food Plan tab to match.");
+    showToast("Target updated to " + newMacros.cal + " cal — regenerate your meals from each meal card's Customize section to match.");
   }
 
   const groceryKey = "w" + groceryDisplayWeek;
@@ -2675,6 +2674,28 @@ function App() {
     showToast(nameMap[id] + " applied to Week " + week);
   }
 
+  // Regenerates one meal and immediately applies it to whichever week is currently being viewed on
+  // the Nutrition tab — no separate "apply to week" step, since the tab already knows which week
+  // that is. Avoids repeating a food the other 3 currently-displayed meals are already using, same
+  // as the Food Plan tab's version. Scope note: unlike the Food Plan tab's regenerate, this simpler
+  // version does not redistribute this meal's macros to the others on failure — it just reports the
+  // error inline, since doing the full redistribution here would also need to silently rewrite the
+  // other meals' overrides from within a single-meal action, which felt like it deserved its own
+  // explicit pass rather than being folded in here by default.
+  function regenerateAndApplyMeal(mealIdx) {
+    const solverMealsOnly = meals.filter(function (m2) { return m2.id !== "iw"; });
+    const avoidNames = [];
+    solverMealsOnly.forEach(function (m2, i2) {
+      if (i2 !== mealIdx && m2.items) m2.items.forEach(function (it) { avoidNames.push(it.name); });
+    });
+    const result = regenerateSingleMeal(data.likedFoodsByMeal, allFoods, def.slots, mealIdx, avoidNames);
+    if (result.error) {
+      showToast(result.error);
+      return;
+    }
+    applySingleMealToWeek(nutritionDisplayWeek, mealIdx, result);
+  }
+
   function revertWeekOverride(week) {
     const newOverrides = Object.assign({}, prog.customMealOverrides);
     delete newOverrides[week];
@@ -2818,13 +2839,15 @@ function App() {
               hasOverride: nutritionHasOverride,
               foodLog: todaysFoodLog, logFood: logFood, removeFoodLogEntry: removeFoodLogEntry, updateFoodLogGrams: updateFoodLogGrams,
               allFoods: allFoods, completeNutritionDay: completeNutritionDay, nutritionHistory: nutritionHistory,
-              addCustomFood: addCustomFood,
+              addCustomFood: addCustomFood, removeCustomFood: removeCustomFood, customFoods: data.customFoods || [],
               dayComplete: !!(prog.nutritionDayComplete || {})[nutritionSelectedDate],
               weekOffset: nutritionWeekOffset, setWeekOffset: setNutritionWeekOffset,
               dayIdx: nutritionDayIdx, setDayIdx: setNutritionDayIdx,
               selectedDate: nutritionSelectedDate, isToday: nutritionIsToday,
               isCustomProgram: data.activeProgram === "custom", swapIngredient: swapMealIngredient, likedFoods: data.likedFoodsByMeal,
-              goToFoodPlan: function () { setTab("custom"); }, goToMilestones: function () { setTab("milestones"); },
+              toggleLiked: toggleLikedFood, copyLikedToEmptyMeals: copyLikedFoodsToEmptyMeals,
+              regenerateAndApplyMeal: regenerateAndApplyMeal, revertWeekOverride: revertWeekOverride, nutritionDisplayWeek: nutritionDisplayWeek,
+              goToMilestones: function () { setTab("milestones"); },
               adaptiveTDEE: adaptiveTDEE, plannedCalories: plannedCalories, updateMacrosFromAdaptiveTDEE: updateMacrosFromAdaptiveTDEE,
               supplementList: data.supplementList, supplementLogsToday: prog.supplementLogs[nutritionSelectedDate] || {},
               addSupplement: addSupplement, removeSupplement: removeSupplement, toggleSupplementLog: toggleSupplementLog,
@@ -2854,13 +2877,6 @@ function App() {
               rotationWeek: rotationWeek, displayWeek: groceryDisplayWeek, viewWeek: groceryViewWeek, setViewWeek: setGroceryViewWeek,
               hasOverride: groceryHasOverride,
             }),
-            tab === "custom" && h(CustomPlanTab, {
-              likedFoods: data.likedFoodsByMeal, toggleLiked: toggleLikedFood, copyLikedToEmptyMeals: copyLikedFoodsToEmptyMeals,
-              applySingleMealToWeek: applySingleMealToWeek, revertWeek: revertWeekOverride, overrides: prog.customMealOverrides,
-              plan: customPlan, setPlan: setCustomPlan, slots: def.slots,
-              allFoods: allFoods, customFoods: data.customFoods || [], addCustomFood: addCustomFood, removeCustomFood: removeCustomFood,
-              uiPrefs: data.uiPrefs, updateUiPrefs: updateUiPrefs,
-            }),
             def.needsSetup === false && data.activeProgram === "custom" && h("button", { className: "reset-list-btn", style: { margin: "16px" }, onClick: resetCustomSetup }, "Redo Custom program setup")
           ),
           h("nav", { className: "navbar" },
@@ -2868,8 +2884,7 @@ function App() {
             h(TabButton, { Icon: UtensilsCrossed, label: "Nutrition", active: tab === "nutrition", onClick: function () { setTab("nutrition"); } }),
             h(TabButton, { Icon: Droplet, label: "Hydration", active: tab === "hydration", onClick: function () { setTab("hydration"); } }),
             h(TabButton, { Icon: TrendingUp, label: "Milestones", active: tab === "milestones", onClick: function () { setTab("milestones"); } }),
-            h(TabButton, { Icon: ShoppingCart, label: "Grocery", active: tab === "grocery", onClick: function () { setTab("grocery"); } }),
-            h(TabButton, { Icon: Sparkles, label: "Food Plan", active: tab === "custom", onClick: function () { setTab("custom"); } })
+            h(TabButton, { Icon: ShoppingCart, label: "Grocery", active: tab === "grocery", onClick: function () { setTab("grocery"); } })
           )
         )
   );
@@ -3364,7 +3379,7 @@ function AdaptiveTDEESection(props) {
             props.isCustomProgram && h("button", {
               className: "swap-save-btn", style: { width: "100%" },
               onClick: function () {
-                if (window.confirm("Update your target to " + tdee.impliedTDEE + " cal/day (adjusted for your cut/bulk/maintain goal)? You'll still need to regenerate your meals in the Food Plan tab to match the new numbers.")) {
+                if (window.confirm("Update your target to " + tdee.impliedTDEE + " cal/day (adjusted for your cut/bulk/maintain goal)? You'll still need to regenerate your meals from each meal card's Customize section to match the new numbers.")) {
                   props.updateMacrosFromAdaptiveTDEE();
                 }
               },
@@ -3695,113 +3710,6 @@ function BarcodeLogger(props) {
   );
 }
 
-function BarcodeAddFood(props) {
-  const [mode, setMode] = useState("idle"); // idle | scanning | loading | found | error | manual
-  const [manualCode, setManualCode] = useState("");
-  const [product, setProduct] = useState(null);
-  const [category, setCategory] = useState(null);
-  const [savedMsg, setSavedMsg] = useState("");
-  const [errorMsg, setErrorMsg] = useState("");
-  const videoRef = useRef(null);
-  const streamRef = useRef(null);
-  const rafRef = useRef(null);
-  const supportsDetector = typeof window !== "undefined" && "BarcodeDetector" in window;
-
-  function stopCamera() {
-    if (rafRef.current) cancelAnimationFrame(rafRef.current);
-    if (streamRef.current) { streamRef.current.getTracks().forEach(function (t) { t.stop(); }); streamRef.current = null; }
-  }
-  useEffect(function () { return stopCamera; }, []);
-
-  function handleBarcode(code) {
-    stopCamera();
-    setMode("loading");
-    lookupBarcode(code).then(function (result) {
-      if (result.error) { setErrorMsg(result.error); setMode("error"); }
-      else { setProduct(result); setCategory(null); setMode("found"); }
-    });
-  }
-
-  function startScan() {
-    if (!supportsDetector) { setMode("manual"); return; }
-    setMode("scanning");
-    navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } })
-      .then(function (stream) {
-        streamRef.current = stream;
-        if (videoRef.current) { videoRef.current.srcObject = stream; videoRef.current.play(); }
-        const detector = new window.BarcodeDetector({ formats: ["ean_13", "ean_8", "upc_a", "upc_e"] });
-        function scanLoop() {
-          if (!videoRef.current) return;
-          detector.detect(videoRef.current).then(function (codes) {
-            if (codes.length > 0) handleBarcode(codes[0].rawValue);
-            else rafRef.current = requestAnimationFrame(scanLoop);
-          }).catch(function () { rafRef.current = requestAnimationFrame(scanLoop); });
-        }
-        rafRef.current = requestAnimationFrame(scanLoop);
-      })
-      .catch(function () {
-        setErrorMsg("Couldn't access the camera — check permissions, or enter the barcode number manually.");
-        setMode("manual");
-      });
-  }
-
-  function cancel() { stopCamera(); setMode("idle"); setProduct(null); setSavedMsg(""); }
-
-  return h("div", { className: "barcode-box" },
-    mode === "idle" && h("div", { className: "barcode-idle-row" },
-      h("button", { className: "ex-action-btn", onClick: startScan }, "📷 Scan Barcode"),
-      h("button", { className: "ex-action-btn", onClick: function () { setMode("manual"); } }, "Type Barcode #")
-    ),
-    mode === "scanning" && h("div", { className: "barcode-scan-area" },
-      h("video", { ref: videoRef, className: "barcode-video", muted: true, playsInline: true }),
-      h("p", null, "Point the camera at the barcode…"),
-      h("button", { className: "ex-action-btn", onClick: cancel }, "Cancel")
-    ),
-    mode === "manual" && h("div", { className: "barcode-manual-row" },
-      h("input", {
-        type: "text", inputMode: "numeric", value: manualCode, placeholder: "e.g. 3017624010701",
-        onChange: function (e) { setManualCode(e.target.value); }, className: "search-input",
-      }),
-      h("div", { style: { display: "flex", gap: 8 } },
-        h("button", { className: "swap-save-btn", style: { flex: 1 }, onClick: function () { if (manualCode) handleBarcode(manualCode); } }, "Look Up"),
-        h("button", { className: "ex-action-btn", onClick: cancel }, "Cancel")
-      )
-    ),
-    mode === "loading" && h("p", { className: "history-empty" }, "Looking up product…"),
-    mode === "error" && h("div", { className: "plan-error" },
-      errorMsg, " ",
-      h("button", { onClick: function () { setMode("manual"); }, style: { color: "#3d97d3", background: "none", border: "none", textDecoration: "underline", cursor: "pointer" } }, "Try again")
-    ),
-    mode === "found" && product && h("div", { className: "rate-panel" },
-      h("p", null, product.name),
-      h("p", { style: { color: "#525252" } },
-        Math.round(product.per100.cal) + " cal · " + product.per100.p.toFixed(1) + "p / " + product.per100.c.toFixed(1) + "c / " + product.per100.f.toFixed(1) + "f per 100g"),
-      h("p", { style: { fontSize: "12px", color: "#a3a3a3" } }, "What's this mostly? (needed for the solver to use it correctly)"),
-      h("div", { className: "diff-row" },
-        [{ id: "protein", label: "Protein" }, { id: "carb", label: "Carb" }, { id: "fat", label: "Fat" }, { id: "veg", label: "Veg" }].map(function (c) {
-          return h("button", {
-            key: c.id, onClick: function () { setCategory(c.id); },
-            className: "diff-btn" + (category === c.id ? " right" : ""),
-          }, c.label);
-        })
-      ),
-      h("div", { style: { display: "flex", gap: 8, marginTop: 8 } },
-        h("button", {
-          className: "swap-save-btn", style: { flex: 1 }, disabled: !category,
-          onClick: function () {
-            props.addCustomFood(product.name, category, product.per100);
-            setSavedMsg("Added \"" + product.name + "\" to your foods.");
-            setMode("idle"); setProduct(null);
-          },
-        }, "Add to My Foods"),
-        h("button", { className: "ex-action-btn", onClick: cancel }, "Cancel")
-      ),
-      !category && h("p", { style: { fontSize: "11px", color: "#525252", marginTop: 6 } }, "Pick a category to enable saving — mixed foods (bars, frozen meals) won't solve as cleanly as single-macro staples.")
-    ),
-    savedMsg && mode === "idle" && h("p", { style: { fontSize: "12px", color: "#4eba6f" } }, savedMsg)
-  );
-}
-
 function WeekSelector(props) {
   return h("div", { className: "week-selector" },
     h("button", {
@@ -3844,8 +3752,8 @@ function MealSwapControl(props) {
         "No liked " + openRole + "s to swap in yet for this meal."),
       h("button", {
         className: "ex-action-btn",
-        onClick: function () { if (props.goToFoodPlan) props.goToFoodPlan(); },
-      }, "Go like some " + openRole + "s in the Food Plan tab")
+        onClick: function () { if (props.onOpenCustomize) props.onOpenCustomize(); },
+      }, "Go like some " + openRole + "s below")
     )
   );
 }
@@ -4023,6 +3931,12 @@ function MealCard(props) {
     if (!allSuppsChecked && prevAllChecked.current) setExpanded(true); // unchecked something — show again
     prevAllChecked.current = allSuppsChecked;
   }, [allSuppsChecked]);
+  const MEAL_CARD_FOOD_CATS = [
+    { key: "protein", label: "Proteins (pick at least 1)" }, { key: "carb", label: "Carbs (pick at least 1)" },
+    { key: "fat", label: "Fats (pick at least 1)" }, { key: "veg", label: "Vegetables (optional)" },
+  ];
+  const likedForMeal = props.likedFoodsForMeal || [];
+  const customizeExpanded = !!props.customizeExpanded;
 
   return h("div", { className: "meal-card" + (status && status !== "skip" ? " done" : "") + (props.disabled ? " preview-disabled" : "") },
     h("div", { className: "check-circle" + (status && status !== "skip" ? " done" : "") }, status && status !== "skip" && h(Check, { size: 12 })),
@@ -4057,10 +3971,51 @@ function MealCard(props) {
         title: "Also take", supplements: supplements,
         logsToday: props.logsToday, toggleLog: props.toggleLog, disabled: props.disabled,
         compact: true, noCollapse: true,
-      })
+      }),
+      // Customize: the liked-foods picker + regenerate, merged in from the old separate Food Plan
+      // tab — collapsed by default, same as every other collapsible section in this app. Regenerating
+      // here applies immediately to whichever week is currently on screen; there's no separate
+      // "apply to week" step, since this tab already knows which week that is.
+      props.showCustomize && h("div", { style: { marginTop: 8 } },
+        h("button", {
+          onClick: function () { props.onToggleCustomize(); },
+          style: { display: "flex", width: "100%", justifyContent: "space-between", alignItems: "center", background: "none", border: "none", padding: "4px 0", color: "#737373", cursor: "pointer", fontSize: 12 },
+        },
+          h("span", null, "Customize" + (likedForMeal.length > 0 ? " (" + likedForMeal.length + " liked)" : "")),
+          customizeExpanded ? h(ChevronUp, { size: 14 }) : h(ChevronDown, { size: 14 })
+        ),
+        customizeExpanded && h("div", { style: { marginTop: 8 } },
+          MEAL_CARD_FOOD_CATS.map(function (cat) {
+            return h("div", { key: cat.key },
+              h("div", { className: "food-cat-title" }, cat.label),
+              h("div", { className: "food-chip-grid" },
+                props.allFoods.filter(function (f) { return f.cat === cat.key; }).map(function (f) {
+                  const liked = likedForMeal.indexOf(f.name) !== -1;
+                  const isCustom = (props.customFoods || []).some(function (c) { return c.name === f.name; });
+                  return h("button", {
+                    key: f.name, className: "food-chip" + (liked ? " liked" : ""),
+                    onClick: function () { props.toggleLiked(props.mealKey, f.name); },
+                  }, f.name + (isCustom ? " 📷" : ""));
+                })
+              )
+            );
+          }),
+          h("div", { style: { display: "flex", gap: 8, marginTop: 8, flexWrap: "wrap" } },
+            likedForMeal.length > 0 && h("button", {
+              className: "ex-action-btn",
+              onClick: function () { props.copyLikedToEmptyMeals(props.mealKey); },
+            }, "Copy to other empty meals"),
+            h("button", {
+              className: "generate-btn", style: { marginTop: 0, flex: "0 0 auto" },
+              onClick: function () { props.onRegenerate(); },
+            }, "Regenerate This Meal")
+          )
+        )
+      )
     )
   );
 }
+
 
 function NutritionTab(props) {
   const STATUS_OPTS = [
@@ -4127,6 +4082,10 @@ function NutritionTab(props) {
         return h("option", { key: w, value: w }, w === -1 ? "Next Week (preview)" : w === 0 ? "This Week" : w === 1 ? "Last Week" : w + " Weeks Ago");
       })
     ),
+    props.isCustomProgram && props.hasOverride && h("button", {
+      className: "reset-list-btn", style: { marginBottom: 10 },
+      onClick: function () { props.revertWeekOverride(props.nutritionDisplayWeek); },
+    }, "Revert this week to default"),
     h("div", { className: "day-tabs" },
       DAY_LABELS.map(function (label, idx) {
         const disabled = props.weekOffset === 0 && idx > todayIdx;
@@ -4154,6 +4113,29 @@ function NutritionTab(props) {
         }, "Update")
       );
     })(),
+
+    props.isCustomProgram && h("div", { style: { marginBottom: 16 } },
+      h("button", {
+        onClick: function () { props.updateUiPrefs({ customFoodsExpanded: !props.uiPrefs.customFoodsExpanded }); },
+        style: { display: "flex", width: "100%", justifyContent: "space-between", alignItems: "center", background: "none", border: "none", padding: "8px 0", color: "inherit", cursor: "pointer" },
+      },
+        h("span", null, "Your Foods" + (props.customFoods.length > 0 ? " (" + props.customFoods.length + ")" : "")),
+        props.uiPrefs.customFoodsExpanded ? h(ChevronUp, { size: 16 }) : h(ChevronDown, { size: 16 })
+      ),
+      props.uiPrefs.customFoodsExpanded && h("div", { style: { marginTop: 8 } },
+        props.customFoods.length > 0 && h("div", { className: "search-results", style: { marginBottom: 12 } },
+          props.customFoods.map(function (f) {
+            return h("div", { key: f.name, className: "search-result-row", style: { cursor: "default" } },
+              h("span", null, f.name + " (" + f.cat + ")"),
+              h("button", { className: "logged-food-remove", onClick: function () { props.removeCustomFood(f.name); } }, "✕")
+            );
+          })
+        ),
+        h("p", { style: { fontSize: "11px", color: "#737373", margin: "0 0 8px" } },
+          "Anything scanned or logged below is saved here permanently and shows up as an option in every meal's Customize section."),
+        h(BarcodeLogger, { logFood: function () {}, addCustomFood: props.addCustomFood, allFoods: props.allFoods })
+      )
+    ),
 
     props.nutrientWarnings && props.nutrientWarnings.length > 0 && h("div", { className: "plan-error", style: { marginBottom: 16 } },
       h("strong", null, "Nutrient overlap — worth a look:"),
@@ -4202,13 +4184,18 @@ function NutritionTab(props) {
         const m = item.meal, idx = item.mealIdx;
         const entry = props.nToday[m.id];
         const status = entry ? (entry.status === "partial" ? (entry.pct === 75 ? "three_quarter" : "half") : entry.status) : null;
+        const expandedMeals = (props.uiPrefs && props.uiPrefs.foodPlanExpandedMeals) || { m1: false, m2: false, m3: false, m4: false };
+        const openCustomizeForThisMeal = function () {
+          props.updateUiPrefs({ foodPlanExpandedMeals: Object.assign({}, expandedMeals, { [m.id]: true }) });
+        };
         const mealSwapControl = props.isCustomProgram && !isFutureWeek && !isFutureDay && m.id !== "iw"
           ? h(MealSwapControl, {
               allFoods: props.allFoods, likedFoods: (props.likedFoods && props.likedFoods[m.id]) || [],
               onSwap: function (role, foodName) { props.swapIngredient(idx, role, foodName); },
-              goToFoodPlan: props.goToFoodPlan,
+              onOpenCustomize: openCustomizeForThisMeal,
             })
           : null;
+        const showCustomize = props.isCustomProgram && !isFutureWeek && !isFutureDay && m.id !== "iw";
         return h(MealCard, {
           key: m.id, meal: m, status: status, disabled: isFutureDay, statusOpts: STATUS_OPTS,
           onSetStatus: function (st, pct) { props.setMealStatus(m.id, st, pct); },
@@ -4216,6 +4203,13 @@ function NutritionTab(props) {
           supplements: props.supplementList.filter(function (s) { return s.timing === m.id; }),
           logsToday: props.supplementLogsToday, toggleLog: props.toggleSupplementLog,
           mealSwapControl: mealSwapControl,
+          showCustomize: showCustomize,
+          likedFoodsForMeal: (props.likedFoods && props.likedFoods[m.id]) || [],
+          toggleLiked: props.toggleLiked, copyLikedToEmptyMeals: props.copyLikedToEmptyMeals,
+          allFoods: props.allFoods, customFoods: props.customFoods, mealKey: m.id,
+          customizeExpanded: !!expandedMeals[m.id],
+          onToggleCustomize: function () { props.updateUiPrefs({ foodPlanExpandedMeals: Object.assign({}, expandedMeals, { [m.id]: !expandedMeals[m.id] }) }); },
+          onRegenerate: function () { props.regenerateAndApplyMeal(idx); },
         });
       })
     ),
@@ -4963,141 +4957,6 @@ function CustomSetupWizard(props) {
     h("div", { style: { display: "flex", gap: 8, marginTop: 16 } },
       h("button", { className: "ex-action-btn", onClick: function () { setStep("foods"); } }, "Back"),
       h("button", { className: "generate-btn", style: { flex: 1, marginTop: 0 }, onClick: confirm }, "Confirm & Start My Program")
-    )
-  );
-}
-
-function CustomPlanTab(props) {
-  const plan = props.plan;
-  const setPlan = props.setPlan;
-  const categories = [
-    { key: "protein", label: "Proteins (pick at least 1)" },
-    { key: "carb", label: "Carbs (pick at least 1)" },
-    { key: "fat", label: "Fats (pick at least 1)" },
-    { key: "veg", label: "Vegetables (optional)" },
-  ];
-  const activeOverrideWeeks = [1, 2, 3, 4].filter(function (w) { return props.overrides[w] && Object.keys(props.overrides[w]).length > 0; });
-  // Regenerates just ONE meal's result, leaving whatever's already generated for the other 3 meals
-  // untouched when it succeeds — so redoing Meal 2 doesn't force Meal 1/3/4 to be regenerated too.
-  // If it FAILS, its target macros get redistributed across whichever other meals already have a
-  // valid result, proportional to their own size, and those get re-solved once at the bumped target
-  // — a one-time fallback, not an ongoing dependency between meals.
-  function regenerateMeal(mealIdx) {
-    const priorResults = (plan && plan.results) || props.slots.map(function () { return null; });
-    const avoidNames = [];
-    priorResults.forEach(function (r, i) {
-      if (i !== mealIdx && r && !r.error) r.items.forEach(function (it) { avoidNames.push(it.name); });
-    });
-    const result = regenerateSingleMeal(props.likedFoods, props.allFoods, props.slots, mealIdx, avoidNames);
-    let newResults = priorResults.slice();
-    newResults[mealIdx] = result;
-    if (result.error) {
-      const okIdx = [0, 1, 2, 3].filter(function (i) { return i !== mealIdx && newResults[i] && !newResults[i].error; });
-      newResults = redistributeAcrossMeals(newResults, [mealIdx], okIdx, props.slots, props.likedFoods, props.allFoods);
-    }
-    setPlan({ results: newResults });
-  }
-  return h("div", null,
-    h("h2", { className: "section-title" }, "Build a Custom Plan"),
-    h("p", { className: "section-sub" },
-      "Pick foods you actually like to eat, meal by meal — different meals can have different foods, so your morning options don't have to be dinner food. Each meal generates, previews, and applies to a week independently — regenerating one never touches the others. The math (same solver used for every meal in this program) fits exact quantities to hit each meal's real macro targets — no guessing, no AI-invented numbers."),
-    activeOverrideWeeks.length > 0 && h("div", { className: "plan-error" },
-      "Custom plan currently active on: Week " + activeOverrideWeeks.join(", Week ") +
-      ". That week's grocery list has been recalculated to match automatically."),
-    h("div", { className: "food-cat-title" }, "Scan a staple to add it to your foods"),
-    h(BarcodeAddFood, { addCustomFood: props.addCustomFood }),
-    props.customFoods.length > 0 && h("div", { className: "search-results", style: { marginBottom: 16 } },
-      props.customFoods.map(function (f) {
-        return h("div", { key: f.name, className: "search-result-row", style: { cursor: "default" } },
-          h("span", null, f.name + " (" + f.cat + ")"),
-          h("button", { className: "logged-food-remove", onClick: function () { props.removeCustomFood(f.name); } }, "✕")
-        );
-      })
-    ),
-    props.slots.map(function (slot, idx) {
-      const mealKey = "m" + (idx + 1);
-      const likedForMeal = (props.likedFoods && props.likedFoods[mealKey]) || [];
-      const expandedMeals = (props.uiPrefs && props.uiPrefs.foodPlanExpandedMeals) || { m1: false, m2: false, m3: false, m4: false };
-      const isOpen = !!expandedMeals[mealKey];
-      const r = plan && plan.results ? plan.results[idx] : null;
-      return h("div", { key: mealKey, style: { marginBottom: 20, paddingBottom: 16, borderBottom: "1px solid #262626" } },
-        h("button", {
-          onClick: function () { props.updateUiPrefs({ foodPlanExpandedMeals: Object.assign({}, expandedMeals, { [mealKey]: !isOpen }) }); },
-          style: { display: "flex", width: "100%", justifyContent: "space-between", alignItems: "center", background: "none", border: "none", padding: 0, color: "inherit", cursor: "pointer" },
-        },
-          h("h3", { style: { fontSize: 15, margin: 0 } },
-            slot.label + " — " + slot.time + (likedForMeal.length > 0 ? " (" + likedForMeal.length + " liked)" : "")),
-          isOpen ? h(ChevronUp, { size: 16 }) : h(ChevronDown, { size: 16 })
-        ),
-        isOpen && h(React.Fragment, null,
-          h("div", { style: { marginTop: 8 } },
-            categories.map(function (cat) {
-              return h("div", { key: cat.key },
-                h("div", { className: "food-cat-title" }, cat.label),
-                h("div", { className: "food-chip-grid" },
-                  props.allFoods.filter(function (f) { return f.cat === cat.key; }).map(function (f) {
-                    const liked = likedForMeal.indexOf(f.name) !== -1;
-                    const isCustom = props.customFoods.some(function (c) { return c.name === f.name; });
-                    return h("button", {
-                      key: f.name, onClick: function () { props.toggleLiked(mealKey, f.name); },
-                      className: "food-chip" + (liked ? " liked" : ""),
-                    }, f.name + (isCustom ? " 📷" : ""));
-                  })
-                )
-              );
-            })
-          ),
-          h("div", { style: { display: "flex", gap: 8, marginTop: 8, flexWrap: "wrap" } },
-            likedForMeal.length > 0 && h("button", {
-              className: "ex-action-btn",
-              onClick: function () { props.copyLikedToEmptyMeals(mealKey); },
-            }, "Copy these foods to other empty meals"),
-            h("button", {
-              className: "generate-btn", style: { marginTop: 0, flex: "0 0 auto" },
-              onClick: function () { regenerateMeal(idx); },
-            }, r ? "Regenerate this meal" : "Generate this meal")
-          ),
-          r && r.error && r.redistributed && h("div", { className: "plan-error", style: { marginTop: 10, borderColor: "#3d97d3" } },
-            "This meal's target couldn't be hit with your liked foods, so its macros were split across your other meals instead — nothing lost from your day's total. Like different foods for " + r.slot + " and regenerate it to bring it back on its own."),
-          r && r.error && !r.redistributed && h("div", { className: "plan-error", style: { marginTop: 10 } }, r.error),
-          r && !r.error && h("div", { className: "plan-result-card", style: { marginTop: 10 } },
-            r.items.map(function (it, j) {
-              return h("div", { key: j, className: "plan-item-row" }, formatMealItem(it, props.allFoods));
-            }),
-            h("div", { className: "plan-macro-row" },
-              Math.round(r.cal) + " cal · " + Math.round(r.p) + "p / " + Math.round(r.c) + "c / " + Math.round(r.f) + "f",
-              h("span", { className: "target" }, "  (target: " + r.target.p + "p / " + r.target.c + "c / " + r.target.f + "f)"),
-              r.boosted && h("span", { style: { color: "#3d97d3" } }, "  · includes macros absorbed from another meal")
-            ),
-            h("div", { style: { marginTop: 8 } },
-              h("div", { style: { fontSize: 11, color: "#737373", marginBottom: 4 } }, "Apply just this meal to:"),
-              h("div", { className: "food-chip-grid" },
-                [1, 2, 3, 4].map(function (w) {
-                  const isActiveForThisMeal = !!(props.overrides[w] && props.overrides[w][mealKey]);
-                  return h("button", {
-                    key: w, className: "week-btn" + (isActiveForThisMeal ? " active" : ""),
-                    onClick: function () { props.applySingleMealToWeek(w, idx, r); },
-                  }, "Week " + w + (isActiveForThisMeal ? " ✓" : ""));
-                })
-              )
-            )
-          )
-        )
-      );
-    }),
-    h("button", {
-      className: "generate-btn",
-      onClick: function () { setPlan(generateCustomPlan(props.likedFoods, props.allFoods, props.slots)); },
-    }, "Generate All 4 Meals"),
-    plan && plan.error && h("div", { className: "plan-error" }, plan.error),
-    activeOverrideWeeks.length > 0 && h("div", { style: { marginTop: 16 } },
-      h("div", { className: "food-cat-title" }, "Currently customized weeks"),
-      activeOverrideWeeks.map(function (w) {
-        return h("button", {
-          key: w, className: "reset-list-btn", style: { marginRight: 8, marginBottom: 8 },
-          onClick: function () { props.revertWeek(w); },
-        }, "Revert Week " + w + " to default");
-      })
     )
   );
 }
