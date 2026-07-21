@@ -857,7 +857,7 @@ const MUSCLE_GROUP_CONSOLIDATION = {
 };
 // The broad groups used for volume tracking — same list an exercise's muscle tag (or a user
 // correction to it) is chosen from.
-const MUSCLE_GROUPS = ["chest", "back", "shoulders", "biceps", "triceps", "quads", "hamstrings_glutes", "calves"];
+const MUSCLE_GROUPS = ["chest", "back", "shoulders", "biceps", "triceps", "quads", "hamstrings_glutes", "calves", "other"];
 function consolidateMuscleGroup(muscle) {
   return MUSCLE_GROUP_CONSOLIDATION[muscle] || muscle;
 }
@@ -1736,7 +1736,11 @@ function effectiveRepRange(ex, state) {
 // User-editable, same as any other exerciseState override — corrects a mis-tagged exercise or one
 // added via a permanent swap, without needing to touch the exercise's own hardcoded definition.
 function effectiveMuscle(ex, state) {
-  return (state && state.muscleOverride) || ex.muscle;
+  // Falls back to "other" for exercises saved before muscle tagging existed (e.g. a Custom program
+  // set up prior to this feature) — old saved data doesn't retroactively gain the new field just
+  // because the code changed, so this must never return null/undefined or every render of that
+  // exercise would crash on the "Muscle: X" button's .replace() call.
+  return (state && state.muscleOverride) || ex.muscle || "other";
 }
 // Persists an added set across phases the same way weight/reps already persist, without touching
 // the exercise definition's own `sets` field.
@@ -2081,7 +2085,7 @@ function fireRestNotification(label) {
 }
 
 function App() {
-  const APP_VERSION = "2026-07-21T05:27:07";
+  const APP_VERSION = "2026-07-21T05:55:42";
   const [updateAvailable, setUpdateAvailable] = useState(false);
   useEffect(function () {
     function checkVersion() {
