@@ -2085,7 +2085,7 @@ function fireRestNotification(label) {
 }
 
 function App() {
-  const APP_VERSION = "2026-07-21T05:55:42";
+  const APP_VERSION = "2026-07-21T06:10:17";
   const [updateAvailable, setUpdateAvailable] = useState(false);
   useEffect(function () {
     function checkVersion() {
@@ -4015,10 +4015,16 @@ function SetLogger(props) {
   }
 
   useEffect(function () {
-    // If the exercise's default weight changed (e.g., after a swap or manual adjustment) and this
-    // set is still showing the old default rather than a manually-typed override, follow the update.
+    // If the exercise's default weight changed (e.g., after a swap, manual adjustment, or an
+    // autoregulation bump/drop triggered by a DIFFERENT set) and this set is still showing the old
+    // default rather than a manually-typed override, follow the update — but only while this set
+    // hasn't actually been logged yet. Once reps are entered, this set's weight is now historical
+    // record of what was actually lifted; letting it keep following the default here is exactly what
+    // caused a runaway feedback loop — the set that triggered an autoregulation bump would have its
+    // own weight rewritten to the new value, which re-fired onLog with the same (still-overshooting)
+    // reps at the new weight, triggering another bump, forever, within milliseconds.
     if (props.state.weight !== prevDefaultWeight.current) {
-      if (weight === "" || Number(weight) === Number(prevDefaultWeight.current)) {
+      if (reps === "" && (weight === "" || Number(weight) === Number(prevDefaultWeight.current))) {
         setWeight(props.state.weight != null ? props.state.weight : "");
       }
       prevDefaultWeight.current = props.state.weight;
