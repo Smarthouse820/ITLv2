@@ -2085,7 +2085,7 @@ function fireRestNotification(label) {
 }
 
 function App() {
-  const APP_VERSION = "2026-07-21T06:10:17";
+  const APP_VERSION = "2026-07-21T06:30:26";
   const [updateAvailable, setUpdateAvailable] = useState(false);
   useEffect(function () {
     function checkVersion() {
@@ -2297,7 +2297,12 @@ function App() {
     const newLogs = Object.assign({}, prog.logs);
     newLogs[week] = weekLogs;
     const updates = { logs: newLogs };
-    if (!isBodyweight && reps != null && weight != null) {
+    // Require a genuinely positive weight, not just non-null, before evaluating autoregulation.
+    // Number("") is 0 in JavaScript, not null — so if reps get typed/committed before the weight
+    // field has actually been filled in, weight arrives here as 0. That's not a real logged weight;
+    // treating it as one would compute a decrement/increment off 0 and permanently corrupt the
+    // session adjustment to 0 for the rest of that exercise's sets this week.
+    if (!isBodyweight && reps != null && weight != null && weight > 0) {
       let adjustment = null;
       if (targetRepLow != null && reps <= targetRepLow * 0.5) {
         adjustment = { weight: nextWeightDecrement(weight), repsTarget: currentRepsTarget };
