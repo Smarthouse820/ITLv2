@@ -275,45 +275,45 @@ function Sparkles(p) { return h(Icon, p,
 // ---------- Program data ----------
 const EXERCISES_CUTTING = {
   Monday: { label: "Upper", cardio: "25–30 min cardio", exercises: [
-    { id: "mon1", name: "Incline Dumbbell Press", weight: 95, sets: 3, repLow: 9, repHigh: 12 },
-    { id: "mon2", name: "Cable Flexion Row", weight: 212, sets: 3, repLow: 14, repHigh: 17 },
-    { id: "mon3", name: "Prime Plate Loaded Incline Press", weight: 280, sets: 3, repLow: 8, repHigh: 11 },
-    { id: "mon4", name: "Hammer Strength Underhand High Pulldown", weight: 80, sets: 3, repLow: 13, repHigh: 16 },
-    { id: "mon5", name: "Leaning Cable Lateral Raise", weight: 16, sets: 4, repLow: 13, repHigh: 16 },
-    { id: "mon6", name: "Bayesian Cable Curl", weight: 20, sets: 4, repLow: 12, repHigh: 15 },
-    { id: "mon7", name: "EZ Bar Skullcrusher", weight: 60, sets: 3, repLow: 15, repHigh: 18 },
+    { id: "mon1", name: "Incline Dumbbell Press", weight: 95, sets: 3, repLow: 9, repHigh: 12, muscle: "chest" },
+    { id: "mon2", name: "Cable Flexion Row", weight: 212, sets: 3, repLow: 14, repHigh: 17, muscle: "back" },
+    { id: "mon3", name: "Prime Plate Loaded Incline Press", weight: 280, sets: 3, repLow: 8, repHigh: 11, muscle: "chest" },
+    { id: "mon4", name: "Hammer Strength Underhand High Pulldown", weight: 80, sets: 3, repLow: 13, repHigh: 16, muscle: "back" },
+    { id: "mon5", name: "Leaning Cable Lateral Raise", weight: 16, sets: 4, repLow: 13, repHigh: 16, muscle: "shoulders" },
+    { id: "mon6", name: "Bayesian Cable Curl", weight: 20, sets: 4, repLow: 12, repHigh: 15, muscle: "biceps" },
+    { id: "mon7", name: "EZ Bar Skullcrusher", weight: 60, sets: 3, repLow: 15, repHigh: 18, muscle: "triceps" },
   ]},
   Tuesday: { label: "Lower", cardio: "25–30 min cardio", exercises: [
-    { id: "tue1", name: "Leg Press", weight: 488, sets: 3, repLow: 15, repHigh: 18 },
-    { id: "tue2", name: "Pendulum Squat", weight: 45, sets: 3, repLow: 12, repHigh: 15 },
-    { id: "tue3", name: "Hip Thruster", weight: 105, sets: 3, repLow: 13, repHigh: 16 },
-    { id: "tue4", name: "Leg Extension", weight: 140, sets: 3, repLow: 13, repHigh: 16 },
-    { id: "tue5", name: "Seated Leg Curl", weight: 105, sets: 3, repLow: 13, repHigh: 16 },
+    { id: "tue1", name: "Leg Press", weight: 488, sets: 3, repLow: 15, repHigh: 18, muscle: "quads" },
+    { id: "tue2", name: "Pendulum Squat", weight: 45, sets: 3, repLow: 12, repHigh: 15, muscle: "quads" },
+    { id: "tue3", name: "Hip Thruster", weight: 105, sets: 3, repLow: 13, repHigh: 16, muscle: "hamstrings_glutes" },
+    { id: "tue4", name: "Leg Extension", weight: 140, sets: 3, repLow: 13, repHigh: 16, muscle: "quads" },
+    { id: "tue5", name: "Seated Leg Curl", weight: 105, sets: 3, repLow: 13, repHigh: 16, muscle: "hamstrings_glutes" },
   ]},
   Wednesday: { label: "Full Rest", exercises: [] },
   Thursday: { label: "Push / Pump Hybrid", cardio: "25–30 min cardio", exercises: [
-    { id: "thu1", name: "Deficit Pushup", weight: null, bodyweight: true, sets: 3, repLow: 12, repHigh: 20, isFailure: true },
-    { id: "thu2", name: "Dips", weight: null, bodyweight: true, sets: 3, repLow: 12, repHigh: 20, isFailure: true },
-    { id: "thu3", name: "Dumbbell Fly", weight: 35, sets: 3, repLow: 13, repHigh: 16 },
-    { id: "thu4", name: "Cable Rope Face Pull", weight: 58, sets: 3, repLow: 13, repHigh: 16 },
-    { id: "thu5", name: "Standing Cable Fly", weight: 27.5, sets: 3, repLow: 13, repHigh: 16 },
-    { id: "thu6", name: "Triceps Pushdown", weight: 50, sets: 4, repLow: 13, repHigh: 16 },
-    { id: "thu7", name: "Bent Over Cable Fly", weight: 37.5, sets: 3, repLow: 13, repHigh: 16 },
-    { id: "thu8", name: "Donkey Calf Raise", weight: 70, sets: 3, repLow: 20, repHigh: 23 },
+    { id: "thu1", name: "Deficit Pushup", weight: null, bodyweight: true, sets: 3, repLow: 12, repHigh: 20, isFailure: true, muscle: "chest" },
+    { id: "thu2", name: "Dips", weight: null, bodyweight: true, sets: 3, repLow: 12, repHigh: 20, isFailure: true, muscle: "chest" },
+    { id: "thu3", name: "Dumbbell Fly", weight: 35, sets: 3, repLow: 13, repHigh: 16, muscle: "chest" },
+    { id: "thu4", name: "Cable Rope Face Pull", weight: 58, sets: 3, repLow: 13, repHigh: 16, muscle: "shoulders" },
+    { id: "thu5", name: "Standing Cable Fly", weight: 27.5, sets: 3, repLow: 13, repHigh: 16, muscle: "chest" },
+    { id: "thu6", name: "Triceps Pushdown", weight: 50, sets: 4, repLow: 13, repHigh: 16, muscle: "triceps" },
+    { id: "thu7", name: "Bent Over Cable Fly", weight: 37.5, sets: 3, repLow: 13, repHigh: 16, muscle: "shoulders" },
+    { id: "thu8", name: "Donkey Calf Raise", weight: 70, sets: 3, repLow: 20, repHigh: 23, muscle: "calves" },
   ]},
   Friday: { label: "Pull", cardio: "25–30 min cardio", exercises: [
-    { id: "fri1", name: "Cross Body Pulldown", weight: 90, sets: 3, repLow: 15, repHigh: 18 },
-    { id: "fri2", name: "Extreme Row Machine", weight: 93, sets: 3, repLow: 13, repHigh: 16 },
-    { id: "fri3", name: "Meadows Row", weight: 95, sets: 3, repLow: 15, repHigh: 18 },
-    { id: "fri4", name: "Seated Dumbbell Lateral Raise", weight: 25, sets: 3, repLow: 13, repHigh: 16 },
-    { id: "fri5", name: "Incline Dumbbell Curl", weight: 35, sets: 3, repLow: 12, repHigh: 15 },
+    { id: "fri1", name: "Cross Body Pulldown", weight: 90, sets: 3, repLow: 15, repHigh: 18, muscle: "back" },
+    { id: "fri2", name: "Extreme Row Machine", weight: 93, sets: 3, repLow: 13, repHigh: 16, muscle: "back" },
+    { id: "fri3", name: "Meadows Row", weight: 95, sets: 3, repLow: 15, repHigh: 18, muscle: "back" },
+    { id: "fri4", name: "Seated Dumbbell Lateral Raise", weight: 25, sets: 3, repLow: 13, repHigh: 16, muscle: "shoulders" },
+    { id: "fri5", name: "Incline Dumbbell Curl", weight: 35, sets: 3, repLow: 12, repHigh: 15, muscle: "biceps" },
   ]},
   Saturday: { label: "Legs (Unilateral / Hip Hinge)", cardio: "25–30 min cardio", exercises: [
-    { id: "sat1", name: "Single Leg Press", weight: 117, sets: 3, repLow: 15, repHigh: 18 },
-    { id: "sat2", name: "Romanian Deadlift", weight: 45, sets: 3, repLow: 10, repHigh: 13 },
-    { id: "sat3", name: "Hip Abduction Machine", weight: 52, sets: 3, repLow: 13, repHigh: 16 },
-    { id: "sat4", name: "Single Leg Extension", weight: 52, sets: 3, repLow: 13, repHigh: 16 },
-    { id: "sat5", name: "Single Leg Curl", weight: 52, sets: 3, repLow: 13, repHigh: 16 },
+    { id: "sat1", name: "Single Leg Press", weight: 117, sets: 3, repLow: 15, repHigh: 18, muscle: "quads" },
+    { id: "sat2", name: "Romanian Deadlift", weight: 45, sets: 3, repLow: 10, repHigh: 13, muscle: "hamstrings_glutes" },
+    { id: "sat3", name: "Hip Abduction Machine", weight: 52, sets: 3, repLow: 13, repHigh: 16, muscle: "hamstrings_glutes" },
+    { id: "sat4", name: "Single Leg Extension", weight: 52, sets: 3, repLow: 13, repHigh: 16, muscle: "quads" },
+    { id: "sat5", name: "Single Leg Curl", weight: 52, sets: 3, repLow: 13, repHigh: 16, muscle: "hamstrings_glutes" },
   ]},
   Sunday: { label: "Full Rest", exercises: [] },
 };
@@ -847,11 +847,26 @@ function pickExercise(muscle, mechanic, equipmentAvailable) {
   return bodyweightFallback[0] || EXERCISE_POOL.filter(function (ex) { return ex.muscle === muscle; })[0];
 }
 
+// Consolidates the finer-grained muscle tags used for exercise SELECTION (e.g. distinguishing a
+// horizontal row from a vertical pulldown) down to the broader groups used for volume tracking —
+// deload volume landmarks are conventionally discussed per muscle group as a whole, not per
+// movement pattern within that group.
+const MUSCLE_GROUP_CONSOLIDATION = {
+  back_horizontal: "back", back_vertical: "back",
+  quads_isolation: "quads", hamstrings_isolation: "hamstrings_glutes",
+};
+// The broad groups used for volume tracking — same list an exercise's muscle tag (or a user
+// correction to it) is chosen from.
+const MUSCLE_GROUPS = ["chest", "back", "shoulders", "biceps", "triceps", "quads", "hamstrings_glutes", "calves"];
+function consolidateMuscleGroup(muscle) {
+  return MUSCLE_GROUP_CONSOLIDATION[muscle] || muscle;
+}
 function requirementToExercise(req, idSuffix, equipmentAvailable) {
   const picked = pickExercise(req.muscle, req.mechanic, equipmentAvailable);
   return Object.assign({ id: req.slot + idSuffix }, {
     name: picked.name, weight: picked.weight, bodyweight: picked.bodyweight || false, isFailure: picked.isFailure || false,
     sets: 3, repLow: 10, repHigh: 15, // overwritten by goal-based rules right after selection
+    muscle: consolidateMuscleGroup(req.muscle),
   });
 }
 
@@ -1702,6 +1717,14 @@ function nextWeightIncrement(w) {
   if (w < 150) return w + 5;
   return w + 10;
 }
+// Mirrors nextWeightIncrement's tiers for automatic within-session autoregulation — a step down
+// instead of up, floored at 0.
+function nextWeightDecrement(w) {
+  if (w == null) return null;
+  if (w <= 50) return Math.max(0, w - 2.5);
+  if (w <= 150) return Math.max(0, w - 5);
+  return Math.max(0, w - 10);
+}
 // Returns the rep range actually in effect for an exercise — a manually-adjusted range (from a
 // weight change) if one's been set, otherwise the exercise's own default range.
 function effectiveRepRange(ex, state) {
@@ -1709,6 +1732,101 @@ function effectiveRepRange(ex, state) {
     return { repLow: state.repLowOverride, repHigh: state.repHighOverride };
   }
   return { repLow: ex.repLow, repHigh: ex.repHigh };
+}
+// User-editable, same as any other exerciseState override — corrects a mis-tagged exercise or one
+// added via a permanent swap, without needing to touch the exercise's own hardcoded definition.
+function effectiveMuscle(ex, state) {
+  return (state && state.muscleOverride) || ex.muscle;
+}
+// Persists an added set across phases the same way weight/reps already persist, without touching
+// the exercise definition's own `sets` field.
+function effectiveSets(ex, state) {
+  return (state && state.setsOverride != null) ? state.setsOverride : ex.sets;
+}
+// The weeks belonging to the phase that just ended, given the week being completed (upToWeek) is
+// the last one before a deload. Walks backward from upToWeek and stops at the first deload week
+// encountered (exclusive) — a deload week is recovery, not part of the volume-earning phase either
+// side of it.
+function computePhaseWeeks(upToWeek, extraDeloadWeeks) {
+  const weeks = [];
+  for (let w = upToWeek; w >= 1; w--) {
+    const isDeload = w % 5 === 0 || (extraDeloadWeeks || []).indexOf(w) !== -1;
+    if (isDeload) break;
+    weeks.unshift(w);
+  }
+  return weeks;
+}
+// Scores one exercise's performance across a completed phase: how many weeks it was actually
+// trained, how many of those hit/exceeded the rep range's ceiling (a real progression event), and
+// how many were rated easy or just right (never "hard").
+function scoreExerciseInPhase(exerciseId, phaseWeeks, logsByWeek, difficultyByWeek, skippedByWeek, range) {
+  let trainedWeeks = 0, progressedWeeks = 0, easyRightWeeks = 0;
+  phaseWeeks.forEach(function (w) {
+    if ((skippedByWeek[w] || {})[exerciseId]) return;
+    const setsLogged = ((logsByWeek[w] || {})[exerciseId] || []).filter(Boolean);
+    if (setsLogged.length === 0) return;
+    trainedWeeks++;
+    const maxReps = Math.max.apply(null, setsLogged.map(function (s) { return s.reps || 0; }));
+    if (maxReps >= range.repHigh) progressedWeeks++;
+    const rating = (difficultyByWeek[w] || {})[exerciseId];
+    if (rating === "easy" || rating === "right") easyRightWeeks++;
+  });
+  return { trainedWeeks: trainedWeeks, progressedWeeks: progressedWeeks, easyRightWeeks: easyRightWeeks };
+}
+// "Consistently met" for one exercise across the phase: progressed (hit rep ceiling) in the
+// majority of trained weeks AND rated easy/just-right in the majority of trained weeks — both
+// conditions together, not either alone.
+function exerciseConsistentlyMet(score) {
+  if (score.trainedWeeks === 0) return false;
+  return score.progressedWeeks > score.trainedWeeks / 2 && score.easyRightWeeks > score.trainedWeeks / 2;
+}
+const VOLUME_CEILING_PER_MUSCLE = 20; // weekly sets per muscle group — sits at the point multiple
+// sources agree returns clearly start flattening; deloads exist specifically to walk volume back
+// down before building toward this again, so it's a backstop, not a target to reach quickly.
+// Evaluates every muscle group that had at least one exercise trained in the completed phase, and
+// returns one recommendation per muscle group that qualifies (more than half its exercises
+// "consistently met," and adding a set wouldn't push the group's weekly total past the ceiling).
+// The exercise chosen to receive the added set is whichever qualifying exercise showed the
+// strongest signal — most weeks progressed, ties broken by most weeks rated easy/just-right.
+function evaluateVolumeIncrease(allExercisesFlat, phaseWeeks, logsByWeek, difficultyByWeek, skippedByWeek, exerciseStateSource) {
+  const byMuscle = {};
+  allExercisesFlat.forEach(function (ex) {
+    const state = exerciseStateSource[ex.id] || {};
+    const muscle = effectiveMuscle(ex, state);
+    if (!muscle) return;
+    if (!byMuscle[muscle]) byMuscle[muscle] = [];
+    byMuscle[muscle].push(ex);
+  });
+  const recommendations = [];
+  Object.keys(byMuscle).forEach(function (muscle) {
+    const exercises = byMuscle[muscle];
+    const scores = {};
+    exercises.forEach(function (ex) {
+      const state = exerciseStateSource[ex.id] || {};
+      const range = effectiveRepRange(ex, state);
+      scores[ex.id] = scoreExerciseInPhase(ex.id, phaseWeeks, logsByWeek, difficultyByWeek, skippedByWeek, range);
+    });
+    const qualifying = exercises.filter(function (ex) { return exerciseConsistentlyMet(scores[ex.id]); });
+    if (qualifying.length === 0 || qualifying.length / exercises.length <= 0.5) return;
+    const currentTotalSets = exercises.reduce(function (sum, ex) {
+      return sum + effectiveSets(ex, exerciseStateSource[ex.id] || {});
+    }, 0);
+    if (currentTotalSets >= VOLUME_CEILING_PER_MUSCLE) return;
+    let best = null, bestScore = -1;
+    qualifying.forEach(function (ex) {
+      const s = scores[ex.id];
+      const score = s.progressedWeeks * 10 + s.easyRightWeeks;
+      if (score > bestScore) { bestScore = score; best = ex; }
+    });
+    if (best) {
+      recommendations.push({
+        muscle: muscle, exerciseId: best.id, exerciseName: best.name,
+        currentSets: effectiveSets(best, exerciseStateSource[best.id] || {}),
+        muscleTotalSets: currentTotalSets,
+      });
+    }
+  });
+  return recommendations;
 }
 // Rough rule of thumb: every ~2.5% change in weight shifts achievable reps by about 1, in the
 // opposite direction. Only returns a suggestion once the shift would move at least 1 rep.
@@ -1806,6 +1924,35 @@ function freshProgramState(exercises) {
     // deliberately separate from exerciseState's nameOverride (the existing permanent swap), which
     // renames a slot in place and keeps one shared history stream by design.
     exerciseWeekOverrides: {},
+    // One-shot undo for a single meal regenerate — { week, mealId, previousMeal } where
+    // previousMeal is either the meal's prior override object or null (meaning it wasn't overridden
+    // before, so undoing removes the override entirely rather than restoring one). Mirrors
+    // undoSnapshot's one-time-only design, just scoped to a single meal instead of a whole week.
+    mealRegenerateUndo: null,
+    // { [dateKey]: { [mealId]: {...same shape as a week override} } } — a MORE SPECIFIC layer than
+    // customMealOverrides[week], used for "rebalance my day" (boosting one meal today, shrinking the
+    // others to compensate). Checked before the week-level override when computing a day's meals.
+    // Once created it persists as real history for that date (like nutrition logs already do) — it
+    // isn't cleared just because the date stops being "today"; only the REBALANCE ACTION itself is
+    // restricted to the actual current day, not the override's ongoing validity when looking back.
+    mealDateOverrides: {},
+    // { [week]: { [exerciseId]: { weight, repsTarget } } } — automatic within-session autoregulation.
+    // A set at or below 50% of the target rep range's low end drops the weight for remaining sets
+    // (same rep target — still aiming for the range, just at less weight). A set at or above the
+    // rep range's high end bumps the weight and resets the target to the range's low end — the same
+    // "top of range -> add weight, reset to bottom" mechanic already used by week-completion
+    // progression and the manual swap form, just triggered mid-session instead of only at week's end.
+    // Since each exercise appears only once per week in this program's structure, "this week" and
+    // "this session" are the same thing, so it naturally resets the next time that exercise comes
+    // up. Purely a safety/usability mechanism — separate from exerciseState's persistent weight,
+    // which only changes via the normal week-completion progression logic (though completeWeek does
+    // fold this in as the realistic starting point, so it isn't silently undone).
+    sessionAdjustments: {},
+    // Array of pending volume-increase recommendations from the phase just completed — see
+    // evaluateVolumeIncrease for how these are derived. Surfaced alongside deloadRecommendation at
+    // the same phase-boundary checkpoint, requiring explicit accept/dismiss like every other
+    // consequential suggestion in this app (adaptive-TDEE, deload itself) — never applied silently.
+    volumeIncreaseRecommendations: [],
   };
 }
 function mergeProgramState(saved, exercises) {
@@ -1822,6 +1969,14 @@ function makeDefaultData() {
     customProgramConfig: null,
     supplementList: [],
     restTimerSettings: { enabled: false, seconds: 90 }, // client-side post-set rest reminder — no backend involved
+    // Cutting, Cruise, and Hypertrophy use identical exercise ids/names (Cruise/Hypertrophy are
+    // literal copies of Cutting with only sets/cardio tweaked) — so unlike Custom, whose exercises
+    // are generated per-user and don't align with anything, these three genuinely share the same
+    // movements. This holds each shared movement's CURRENT progression (weight/rep target), so
+    // switching between these three programs doesn't reset progress on the same exercise. Logged
+    // history (sets per week) stays per-program as before, since each program has its own calendar
+    // of weeks — only the "where am I at right now" state is shared.
+    sharedExerciseState: {},
     uiPrefs: { sleepExpanded: true, supplementsBoxExpanded: false, yourSupplementsOpen: false, unscheduledSupplementsOpen: false, foodPlanExpandedMeals: { m1: false, m2: false, m3: false, m4: false }, milestonesCardExpanded: false, customFoodsExpanded: false }, // manual collapse/expand toggles — persisted so they stay as left across tab switches
     programs: {
       cutting: freshProgramState(EXERCISES_CUTTING),
@@ -1852,6 +2007,17 @@ function normalizeV2(parsed) {
   const likedFoodsByMeal = parsed.likedFoodsByMeal
     ? Object.assign({ m1: [], m2: [], m3: [], m4: [] }, parsed.likedFoodsByMeal)
     : { m1: legacyLikedFoods || [], m2: legacyLikedFoods || [], m3: legacyLikedFoods || [], m4: legacyLikedFoods || [] };
+  // One-time migration: Cutting/Cruise/Hypertrophy's exercise progression used to live separately
+  // per program even though they share the same exercise ids/names. Seeded once here by merging
+  // whatever each program had — Cutting's own values win for any id logged in more than one, since
+  // it's the base the other two were copied from — so nothing looks reset on the first load after
+  // this change; from here forward all three read and write this one shared field instead.
+  const sharedExerciseState = parsed.sharedExerciseState || Object.assign(
+    {},
+    ((parsed.programs || {}).hypertrophy || {}).exerciseState || {},
+    ((parsed.programs || {}).cruise || {}).exerciseState || {},
+    ((parsed.programs || {}).cutting || {}).exerciseState || {}
+  );
   return {
     activeProgram: validPrograms.indexOf(parsed.activeProgram) !== -1 ? parsed.activeProgram : "custom",
     likedFoodsByMeal: likedFoodsByMeal,
@@ -1859,6 +2025,7 @@ function normalizeV2(parsed) {
     customProgramConfig: parsed.customProgramConfig || null,
     supplementList: parsed.supplementList || [],
     restTimerSettings: Object.assign({ enabled: false, seconds: 90 }, parsed.restTimerSettings || {}),
+    sharedExerciseState: sharedExerciseState,
     uiPrefs: Object.assign({ sleepExpanded: true, supplementsBoxExpanded: false, yourSupplementsOpen: false, unscheduledSupplementsOpen: false, foodPlanExpandedMeals: { m1: false, m2: false, m3: false, m4: false }, milestonesCardExpanded: false, customFoodsExpanded: false }, parsed.uiPrefs || {}),
     programs: {
       cutting: mergeProgramState(withLegacySupplementLogs((parsed.programs || {}).cutting), EXERCISES_CUTTING),
@@ -1914,7 +2081,7 @@ function fireRestNotification(label) {
 }
 
 function App() {
-  const APP_VERSION = "2026-07-20T04:24:53";
+  const APP_VERSION = "2026-07-21T05:27:07";
   const [updateAvailable, setUpdateAvailable] = useState(false);
   useEffect(function () {
     function checkVersion() {
@@ -1938,6 +2105,7 @@ function App() {
   });
   const [expanded, setExpanded] = useState({});
   const [toast, setToast] = useState("");
+  const [showEditProgramSettings, setShowEditProgramSettings] = useState(false);
   const [nutritionViewWeek, setNutritionViewWeek] = useState(null);
   const [groceryViewWeek, setGroceryViewWeek] = useState(null);
   const [nutritionWeekOffset, setNutritionWeekOffset] = useState(0);
@@ -2008,6 +2176,15 @@ function App() {
 
   const def = data.activeProgram === "custom" ? buildCustomProgramDef(data.customProgramConfig) : PROGRAM_DEFS[data.activeProgram];
   const prog = data.programs[data.activeProgram];
+  // Cutting/Cruise/Hypertrophy share exercise progression via data.sharedExerciseState (see its
+  // definition in makeDefaultData for why); Custom's exercises are generated per-user and don't
+  // align with anything, so it keeps its own separate, per-program exerciseState as before.
+  const isSharedProgram = data.activeProgram !== "custom";
+  const effectiveExerciseState = isSharedProgram ? (data.sharedExerciseState || {}) : prog.exerciseState;
+  function saveExerciseState(newState) {
+    if (isSharedProgram) save(Object.assign({}, data, { sharedExerciseState: newState }));
+    else saveProgram({ exerciseState: newState });
+  }
   const saveProgram = useCallback(function (patch) {
     setData(function (cur) {
       const curProg = cur.programs[cur.activeProgram];
@@ -2062,19 +2239,25 @@ function App() {
   const allFoods = FOOD_DB.concat(data.customFoods || []);
   const weekOverride = prog.customMealOverrides[nutritionDisplayWeek];
   const hasWeekOverride = !!(weekOverride && Object.keys(weekOverride).length);
+  // "Rebalance my day" writes here — a MORE SPECIFIC layer than the week-level override, checked
+  // first, since it represents an intentional one-day adjustment (e.g. eating out tonight) on top of
+  // whatever the week's normal plan already is.
+  const dateOverride = prog.mealDateOverrides[nutritionSelectedDate];
+  const hasDateOverride = !!(dateOverride && Object.keys(dateOverride).length);
   const baseMeals = def.mealsByWeek[nutritionDisplayWeek].map(function (m) {
+    if (dateOverride && dateOverride[m.id]) return dateOverride[m.id];
     return (weekOverride && weekOverride[m.id]) ? weekOverride[m.id] : m;
   });
   // Training-time macro bias: only for the Custom program, only when a training time was entered in
   // the wizard, only on days that actually have a lifting session, and only when nothing on this
-  // week has been manually overridden (an override means the person already customized that meal
-  // themselves — the automatic bias shouldn't second-guess it). The intra-workout drink (if any) is
-  // excluded from this entirely — its macros were already reserved off the top at setup time, so it
-  // never participates in redistribution between the 4 solved meals.
+  // week (or this specific day) has been manually overridden (an override means the person already
+  // customized that meal themselves — the automatic bias shouldn't second-guess it). The intra-
+  // workout drink (if any) is excluded from this entirely — its macros were already reserved off the
+  // top at setup time, so it never participates in redistribution between the 4 solved meals.
   const solverMeals = baseMeals.filter(function (m) { return m.id !== "iw"; });
   const intraWorkoutMeal = baseMeals.filter(function (m) { return m.id === "iw"; })[0] || null;
   const viewedDayIsTrainingDay = !!(def.exercises && def.exercises[DAYS[nutritionDayIdx]] && def.exercises[DAYS[nutritionDayIdx]].exercises && def.exercises[DAYS[nutritionDayIdx]].exercises.length > 0);
-  const biasedSolverMeals = (data.activeProgram === "custom" && def.trainingTime && viewedDayIsTrainingDay && !hasWeekOverride)
+  const biasedSolverMeals = (data.activeProgram === "custom" && def.trainingTime && viewedDayIsTrainingDay && !hasWeekOverride && !hasDateOverride)
     ? applyTrainingTimeBias(solverMeals, allFoods, findNearestMealIndex(solverMeals.map(function (m) { return m.time; }), def.trainingTime))
     : solverMeals;
   const meals = intraWorkoutMeal ? biasedSolverMeals.concat([intraWorkoutMeal]) : biasedSolverMeals;
@@ -2092,7 +2275,16 @@ function App() {
   const groceryList = groceryHasOverride ? computeCustomGrocery(groceryFullOverride, allFoods) : def.groceryByWeek[groceryDisplayWeek];
   const nutritionHasOverride = !!(prog.customMealOverrides[nutritionDisplayWeek] && Object.keys(prog.customMealOverrides[nutritionDisplayWeek]).length);
 
-  function logSet(exerciseId, setIdx, reps, weight) {
+  // targetRepLow/targetRepHigh/isBodyweight/currentRepsTarget are optional — when provided:
+  //  - a set at or below 50% of targetRepLow drops the weight for this exercise's REMAINING sets
+  //    this week, keeping the same rep target (still aiming for the range, just at less weight).
+  //  - a set at or above targetRepHigh bumps the weight (same nextWeightIncrement used everywhere
+  //    else) and resets the target down to targetRepLow for the remaining sets — the standard
+  //    "hit the top, add weight, reset to the bottom" progression, just applied mid-session.
+  // Both skip bodyweight movements (no weight to adjust). This is a safety/usability mechanism, not
+  // a change to the exercise's normal persistent progression — next week still starts from wherever
+  // exerciseState says, unless completeWeek() also folds this in.
+  function logSet(exerciseId, setIdx, reps, weight, targetRepLow, targetRepHigh, isBodyweight, currentRepsTarget) {
     const week = prog.currentWeek;
     const weekLogs = Object.assign({}, prog.logs[week] || {});
     const exLogs = (weekLogs[exerciseId] || []).slice();
@@ -2100,7 +2292,23 @@ function App() {
     weekLogs[exerciseId] = exLogs;
     const newLogs = Object.assign({}, prog.logs);
     newLogs[week] = weekLogs;
-    saveProgram({ logs: newLogs });
+    const updates = { logs: newLogs };
+    if (!isBodyweight && reps != null && weight != null) {
+      let adjustment = null;
+      if (targetRepLow != null && reps <= targetRepLow * 0.5) {
+        adjustment = { weight: nextWeightDecrement(weight), repsTarget: currentRepsTarget };
+      } else if (targetRepHigh != null && reps >= targetRepHigh) {
+        adjustment = { weight: nextWeightIncrement(weight), repsTarget: targetRepLow };
+      }
+      if (adjustment) {
+        const adjustments = Object.assign({}, prog.sessionAdjustments);
+        const weekAdjustments = Object.assign({}, adjustments[week] || {});
+        weekAdjustments[exerciseId] = adjustment;
+        adjustments[week] = weekAdjustments;
+        updates.sessionAdjustments = adjustments;
+      }
+    }
+    saveProgram(updates);
   }
 
   function setExerciseDifficulty(exerciseId, rating) {
@@ -2115,20 +2323,33 @@ function App() {
   function completeWeek() {
     const week = prog.currentWeek;
     if (!window.confirm("Nice work — every workout this week is done! Apply progression and start Week " + (week + 1) + "? You can undo this once, immediately after, if needed.")) return false;
-    const snapshot = { currentWeek: prog.currentWeek, exerciseState: prog.exerciseState };
+    const snapshot = { currentWeek: prog.currentWeek, exerciseState: effectiveExerciseState };
     const weekLogs = prog.logs[week] || {};
     const weekSkipped = prog.skipped[week] || {};
     const weekDifficulty = prog.exerciseDifficulty[week] || {};
-    const newState = Object.assign({}, prog.exerciseState);
+    const newState = Object.assign({}, effectiveExerciseState);
+    const weekAdjustments = prog.sessionAdjustments[week] || {};
     allExercises(def.exercises).forEach(function (ex) {
       if (weekSkipped[ex.id]) return;
       const setsLogged = (weekLogs[ex.id] || []).filter(Boolean);
-      const cur = newState[ex.id] || { weight: ex.weight, repsTarget: ex.repLow, nameOverride: null };
+      const rawCur = newState[ex.id] || { weight: ex.weight, repsTarget: ex.repLow, nameOverride: null };
+      // If a within-session adjustment happened this week (undershoot drop or overshoot bump), next
+      // week's progression should build from that realistic weight/target, not the stale pre-
+      // adjustment one — otherwise the safety mechanism would just get silently undone the moment
+      // the week completes.
+      const cur = weekAdjustments[ex.id] != null ? Object.assign({}, rawCur, weekAdjustments[ex.id]) : rawCur;
       if (setsLogged.length === 0) return;
       const rating = weekDifficulty[ex.id];
-      if (!rating || rating === "hard") return; // no rating given, or rated too difficult — hold either way
+      if (!rating) return; // no rating given at all — no signal to act on, hold
       const range = effectiveRepRange(ex, cur);
       const maxReps = Math.max.apply(null, setsLogged.map(function (s) { return s.reps || 0; }));
+      if (rating === "hard") {
+        // Too difficult — weight still holds, but the rep target now reflects what was actually
+        // achieved (their best set that week) instead of freezing at whatever the old target was
+        // regardless of real performance. Clamped to the exercise's own rep range either way.
+        newState[ex.id] = Object.assign({}, cur, { repsTarget: Math.max(range.repLow, Math.min(maxReps, range.repHigh)) });
+        return;
+      }
       if (maxReps >= range.repHigh) {
         newState[ex.id] = Object.assign({}, cur, {
           weight: ex.bodyweight ? cur.weight : nextWeightIncrement(cur.weight),
@@ -2139,6 +2360,13 @@ function App() {
       }
     });
     const nextWeekAlreadyDeload = (week + 1) % 5 === 0 || (prog.extraDeloadWeeks || []).indexOf(week + 1) !== -1;
+    // The phase that just ended is the natural checkpoint to ask "has any muscle group earned more
+    // volume for the next phase?" — same timing as the deload-difficulty recommendation below, since
+    // both are phase-boundary judgments. Requires an explicit accept, same as every other
+    // consequential suggestion in this app; never applied silently.
+    const volumeIncreaseRecommendations = nextWeekAlreadyDeload
+      ? evaluateVolumeIncrease(allExercises(def.exercises), computePhaseWeeks(week, prog.extraDeloadWeeks), Object.assign({}, prog.logs, { [week]: weekLogs }), prog.exerciseDifficulty, prog.skipped, newState)
+      : [];
     const ratings = Object.keys(weekDifficulty).map(function (id) { return weekDifficulty[id]; });
     const totalRated = ratings.length;
     const hardCount = ratings.filter(function (r) { return r === "hard"; }).length;
@@ -2167,7 +2395,11 @@ function App() {
         };
       }
     }
-    saveProgram({ currentWeek: week + 1, exerciseState: newState, undoSnapshot: snapshot, deloadRecommendation: recommendation });
+    const newProgramPatch = { currentWeek: week + 1, undoSnapshot: snapshot, deloadRecommendation: recommendation, volumeIncreaseRecommendations: volumeIncreaseRecommendations };
+    if (!isSharedProgram) newProgramPatch.exerciseState = newState;
+    const newPrograms = Object.assign({}, data.programs, { [data.activeProgram]: Object.assign({}, prog, newProgramPatch) });
+    const newData = Object.assign({}, data, { programs: newPrograms }, isSharedProgram ? { sharedExerciseState: newState } : {});
+    save(newData);
     showToast("Week " + week + " complete — Week " + (week + 1) + " targets updated");
     return true;
   }
@@ -2177,7 +2409,7 @@ function App() {
     const weekLogs = prog.logs[prog.currentWeek] || {};
     const weekSkipped = prog.skipped[prog.currentWeek] || {};
     const weekDifficulty = prog.exerciseDifficulty[prog.currentWeek] || {};
-    if (!isDayFullyComplete(dayExercises, isDeloadWeek, weekLogs, weekSkipped, weekDifficulty)) return;
+    if (!isDayFullyComplete(dayExercises, isDeloadWeek, weekLogs, weekSkipped, weekDifficulty, effectiveExerciseState)) return;
     const idx = TRAINING_DAY_ORDER.indexOf(selectedDay);
     if (idx === -1) return;
     if (idx === TRAINING_DAY_ORDER.length - 1) {
@@ -2193,7 +2425,11 @@ function App() {
   function undoCompleteWeek() {
     if (!prog.undoSnapshot) return;
     const snap = prog.undoSnapshot;
-    saveProgram({ currentWeek: snap.currentWeek, exerciseState: snap.exerciseState, undoSnapshot: null });
+    const newProgramPatch = { currentWeek: snap.currentWeek, undoSnapshot: null };
+    if (!isSharedProgram) newProgramPatch.exerciseState = snap.exerciseState;
+    const newPrograms = Object.assign({}, data.programs, { [data.activeProgram]: Object.assign({}, prog, newProgramPatch) });
+    const newData = Object.assign({}, data, { programs: newPrograms }, isSharedProgram ? { sharedExerciseState: snap.exerciseState } : {});
+    save(newData);
     showToast("Undone — back to Week " + snap.currentWeek);
   }
 
@@ -2205,6 +2441,27 @@ function App() {
   }
   function dismissDeloadRecommendation() {
     saveProgram({ deloadRecommendation: null });
+  }
+  // Applies one accepted volume-increase recommendation as a setsOverride (persists across phases,
+  // same mechanism weight/reps already use) and removes it from the pending list, leaving any other
+  // pending recommendations from the same checkpoint untouched.
+  function acceptVolumeIncreaseRecommendation(exerciseId) {
+    const rec = (prog.volumeIncreaseRecommendations || []).filter(function (r) { return r.exerciseId === exerciseId; })[0];
+    if (!rec) return;
+    const newExerciseState = Object.assign({}, effectiveExerciseState);
+    const curExState = newExerciseState[exerciseId] || {};
+    newExerciseState[exerciseId] = Object.assign({}, curExState, { setsOverride: rec.currentSets + 1 });
+    const remaining = (prog.volumeIncreaseRecommendations || []).filter(function (r) { return r.exerciseId !== exerciseId; });
+    const newProgramPatch = { volumeIncreaseRecommendations: remaining };
+    if (!isSharedProgram) newProgramPatch.exerciseState = newExerciseState;
+    const newPrograms = Object.assign({}, data.programs, { [data.activeProgram]: Object.assign({}, prog, newProgramPatch) });
+    const newData = Object.assign({}, data, { programs: newPrograms }, isSharedProgram ? { sharedExerciseState: newExerciseState } : {});
+    save(newData);
+    showToast(rec.exerciseName + " now has " + (rec.currentSets + 1) + " sets going forward");
+  }
+  function dismissVolumeIncreaseRecommendation(exerciseId) {
+    const remaining = (prog.volumeIncreaseRecommendations || []).filter(function (r) { return r.exerciseId !== exerciseId; });
+    saveProgram({ volumeIncreaseRecommendations: remaining });
   }
 
   function resetAll() {
@@ -2488,6 +2745,34 @@ function App() {
     save(Object.assign({}, data, { customProgramConfig: Object.assign({}, config, { macros: newMacros, slots: newSlots, currentWeight: latestWeight }) }));
     showToast("Target updated to " + newMacros.cal + " cal — regenerate your meals from each meal card's Customize section to match.");
   }
+  // Lightweight settings edit — updates just the inputs that can change on their own (current
+  // weight, activity level, diet style) and recalculates macros the same way the original wizard
+  // did (computeCustomMacros, unchanged Mifflin-St Jeor math), without touching any logged history.
+  // Deliberately does not cover goal type, training days, or equipment — those are entangled with
+  // the actual exercise program structure, not just the macro math, so they still need a full reset.
+  function updateProgramSettings(newWeight, newActivity, newDietStyle) {
+    const config = data.customProgramConfig;
+    if (!config) return;
+    if (!config.gender || !config.heightCm) {
+      showToast("This program was set up before this feature existed — use \"Redo Custom program setup\" once to enable it.");
+      return;
+    }
+    const newMacros = computeCustomMacros(newWeight, newActivity, config.goal, config.gender, config.heightCm, config.age, newDietStyle);
+    const intraWorkoutMacros = config.intraWorkout || null;
+    const remaining = intraWorkoutMacros
+      ? { p: newMacros.p - intraWorkoutMacros.p, c: newMacros.c - intraWorkoutMacros.c, f: newMacros.f - intraWorkoutMacros.f }
+      : { p: newMacros.p, c: newMacros.c, f: newMacros.f };
+    const perMeal = { p: remaining.p / 4, c: remaining.c / 4, f: remaining.f / 4 };
+    const newSlots = config.slots.map(function (slot) {
+      return Object.assign({}, slot, { p: Math.round(perMeal.p), c: Math.round(perMeal.c), f: Math.round(perMeal.f) });
+    });
+    save(Object.assign({}, data, {
+      customProgramConfig: Object.assign({}, config, {
+        macros: newMacros, slots: newSlots, currentWeight: newWeight, activity: newActivity, dietStyle: newDietStyle,
+      }),
+    }));
+    showToast("Settings updated, target now " + newMacros.cal + " cal — regenerate your meals from each meal card's Customize section to match.");
+  }
 
   const groceryKey = "w" + groceryDisplayWeek;
   const groceryChecked = (prog.groceryLogs && prog.groceryLogs[groceryKey]) || {};
@@ -2514,7 +2799,7 @@ function App() {
   }
 
   function setSwap(exerciseId, name, weight, newRepRange) {
-    const cur = prog.exerciseState[exerciseId];
+    const cur = effectiveExerciseState[exerciseId];
     const next = Object.assign({}, cur, { nameOverride: name || null });
     if (weight !== null && weight !== "" && !isNaN(Number(weight))) next.weight = Number(weight);
     if (newRepRange) {
@@ -2522,16 +2807,16 @@ function App() {
       next.repHighOverride = newRepRange.repHigh;
       next.repsTarget = newRepRange.repLow;
     }
-    const newState = Object.assign({}, prog.exerciseState);
+    const newState = Object.assign({}, effectiveExerciseState);
     newState[exerciseId] = next;
-    saveProgram({ exerciseState: newState });
+    saveExerciseState(newState);
   }
 
   function clearSwap(exerciseId) {
-    const cur = prog.exerciseState[exerciseId];
-    const newState = Object.assign({}, prog.exerciseState);
+    const cur = effectiveExerciseState[exerciseId];
+    const newState = Object.assign({}, effectiveExerciseState);
     newState[exerciseId] = Object.assign({}, cur, { nameOverride: null });
-    saveProgram({ exerciseState: newState });
+    saveExerciseState(newState);
   }
 
   // "This week only" substitution — deliberately separate from setSwap/clearSwap above. Logged sets
@@ -2559,11 +2844,32 @@ function App() {
     saveProgram({ exerciseWeekOverrides: weekOverrides });
   }
 
+  // Resets ONE exercise's shared progression (weight/rep target/any swap) back to the program's
+  // own starting point — for when someone wants a fresh baseline on a movement rather than
+  // continuing wherever Cutting/Cruise/Hypertrophy last left it (they share this state; see
+  // sharedExerciseState's definition). Deliberately only clears the progression pointer, not any
+  // actual logged sets — those remain in each program's own history exactly as before.
+  function clearExerciseHistory(exerciseId) {
+    const newState = Object.assign({}, effectiveExerciseState);
+    delete newState[exerciseId];
+    saveExerciseState(newState);
+    showToast("Cleared — this exercise starts fresh from here");
+  }
+  // Corrects an exercise's muscle-group tag (for a mis-tagged built-in exercise, or one swapped in
+  // permanently that doesn't match the slot's default) without touching the exercise's own hardcoded
+  // definition — same override pattern as everything else in exerciseState. Feeds directly into the
+  // volume-increase evaluation's muscle-group grouping the next time it runs.
+  function setMuscleOverride(exerciseId, muscle) {
+    const cur = effectiveExerciseState[exerciseId] || {};
+    const newState = Object.assign({}, effectiveExerciseState);
+    newState[exerciseId] = Object.assign({}, cur, { muscleOverride: muscle });
+    saveExerciseState(newState);
+  }
   function updateExerciseNote(exerciseId, text) {
-    const cur = prog.exerciseState[exerciseId] || {};
-    const newState = Object.assign({}, prog.exerciseState);
+    const cur = effectiveExerciseState[exerciseId] || {};
+    const newState = Object.assign({}, effectiveExerciseState);
     newState[exerciseId] = Object.assign({}, cur, { notes: text });
-    saveProgram({ exerciseState: newState });
+    saveExerciseState(newState);
   }
 
   function createSuperset(day, exerciseIds) {
@@ -2651,7 +2957,7 @@ function App() {
   }
 
   function resetCustomSetup() {
-    if (!window.confirm("Start the Custom program setup over? This clears its current macros, meal plan, and exercise program (your other programs aren't affected).")) return;
+    if (!window.confirm("Start the Custom program setup over? This clears its current macros, meal plan, and exercise program — and ALL logged history for it (sets, weigh-ins, nutrition, everything). Your other programs aren't affected. For a small change like your current weight or activity level, use \"Edit Program Settings\" instead — it keeps your history.")) return;
     const newPrograms = Object.assign({}, data.programs, { custom: freshProgramState(EMPTY_CUSTOM_EXERCISES) });
     save(Object.assign({}, data, { customProgramConfig: null, programs: newPrograms }));
   }
@@ -2693,7 +2999,81 @@ function App() {
       showToast(result.error);
       return;
     }
+    const mealKey = "m" + (mealIdx + 1);
+    const weekOverride = prog.customMealOverrides[nutritionDisplayWeek];
+    const previousMeal = (weekOverride && weekOverride[mealKey]) || null; // null means "wasn't overridden" — undo should remove, not restore
     applySingleMealToWeek(nutritionDisplayWeek, mealIdx, result);
+    saveProgram({ mealRegenerateUndo: { week: nutritionDisplayWeek, mealId: mealKey, previousMeal: previousMeal } });
+  }
+  // One-shot undo for the meal regenerate above — mirrors undoCompleteWeek's one-time-only design.
+  // If the meal wasn't overridden before regenerating, undoing removes the override entirely
+  // (reverting to the base plan) rather than trying to restore a "previous" state that never existed.
+  function undoMealRegenerate() {
+    const snap = prog.mealRegenerateUndo;
+    if (!snap) return;
+    const newOverrides = Object.assign({}, prog.customMealOverrides);
+    const weekOverride = Object.assign({}, newOverrides[snap.week] || {});
+    if (snap.previousMeal) weekOverride[snap.mealId] = snap.previousMeal;
+    else delete weekOverride[snap.mealId];
+    newOverrides[snap.week] = weekOverride;
+    saveProgram({ customMealOverrides: newOverrides, mealRegenerateUndo: null });
+    showToast("Undid last regenerate for that meal");
+  }
+
+  // "Rebalance my day": boosts one meal by a multiplier (e.g. 1.5x its current size), taking the
+  // surplus from the OTHER meals today, proportional to their own size — the inverse of the
+  // solver-failure redistribution math (pulling FROM survivors instead of giving TO one that
+  // failed). Applies to the actual current calendar day only; the resulting override then persists
+  // as real history for that date even after today becomes yesterday, the same way nutrition logs
+  // already do — only the action itself is restricted to today, not its ongoing validity once made.
+  // All-or-nothing: if any affected meal can't be re-solved at its new target, nothing is applied.
+  function rebalanceDayAroundMeal(mealIdx, multiplier) {
+    const solverMealsOnly = meals.filter(function (m2) { return m2.id !== "iw"; });
+    const boosted = solverMealsOnly[mealIdx];
+    if (!boosted) return;
+    const surplus = { p: boosted.p * (multiplier - 1), c: boosted.c * (multiplier - 1), f: boosted.f * (multiplier - 1) };
+    const otherIdx = [0, 1, 2, 3].filter(function (i) { return i !== mealIdx; });
+    const totalP = otherIdx.reduce(function (s, i) { return s + solverMealsOnly[i].p; }, 0);
+    const totalC = otherIdx.reduce(function (s, i) { return s + solverMealsOnly[i].c; }, 0);
+    const totalF = otherIdx.reduce(function (s, i) { return s + solverMealsOnly[i].f; }, 0);
+    const newTargets = {};
+    newTargets[mealIdx] = { p: boosted.p + surplus.p, c: boosted.c + surplus.c, f: boosted.f + surplus.f };
+    otherIdx.forEach(function (i) {
+      const shareP = totalP > 0 ? solverMealsOnly[i].p / totalP : 1 / otherIdx.length;
+      const shareC = totalC > 0 ? solverMealsOnly[i].c / totalC : 1 / otherIdx.length;
+      const shareF = totalF > 0 ? solverMealsOnly[i].f / totalF : 1 / otherIdx.length;
+      newTargets[i] = {
+        p: Math.max(0, solverMealsOnly[i].p - surplus.p * shareP),
+        c: Math.max(0, solverMealsOnly[i].c - surplus.c * shareC),
+        f: Math.max(0, solverMealsOnly[i].f - surplus.f * shareF),
+      };
+    });
+    const idMap = ["m1", "m2", "m3", "m4"];
+    const nameMap = { m1: "Meal 1", m2: "Meal 2", m3: "Meal 3", m4: "Meal 4" };
+    const results = [];
+    let failed = false;
+    [0, 1, 2, 3].forEach(function (i) {
+      const slot = Object.assign({}, def.slots[i], newTargets[i]);
+      const r = generateSingleMealResult(data.likedFoodsByMeal, allFoods, slot, i);
+      if (r.error) failed = true;
+      results[i] = r;
+    });
+    if (failed) {
+      showToast("Couldn't rebalance — one of today's meals can't hit its new target with your liked foods.");
+      return;
+    }
+    const newDateOverrides = Object.assign({}, prog.mealDateOverrides);
+    const todayOverride = Object.assign({}, newDateOverrides[nutritionSelectedDate] || {});
+    [0, 1, 2, 3].forEach(function (i) {
+      const id = idMap[i];
+      const r = results[i];
+      const time = (def.slots[i] && def.slots[i].time) || nameMap[id];
+      const foodStr = r.items.map(function (it) { return formatMealItem(it, allFoods); }).join(" + ");
+      todayOverride[id] = { id: id, time: time, name: nameMap[id], food: foodStr, cal: Math.round(r.cal), p: Math.round(r.p), c: Math.round(r.c), f: Math.round(r.f), items: r.items };
+    });
+    newDateOverrides[nutritionSelectedDate] = todayOverride;
+    saveProgram({ mealDateOverrides: newDateOverrides });
+    showToast("Rebalanced today's meals around " + nameMap[idMap[mealIdx]] + ".");
   }
 
   function revertWeekOverride(week) {
@@ -2822,15 +3202,19 @@ function App() {
       : h(React.Fragment, null,
           h("main", null,
             tab === "workouts" && h(WorkoutsTab, {
-              selectedDay: selectedDay, setSelectedDay: setSelectedDay, data: prog, exercises: def.exercises, isDeloadWeek: isDeloadWeek,
+              selectedDay: selectedDay, setSelectedDay: setSelectedDay, data: Object.assign({}, prog, { exerciseState: effectiveExerciseState }), exercises: def.exercises, isDeloadWeek: isDeloadWeek,
               expanded: expanded, setExpanded: setExpanded, logSet: logSet, completeDay: completeDay,
               toggleSkip: toggleSkip, setSwap: setSwap, clearSwap: clearSwap, setWeekSwap: setWeekSwap, clearWeekSwap: clearWeekSwap,
+              isSharedProgram: isSharedProgram, clearExerciseHistory: clearExerciseHistory, setMuscleOverride: setMuscleOverride,
               undoCompleteWeek: undoCompleteWeek, updateExerciseNote: updateExerciseNote,
               setExerciseDifficulty: setExerciseDifficulty, color: def.color,
               targetHR: (data.customProgramConfig && data.customProgramConfig.age) ? Math.round((220 - data.customProgramConfig.age) * 0.65) : null,
               supersetGroups: prog.supersetGroups, createSuperset: createSuperset, removeSuperset: removeSuperset,
               deloadRecommendation: prog.deloadRecommendation, acceptDeloadRecommendation: acceptDeloadRecommendation,
               dismissDeloadRecommendation: dismissDeloadRecommendation, readinessSignal: readinessSignal,
+              volumeIncreaseRecommendations: prog.volumeIncreaseRecommendations,
+              acceptVolumeIncreaseRecommendation: acceptVolumeIncreaseRecommendation,
+              dismissVolumeIncreaseRecommendation: dismissVolumeIncreaseRecommendation,
               restTimerSettings: data.restTimerSettings, updateRestTimerSettings: updateRestTimerSettings,
               startRestTimer: startRestTimer, skipRestTimer: skipRestTimer,
             }),
@@ -2847,6 +3231,8 @@ function App() {
               isCustomProgram: data.activeProgram === "custom", swapIngredient: swapMealIngredient, likedFoods: data.likedFoodsByMeal,
               toggleLiked: toggleLikedFood, copyLikedToEmptyMeals: copyLikedFoodsToEmptyMeals,
               regenerateAndApplyMeal: regenerateAndApplyMeal, revertWeekOverride: revertWeekOverride, nutritionDisplayWeek: nutritionDisplayWeek,
+              undoMealRegenerate: undoMealRegenerate, mealRegenerateUndo: prog.mealRegenerateUndo,
+              rebalanceDayAroundMeal: rebalanceDayAroundMeal,
               goToMilestones: function () { setTab("milestones"); },
               adaptiveTDEE: adaptiveTDEE, plannedCalories: plannedCalories, updateMacrosFromAdaptiveTDEE: updateMacrosFromAdaptiveTDEE,
               supplementList: data.supplementList, supplementLogsToday: prog.supplementLogs[nutritionSelectedDate] || {},
@@ -2877,7 +3263,19 @@ function App() {
               rotationWeek: rotationWeek, displayWeek: groceryDisplayWeek, viewWeek: groceryViewWeek, setViewWeek: setGroceryViewWeek,
               hasOverride: groceryHasOverride,
             }),
-            def.needsSetup === false && data.activeProgram === "custom" && h("button", { className: "reset-list-btn", style: { margin: "16px" }, onClick: resetCustomSetup }, "Redo Custom program setup")
+            def.needsSetup === false && data.activeProgram === "custom" && h("div", { style: { margin: "16px" } },
+              h("div", { style: { display: "flex", gap: 8, flexWrap: "wrap" } },
+                h("button", { className: "ex-action-btn", onClick: function () { setShowEditProgramSettings(!showEditProgramSettings); } }, "Edit Program Settings"),
+                h("button", { className: "reset-list-btn", onClick: resetCustomSetup }, "Redo Custom program setup")
+              ),
+              showEditProgramSettings && h(EditProgramSettingsForm, {
+                config: data.customProgramConfig,
+                onSave: function (newWeight, newActivity, newDietStyle) {
+                  updateProgramSettings(newWeight, newActivity, newDietStyle);
+                  setShowEditProgramSettings(false);
+                },
+              })
+            )
           ),
           h("nav", { className: "navbar" },
             h(TabButton, { Icon: Dumbbell, label: "Workouts", active: tab === "workouts", onClick: function () { setTab("workouts"); } }),
@@ -2904,11 +3302,13 @@ function allSetsHaveReps(logsForEx, setsToday) {
 function hasAnyLoggedSet(logsForEx) {
   return logsForEx.some(function (s) { return s && s.reps != null && s.reps !== ""; });
 }
-function isDayFullyComplete(dayExercises, isDeloadWeek, weekLogs, weekSkipped, weekDifficulty) {
+function isDayFullyComplete(dayExercises, isDeloadWeek, weekLogs, weekSkipped, weekDifficulty, exerciseState) {
   if (dayExercises.length === 0) return true; // rest day — nothing to complete
   return dayExercises.every(function (ex) {
     if (weekSkipped[ex.id]) return true;
-    const setsToday = isDeloadWeek ? Math.ceil(ex.sets / 2) : ex.sets;
+    const exState = (exerciseState && exerciseState[ex.id]) || {};
+    const sets = effectiveSets(ex, exState);
+    const setsToday = isDeloadWeek ? Math.ceil(sets / 2) : sets;
     const logsForEx = weekLogs[ex.id] || [];
     return allSetsHaveReps(logsForEx, setsToday) && !!weekDifficulty[ex.id];
   });
@@ -2917,6 +3317,7 @@ function isDayFullyComplete(dayExercises, isDeloadWeek, weekLogs, weekSkipped, w
 function WorkoutsTab(props) {
   const [swapOpen, setSwapOpen] = useState({});
   const [historyOpen, setHistoryOpen] = useState({});
+  const [muscleEditOpen, setMuscleEditOpen] = useState({});
   const [groupingMode, setGroupingMode] = useState(false);
   const [pendingSelection, setPendingSelection] = useState([]);
   const day = props.exercises[props.selectedDay];
@@ -2945,7 +3346,8 @@ function WorkoutsTab(props) {
   // Precompute status for every exercise in this day: completed (done or skipped) vs. in-progress
   // (has some logged sets but not yet rated/completed) vs. not started.
   const statuses = effectiveExercises.map(function (ex) {
-    const setsToday = props.isDeloadWeek ? Math.ceil(ex.sets / 2) : ex.sets;
+    const exState = props.data.exerciseState[ex.id] || {};
+    const setsToday = props.isDeloadWeek ? Math.ceil(effectiveSets(ex, exState) / 2) : effectiveSets(ex, exState);
     const logsForEx = weekLogs[ex.id] || [];
     const isSkipped = !!weekSkipped[ex.id];
     const rated = !!weekDifficulty[ex.id];
@@ -2959,9 +3361,17 @@ function WorkoutsTab(props) {
   // grouping is purely a visual/organizational layer on top of this, nothing about logging,
   // history, notes, or swapping changes based on whether an exercise is in a superset.
   function renderCard(ex, idx) {
-    const state = props.data.exerciseState[ex.id] || { weight: ex.weight, repsTarget: ex.repLow, nameOverride: null };
+    const rawState = props.data.exerciseState[ex.id] || { weight: ex.weight, repsTarget: ex.repLow, nameOverride: null };
+    // A within-session adjustment (undershoot drop or overshoot bump, triggered by a big rep miss or
+    // a big rep beat) overrides the displayed/logged weight (and, for an overshoot, the rep target
+    // too) for this exercise's remaining sets this week, without touching the persistent
+    // exerciseState itself — that only changes via the normal week-completion progression logic.
+    const weekAdjustments = (props.data.sessionAdjustments && props.data.sessionAdjustments[props.data.currentWeek]) || {};
+    const sessionAdjustment = weekAdjustments[ex.id];
+    const state = sessionAdjustment ? Object.assign({}, rawState, sessionAdjustment) : rawState;
+    const sessionAdjustmentDirection = !sessionAdjustment ? null : (sessionAdjustment.weight > rawState.weight ? "up" : "down");
     const range = effectiveRepRange(ex, state);
-    const setsToday = props.isDeloadWeek ? Math.ceil(ex.sets / 2) : ex.sets;
+    const setsToday = props.isDeloadWeek ? Math.ceil(effectiveSets(ex, rawState) / 2) : effectiveSets(ex, rawState);
     const logsForEx = weekLogs[ex.id] || [];
     const loggedCount = logsForEx.filter(Boolean).length;
     const isSkipped = !!weekSkipped[ex.id];
@@ -3013,6 +3423,8 @@ function WorkoutsTab(props) {
               ? "Skipped this week"
               : (ex.bodyweight ? "Bodyweight" : state.weight + "lb") + " · " + setsToday + "×" +
                 (ex.isFailure ? "to failure (target " + state.repsTarget + ", range " + range.repLow + "–" + range.repHigh + ")" : state.repsTarget + " (range " + range.repLow + "–" + range.repHigh + ")"),
+            sessionAdjustmentDirection === "down" && h("span", { style: { color: "#f0b429" } }, " · reduced this session after a big rep miss"),
+            sessionAdjustmentDirection === "up" && h("span", { style: { color: "#4eba6f" } }, " · increased this session after beating the top of your range"),
             loggedCount > 0 && !isSkipped && h("span", { className: "done" }, " · " + loggedCount + "/" + setsToday + " logged"),
             rating && h("span", { className: "rated-tag" + (rating === "hard" ? " hard" : "") },
               " · Rated: " + (rating === "easy" ? "Easy" : rating === "right" ? "Just Right" : "Too Difficult")),
@@ -3035,6 +3447,22 @@ function WorkoutsTab(props) {
             className: "ex-action-btn",
             onClick: function () { props.clearWeekSwap(ex.originalExercise.id); },
           }, "Revert to original now"),
+          props.isSharedProgram && !ex.isWeekSubstitute && h("button", {
+            className: "ex-action-btn",
+            onClick: function () {
+              if (window.confirm("Clear saved progress for \"" + displayName + "\"? This resets its weight and rep target back to the program's starting point — shared across Cutting/Cruise/Hypertrophy, so this affects all three. Past logged sets stay in your history untouched; this only resets where you're picking up from.")) {
+                props.clearExerciseHistory(ex.id);
+              }
+            },
+          }, "Clear History"),
+          h("button", {
+            className: "ex-action-btn",
+            onClick: function () {
+              const next = Object.assign({}, muscleEditOpen);
+              next[ex.id] = !next[ex.id];
+              setMuscleEditOpen(next);
+            },
+          }, "Muscle: " + effectiveMuscle(ex, state).replace("_", "/")),
           h("button", {
             className: "ex-action-btn", onClick: function () {
               const next = Object.assign({}, historyOpen);
@@ -3047,6 +3475,16 @@ function WorkoutsTab(props) {
             style: { textAlign: "center", textDecoration: "none", display: "block" },
             href: "https://www.youtube.com/results?search_query=" + encodeURIComponent(ex.name + " exercise form"),
           }, "Watch Demo")
+        ),
+        muscleEditOpen[ex.id] && h("div", { style: { marginBottom: 12 } },
+          h("p", { style: { fontSize: "11px", color: "#737373", margin: "0 0 6px" } },
+            "Correct this if it's mis-tagged, or if you've swapped in a different exercise here — this feeds the deload volume-increase check."),
+          h("select", {
+            className: "search-input", value: effectiveMuscle(ex, state),
+            onChange: function (e) { props.setMuscleOverride(ex.id, e.target.value); setMuscleEditOpen(Object.assign({}, muscleEditOpen, { [ex.id]: false })); },
+          },
+            MUSCLE_GROUPS.map(function (m) { return h("option", { key: m, value: m }, m.replace("_", "/")); })
+          )
         ),
         isHistoryOpen && h(ExerciseHistory, { exercise: ex, logs: props.data.logs, currentWeek: props.data.currentWeek, ratings: props.data.exerciseDifficulty, color: props.color }),
         h(ExerciseNotes, { exerciseId: ex.id, notes: state.notes || "", onSave: props.updateExerciseNote }),
@@ -3071,7 +3509,7 @@ function WorkoutsTab(props) {
                 const isLastSet = i === setsToday - 1;
                 return h(SetLogger, {
                   key: props.data.currentWeek + "-" + i, setIdx: i, exercise: ex, state: state,
-                  existing: logsForEx[i], onLog: function (reps, weight) { props.logSet(ex.id, i, reps, weight); },
+                  existing: logsForEx[i], onLog: function (reps, weight) { props.logSet(ex.id, i, reps, weight, range.repLow, range.repHigh, ex.bodyweight, state.repsTarget); },
                   // On the final set there's nothing left to rest for within this exercise — clear any
                   // countdown still running from the previous set rather than starting a new one.
                   onSetCommitted: function () {
@@ -3140,6 +3578,16 @@ function WorkoutsTab(props) {
         h("button", { className: "ex-action-btn", onClick: props.dismissDeloadRecommendation }, "No, train normally")
       )
     ),
+    (props.volumeIncreaseRecommendations || []).map(function (rec) {
+      return h("div", { key: rec.exerciseId, className: "preview-banner", style: { marginBottom: 16 } },
+        h("p", { style: { margin: "0 0 8px" } },
+          "Last phase, " + rec.exerciseName + " (" + rec.muscle.replace("_", "/") + ") consistently exceeded its rep range and came back easy or just right most weeks — add a set for the next phase?"),
+        h("div", { style: { display: "flex", gap: 8 } },
+          h("button", { className: "swap-save-btn", style: { flex: 1 }, onClick: function () { props.acceptVolumeIncreaseRecommendation(rec.exerciseId); } }, "Yes, add a set"),
+          h("button", { className: "ex-action-btn", onClick: function () { props.dismissVolumeIncreaseRecommendation(rec.exerciseId); } }, "Not yet")
+        )
+      );
+    }),
     h("div", { className: "day-tabs" },
       DAYS.map(function (d) {
         return h("button", {
@@ -3219,7 +3667,7 @@ function WorkoutsTab(props) {
       const weekLogs = props.data.logs[props.data.currentWeek] || {};
       const weekSkipped = props.data.skipped[props.data.currentWeek] || {};
       const weekDifficulty = props.data.exerciseDifficulty[props.data.currentWeek] || {};
-      const dayComplete = isDayFullyComplete(effectiveExercises, props.isDeloadWeek, weekLogs, weekSkipped, weekDifficulty);
+      const dayComplete = isDayFullyComplete(effectiveExercises, props.isDeloadWeek, weekLogs, weekSkipped, weekDifficulty, props.data.exerciseState);
       const trainingIdx = TRAINING_DAY_ORDER.indexOf(props.selectedDay);
       const isLastTrainingDay = trainingIdx === TRAINING_DAY_ORDER.length - 1;
       if (!dayComplete) {
@@ -3242,6 +3690,51 @@ function WorkoutsTab(props) {
   );
 }
 
+// Lightweight settings editor — current weight, activity level, and diet style only. Deliberately
+// does not cover goal type, training days, or equipment, since those are entangled with the actual
+// exercise program structure, not just the macro math; those still need a full "Redo setup."
+function EditProgramSettingsForm(props) {
+  const config = props.config;
+  const [weight, setWeight] = useState(String(config.currentWeight));
+  const [activity, setActivity] = useState(config.activity);
+  const [dietStyle, setDietStyle] = useState(config.dietStyle || "standard");
+  return h("div", { style: { marginTop: 8 } },
+    h("div", { className: "food-cat-title" }, "Current Weight (lb)"),
+    h("input", {
+      type: "number", inputMode: "decimal", className: "search-input", value: weight,
+      onChange: function (e) { setWeight(e.target.value); },
+    }),
+    h("div", { className: "food-cat-title" }, "Activity Level"),
+    h("select", {
+      className: "search-input", value: activity,
+      onChange: function (e) { setActivity(e.target.value); },
+    },
+      h("option", { value: "sedentary" }, "Sedentary"),
+      h("option", { value: "light" }, "Light"),
+      h("option", { value: "moderate" }, "Moderate"),
+      h("option", { value: "active" }, "Active")
+    ),
+    h("div", { className: "food-cat-title" }, "Diet Style"),
+    h("select", {
+      className: "search-input", value: dietStyle,
+      onChange: function (e) { setDietStyle(e.target.value); },
+    },
+      h("option", { value: "standard" }, "Standard"),
+      h("option", { value: "keto" }, "Keto"),
+      h("option", { value: "lowfat" }, "Low-fat")
+    ),
+    h("p", { style: { fontSize: "11px", color: "#737373", margin: "8px 0" } },
+      "Recalculates your target the same way the original setup did — nothing logged is touched. You'll still need to regenerate your meals afterward to match the new numbers."),
+    h("button", {
+      className: "swap-save-btn", style: { width: "100%" },
+      onClick: function () {
+        const numWeight = Number(weight);
+        if (!numWeight || numWeight <= 0) return;
+        props.onSave(numWeight, activity, dietStyle);
+      },
+    }, "Save Settings")
+  );
+}
 function SwapForm(props) {
   const [name, setName] = useState(props.current.nameOverride || "");
   const [weight, setWeight] = useState("");
@@ -3733,7 +4226,7 @@ function MealSwapControl(props) {
   // Liked foods stay quick to reach at the top, but the rest of the database is right there too —
   // picking anything, liked or not, swaps immediately. No more needing to go "like" a food first in
   // a separate step before it's even selectable here.
-  const allInCat = openRole ? props.allFoods.filter(function (f) { return f.cat === openRole; }) : [];
+  const allInCat = openRole ? props.allFoods.filter(function (f) { return f.cat === openRole; }).sort(function (a, b) { return a.name.localeCompare(b.name); }) : [];
   const likedInCat = allInCat.filter(function (f) { return props.likedFoods.indexOf(f.name) !== -1; });
   const otherInCat = allInCat.filter(function (f) { return props.likedFoods.indexOf(f.name) === -1; });
   return h("div", { style: { marginTop: 10 } },
@@ -3943,6 +4436,8 @@ function MealCard(props) {
     { key: "fat", label: "Fats (pick at least 1)" }, { key: "veg", label: "Vegetables (optional)" },
   ];
   const likedForMeal = props.likedFoodsForMeal || [];
+  const [foodFilter, setFoodFilter] = useState("");
+  const [showRebalance, setShowRebalance] = useState(false);
   const customizeExpanded = !!props.customizeExpanded;
 
   return h("div", { className: "meal-card" + (status && status !== "skip" ? " done" : "") + (props.disabled ? " preview-disabled" : "") },
@@ -3992,11 +4487,20 @@ function MealCard(props) {
           customizeExpanded ? h(ChevronUp, { size: 14 }) : h(ChevronDown, { size: 14 })
         ),
         customizeExpanded && h("div", { style: { marginTop: 8 } },
+          h("input", {
+            type: "text", className: "search-input", placeholder: "Search foods...",
+            value: foodFilter, onChange: function (e) { setFoodFilter(e.target.value); },
+            style: { marginBottom: 8 },
+          }),
           MEAL_CARD_FOOD_CATS.map(function (cat) {
+            const filtered = props.allFoods.filter(function (f) {
+              return f.cat === cat.key && f.name.toLowerCase().indexOf(foodFilter.toLowerCase()) !== -1;
+            }).sort(function (a, b) { return a.name.localeCompare(b.name); });
+            if (foodFilter && filtered.length === 0) return null; // hide a category with no matches while searching
             return h("div", { key: cat.key },
               h("div", { className: "food-cat-title" }, cat.label),
               h("div", { className: "food-chip-grid" },
-                props.allFoods.filter(function (f) { return f.cat === cat.key; }).map(function (f) {
+                filtered.map(function (f) {
                   const liked = likedForMeal.indexOf(f.name) !== -1;
                   const isCustom = (props.customFoods || []).some(function (c) { return c.name === f.name; });
                   return h("button", {
@@ -4015,7 +4519,35 @@ function MealCard(props) {
             h("button", {
               className: "generate-btn", style: { marginTop: 0, flex: "0 0 auto" },
               onClick: function () { props.onRegenerate(); },
-            }, "Regenerate This Meal")
+            }, "Regenerate This Meal"),
+            props.canUndoRegenerate && h("button", {
+              className: "undo-btn", style: { flex: "0 0 auto" },
+              onClick: function () { props.onUndoRegenerate(); },
+            }, "Undo last regenerate")
+          )
+        )
+      ),
+      // Rebalance my day: boosts THIS meal for today only (e.g. eating out tonight), shrinking the
+      // other 3 meals today to compensate, proportional to their own size. Only available on the
+      // actual current day — not a future preview, not a past day being looked back on.
+      props.canRebalance && h("div", { style: { marginTop: 8 } },
+        h("button", {
+          onClick: function () { setShowRebalance(!showRebalance); },
+          style: { display: "flex", width: "100%", justifyContent: "space-between", alignItems: "center", background: "none", border: "none", padding: "4px 0", color: "#737373", cursor: "pointer", fontSize: 12 },
+        },
+          h("span", null, "Rebalance my day around this meal"),
+          showRebalance ? h(ChevronUp, { size: 14 }) : h(ChevronDown, { size: 14 })
+        ),
+        showRebalance && h("div", { style: { marginTop: 8 } },
+          h("p", { style: { fontSize: "11px", color: "#737373", margin: "0 0 8px" } },
+            "Make this meal bigger today, taking the difference from your other 3 meals today, proportional to their size. Just for today — tomorrow's plan is unaffected."),
+          h("div", { style: { display: "flex", gap: 8, flexWrap: "wrap" } },
+            [1.25, 1.5, 1.75, 2].map(function (mult) {
+              return h("button", {
+                key: mult, className: "ex-action-btn",
+                onClick: function () { props.onRebalance(mult); setShowRebalance(false); },
+              }, mult + "x");
+            })
           )
         )
       )
@@ -4130,17 +4662,16 @@ function NutritionTab(props) {
         props.uiPrefs.customFoodsExpanded ? h(ChevronUp, { size: 16 }) : h(ChevronDown, { size: 16 })
       ),
       props.uiPrefs.customFoodsExpanded && h("div", { style: { marginTop: 8 } },
-        props.customFoods.length > 0 && h("div", { className: "search-results", style: { marginBottom: 12 } },
+        props.customFoods.length > 0 ? h("div", { className: "search-results", style: { marginBottom: 12 } },
           props.customFoods.map(function (f) {
             return h("div", { key: f.name, className: "search-result-row", style: { cursor: "default" } },
               h("span", null, f.name + " (" + f.cat + ")"),
               h("button", { className: "logged-food-remove", onClick: function () { props.removeCustomFood(f.name); } }, "✕")
             );
           })
-        ),
-        h("p", { style: { fontSize: "11px", color: "#737373", margin: "0 0 8px" } },
-          "Anything scanned or logged below is saved here permanently and shows up as an option in every meal's Customize section."),
-        h(BarcodeLogger, { logFood: function () {}, addCustomFood: props.addCustomFood, allFoods: props.allFoods })
+        ) : null,
+        h("p", { style: { fontSize: "11px", color: "#737373", margin: 0 } },
+          "Scan or log a food below in your daily food log, and it's saved here permanently — no need to add it twice.")
       )
     ),
 
@@ -4214,6 +4745,10 @@ function NutritionTab(props) {
           customizeExpanded: !!expandedMeals[m.id],
           onToggleCustomize: function () { props.updateUiPrefs({ foodPlanExpandedMeals: Object.assign({}, expandedMeals, { [m.id]: !expandedMeals[m.id] }) }); },
           onRegenerate: function () { props.regenerateAndApplyMeal(idx); },
+          canUndoRegenerate: !!(props.mealRegenerateUndo && props.mealRegenerateUndo.week === props.nutritionDisplayWeek && props.mealRegenerateUndo.mealId === m.id),
+          onUndoRegenerate: props.undoMealRegenerate,
+          canRebalance: props.isCustomProgram && !isFutureWeek && !isFutureDay && props.isToday && m.id !== "iw",
+          onRebalance: function (multiplier) { props.rebalanceDayAroundMeal(idx, multiplier); },
         });
       })
     ),
@@ -4629,6 +5164,7 @@ function CustomSetupWizard(props) {
   const [equipmentAvailable, setEquipmentAvailable] = useState(["bodyweight"]);
   const [likedFoodsByMealCustom, setLikedFoodsByMealCustom] = useState({ m1: [], m2: [], m3: [], m4: [] });
   const [expandedMeals, setExpandedMeals] = useState({}); // absent/false = collapsed; each meal's food section starts closed
+  const [foodFilters, setFoodFilters] = useState({}); // per-meal search text, keyed by mealKey
   const [plan, setPlan] = useState(null);
   const [computed, setComputed] = useState(null);
 
@@ -4898,11 +5434,21 @@ function CustomSetupWizard(props) {
           ),
           isOpen && h(React.Fragment, null,
             h("div", { style: { marginTop: 8 } },
+              h("input", {
+                type: "text", className: "search-input", placeholder: "Search foods...",
+                value: foodFilters[mealKey] || "", onChange: function (e) { setFoodFilters(Object.assign({}, foodFilters, { [mealKey]: e.target.value })); },
+                style: { marginBottom: 8 },
+              }),
               FOOD_CATS.map(function (cat) {
+                const query = (foodFilters[mealKey] || "").toLowerCase();
+                const filtered = props.allFoods.filter(function (f) {
+                  return f.cat === cat.key && f.name.toLowerCase().indexOf(query) !== -1;
+                }).sort(function (a, b) { return a.name.localeCompare(b.name); });
+                if (query && filtered.length === 0) return null;
                 return h("div", { key: cat.key },
                   h("div", { className: "food-cat-title" }, cat.label),
                   h("div", { className: "food-chip-grid" },
-                    props.allFoods.filter(function (f) { return f.cat === cat.key; }).map(function (f) {
+                    filtered.map(function (f) {
                       const liked = likedForMeal.indexOf(f.name) !== -1;
                       return h("button", { key: f.name, className: "food-chip" + (liked ? " liked" : ""), onClick: function () { toggleLiked(mealKey, f.name); } }, f.name);
                     })
