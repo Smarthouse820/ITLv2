@@ -142,7 +142,7 @@
   .exercise-notes-input { width: 100%; background: #171717; border: 1px solid #262626; border-radius: 8px;
     color: #f5f5f5; font-size: 13px; padding: 8px 10px; font-family: inherit; resize: vertical; }
   .exercise-notes-input::placeholder { color: #525252; }
-  .diff-row { display: flex; gap: 6px; }
+  .diff-row { display: flex; gap: 6px; flex-wrap: wrap; }
   .diff-btn { flex: 1; font-size: 12px; padding: 6px 0; border-radius: 6px; border: 1px solid #262626;
     background: #171717; color: #737373; cursor: pointer; }
   .diff-btn.easy { background: #4eba6f; border-color: #3a9a57; color: #0a0a0a; }
@@ -278,45 +278,45 @@ function Sparkles(p) { return h(Icon, p,
 // ---------- Program data ----------
 const EXERCISES_CUTTING = {
   Monday: { label: "Upper", cardio: "25–30 min cardio", exercises: [
-    { id: "mon1", name: "Incline Dumbbell Press", weight: 95, sets: 3, repLow: 9, repHigh: 12, muscle: "chest" },
-    { id: "mon2", name: "Cable Flexion Row", weight: 212, sets: 3, repLow: 14, repHigh: 17, muscle: "back" },
-    { id: "mon3", name: "Prime Plate Loaded Incline Press", weight: 280, sets: 3, repLow: 8, repHigh: 11, muscle: "chest" },
-    { id: "mon4", name: "Hammer Strength Underhand High Pulldown", weight: 80, sets: 3, repLow: 13, repHigh: 16, muscle: "back" },
-    { id: "mon5", name: "Leaning Cable Lateral Raise", weight: 16, sets: 4, repLow: 13, repHigh: 16, muscle: "shoulders" },
-    { id: "mon6", name: "Bayesian Cable Curl", weight: 20, sets: 4, repLow: 12, repHigh: 15, muscle: "biceps" },
-    { id: "mon7", name: "EZ Bar Skullcrusher", weight: 60, sets: 3, repLow: 15, repHigh: 18, muscle: "triceps" },
+    { id: "mon1", name: "Incline Dumbbell Press", weight: 95, sets: 3, repLow: 10, repHigh: 15, muscle: "chest" },
+    { id: "mon2", name: "Cable Flexion Row", weight: 212, sets: 3, repLow: 10, repHigh: 15, muscle: "back" },
+    { id: "mon3", name: "Prime Plate Loaded Incline Press", weight: 280, sets: 3, repLow: 10, repHigh: 15, muscle: "chest" },
+    { id: "mon4", name: "Hammer Strength Underhand High Pulldown", weight: 80, sets: 3, repLow: 10, repHigh: 15, muscle: "back" },
+    { id: "mon5", name: "Leaning Cable Lateral Raise", weight: 16, sets: 4, repLow: 10, repHigh: 15, muscle: "shoulders" },
+    { id: "mon6", name: "Bayesian Cable Curl", weight: 20, sets: 4, repLow: 10, repHigh: 15, muscle: "biceps" },
+    { id: "mon7", name: "EZ Bar Skullcrusher", weight: 60, sets: 3, repLow: 10, repHigh: 15, muscle: "triceps" },
   ]},
   Tuesday: { label: "Lower", cardio: "25–30 min cardio", exercises: [
-    { id: "tue1", name: "Leg Press", weight: 488, sets: 3, repLow: 15, repHigh: 18, muscle: "quads" },
-    { id: "tue2", name: "Pendulum Squat", weight: 45, sets: 3, repLow: 12, repHigh: 15, muscle: "quads" },
-    { id: "tue3", name: "Hip Thruster", weight: 105, sets: 3, repLow: 13, repHigh: 16, muscle: "hamstrings_glutes" },
-    { id: "tue4", name: "Leg Extension", weight: 140, sets: 3, repLow: 13, repHigh: 16, muscle: "quads" },
-    { id: "tue5", name: "Seated Leg Curl", weight: 105, sets: 3, repLow: 13, repHigh: 16, muscle: "hamstrings_glutes" },
+    { id: "tue1", name: "Leg Press", weight: 488, sets: 3, repLow: 10, repHigh: 15, muscle: "quads" },
+    { id: "tue2", name: "Pendulum Squat", weight: 45, sets: 3, repLow: 10, repHigh: 15, muscle: "quads" },
+    { id: "tue3", name: "Hip Thruster", weight: 105, sets: 3, repLow: 10, repHigh: 15, muscle: "hamstrings_glutes" },
+    { id: "tue4", name: "Leg Extension", weight: 140, sets: 3, repLow: 10, repHigh: 15, muscle: "quads" },
+    { id: "tue5", name: "Seated Leg Curl", weight: 105, sets: 3, repLow: 10, repHigh: 15, muscle: "hamstrings_glutes" },
   ]},
   Wednesday: { label: "Full Rest", exercises: [] },
   Thursday: { label: "Push / Pump Hybrid", cardio: "25–30 min cardio", exercises: [
     { id: "thu1", name: "Deficit Pushup", weight: null, bodyweight: true, sets: 3, repLow: 12, repHigh: 20, isFailure: true, muscle: "chest" },
     { id: "thu2", name: "Dips", weight: null, bodyweight: true, sets: 3, repLow: 12, repHigh: 20, isFailure: true, muscle: "chest" },
-    { id: "thu3", name: "Dumbbell Fly", weight: 35, sets: 3, repLow: 13, repHigh: 16, muscle: "chest" },
-    { id: "thu4", name: "Cable Rope Face Pull", weight: 58, sets: 3, repLow: 13, repHigh: 16, muscle: "shoulders" },
-    { id: "thu5", name: "Standing Cable Fly", weight: 27.5, sets: 3, repLow: 13, repHigh: 16, muscle: "chest" },
-    { id: "thu6", name: "Triceps Pushdown", weight: 50, sets: 4, repLow: 13, repHigh: 16, muscle: "triceps" },
-    { id: "thu7", name: "Bent Over Cable Fly", weight: 37.5, sets: 3, repLow: 13, repHigh: 16, muscle: "shoulders" },
-    { id: "thu8", name: "Donkey Calf Raise", weight: 70, sets: 3, repLow: 20, repHigh: 23, muscle: "calves" },
+    { id: "thu3", name: "Dumbbell Fly", weight: 35, sets: 3, repLow: 10, repHigh: 15, muscle: "chest" },
+    { id: "thu4", name: "Cable Rope Face Pull", weight: 58, sets: 3, repLow: 10, repHigh: 15, muscle: "shoulders" },
+    { id: "thu5", name: "Standing Cable Fly", weight: 27.5, sets: 3, repLow: 10, repHigh: 15, muscle: "chest" },
+    { id: "thu6", name: "Triceps Pushdown", weight: 50, sets: 4, repLow: 10, repHigh: 15, muscle: "triceps" },
+    { id: "thu7", name: "Bent Over Cable Fly", weight: 37.5, sets: 3, repLow: 10, repHigh: 15, muscle: "shoulders" },
+    { id: "thu8", name: "Donkey Calf Raise", weight: 70, sets: 3, repLow: 10, repHigh: 15, muscle: "calves" },
   ]},
   Friday: { label: "Pull", cardio: "25–30 min cardio", exercises: [
-    { id: "fri1", name: "Cross Body Pulldown", weight: 90, sets: 3, repLow: 15, repHigh: 18, muscle: "back" },
-    { id: "fri2", name: "Extreme Row Machine", weight: 93, sets: 3, repLow: 13, repHigh: 16, muscle: "back" },
-    { id: "fri3", name: "Meadows Row", weight: 95, sets: 3, repLow: 15, repHigh: 18, muscle: "back" },
-    { id: "fri4", name: "Seated Dumbbell Lateral Raise", weight: 25, sets: 3, repLow: 13, repHigh: 16, muscle: "shoulders" },
-    { id: "fri5", name: "Incline Dumbbell Curl", weight: 35, sets: 3, repLow: 12, repHigh: 15, muscle: "biceps" },
+    { id: "fri1", name: "Cross Body Pulldown", weight: 90, sets: 3, repLow: 10, repHigh: 15, muscle: "back" },
+    { id: "fri2", name: "Extreme Row Machine", weight: 93, sets: 3, repLow: 10, repHigh: 15, muscle: "back" },
+    { id: "fri3", name: "Meadows Row", weight: 95, sets: 3, repLow: 10, repHigh: 15, muscle: "back" },
+    { id: "fri4", name: "Seated Dumbbell Lateral Raise", weight: 25, sets: 3, repLow: 10, repHigh: 15, muscle: "shoulders" },
+    { id: "fri5", name: "Incline Dumbbell Curl", weight: 35, sets: 3, repLow: 10, repHigh: 15, muscle: "biceps" },
   ]},
   Saturday: { label: "Legs (Unilateral / Hip Hinge)", cardio: "25–30 min cardio", exercises: [
-    { id: "sat1", name: "Single Leg Press", weight: 117, sets: 3, repLow: 15, repHigh: 18, muscle: "quads" },
-    { id: "sat2", name: "Romanian Deadlift", weight: 45, sets: 3, repLow: 10, repHigh: 13, muscle: "hamstrings_glutes" },
-    { id: "sat3", name: "Hip Abduction Machine", weight: 52, sets: 3, repLow: 13, repHigh: 16, muscle: "hamstrings_glutes" },
-    { id: "sat4", name: "Single Leg Extension", weight: 52, sets: 3, repLow: 13, repHigh: 16, muscle: "quads" },
-    { id: "sat5", name: "Single Leg Curl", weight: 52, sets: 3, repLow: 13, repHigh: 16, muscle: "hamstrings_glutes" },
+    { id: "sat1", name: "Single Leg Press", weight: 117, sets: 3, repLow: 10, repHigh: 15, muscle: "quads" },
+    { id: "sat2", name: "Romanian Deadlift", weight: 45, sets: 3, repLow: 10, repHigh: 15, muscle: "hamstrings_glutes" },
+    { id: "sat3", name: "Hip Abduction Machine", weight: 52, sets: 3, repLow: 10, repHigh: 15, muscle: "hamstrings_glutes" },
+    { id: "sat4", name: "Single Leg Extension", weight: 52, sets: 3, repLow: 10, repHigh: 15, muscle: "quads" },
+    { id: "sat5", name: "Single Leg Curl", weight: 52, sets: 3, repLow: 10, repHigh: 15, muscle: "hamstrings_glutes" },
   ]},
   Sunday: { label: "Full Rest", exercises: [] },
 };
@@ -592,8 +592,8 @@ const GOAL_CAL_ADJUST = { cut: 0.8, bulk: 1.12, maintain: 1.0 };
 const MSJ_ACTIVITY_MULTIPLIER = { sedentary: 1.2, light: 1.375, moderate: 1.55, active: 1.725 };
 const GOAL_REP_RULES = {
   cut: { sets: 3, repLow: 10, repHigh: 15 },
-  bulk: { sets: 4, repLow: 8, repHigh: 12 },
-  maintain: { sets: 3, repLow: 8, repHigh: 12 },
+  bulk: { sets: 4, repLow: 10, repHigh: 15 },
+  maintain: { sets: 3, repLow: 10, repHigh: 15 },
 };
 
 // Fraction of total weight change assumed to be FAT (vs. lean mass), for converting a body-fat-%
@@ -1809,16 +1809,21 @@ function exerciseConsistentlyMet(score) {
 // input anywhere — reps/weight are typed in exactly as they already are; the app infers whether
 // that week's implicit RIR target was met purely from the numbers, and derives the NEXT week's
 // target from what actually happened, adjusted by however much the schedule itself moved.
-const RIR_SCHEDULE_BLOCKS = [3, 1]; // target RIR per half of a phase: weeks 1-2 -> 3, weeks 3-4 -> 1
+// Target RIR per week-position-in-phase (1-indexed): weeks 1-2 -> 3, week 3 -> 1, week 4 -> 0.
+// Explicit per-position rather than split-in-half, since the ramp is no longer symmetric — the
+// last week peaks at true failure (RIR 0) right before the deload, then eases substantially at
+// the start of the next phase (see the phase-boundary handling in completeWeek).
+const RIR_SCHEDULE = [3, 3, 1, 0];
 const RIR_PHASE_LENGTH = 4; // training weeks per phase (matches the existing every-5th-week deload cadence, minus the deload week itself)
 const RIR_REP_CEILING = 20; // past this, a rep count stops being a meaningful "target" on its own
 
 // Which target RIR applies to a given week, based on its position within the current phase (1 =
-// first week of the phase). Splits the phase into two halves; generalizes cleanly if the phase
-// length itself ever changes later (e.g. a future tier-based deload cadence).
+// first week of the phase). Clamped to the schedule's length so an out-of-range position (e.g. 0,
+// which computePhaseWeeks returns for a deload week itself) never throws — falls back to the last
+// defined tier rather than reading past the array.
 function computeTargetRIRForWeek(weekPositionInPhase, phaseLength) {
-  const halfLength = Math.ceil(phaseLength / 2);
-  return weekPositionInPhase <= halfLength ? RIR_SCHEDULE_BLOCKS[0] : RIR_SCHEDULE_BLOCKS[1];
+  const idx = Math.max(0, Math.min(weekPositionInPhase, RIR_SCHEDULE.length) - 1);
+  return RIR_SCHEDULE[idx];
 }
 
 // Derives next week's target rep count from this week's actual performance, shifted by however
@@ -2289,7 +2294,7 @@ function buildPushSchedule(data) {
 }
 
 function App() {
-  const APP_VERSION = "2026-07-23T21:45:00";
+  const APP_VERSION = "2026-07-24T01:05:00";
   const [updateAvailable, setUpdateAvailable] = useState(false);
   useEffect(function () {
     function checkVersion() {
@@ -2484,6 +2489,11 @@ function App() {
   // Same shared-vs-per-program split as exerciseState itself, since the toggle is fundamentally
   // about how that shared state's rep targets get computed for the exercises it covers.
   const rirModeEnabled = isSharedProgram ? !!data.sharedRirModeEnabled : !!(data.customProgramConfig && data.customProgramConfig.rirModeEnabled);
+  // Set only while an "enable" request is queued, waiting for the next deload boundary — see
+  // toggleRirMode and completeWeek. Turning OFF is always immediate; only turning ON is deferred,
+  // since re-enabling mid-phase is what risks mixing stale RIR state with a phase it was never
+  // tracked through.
+  const rirModePendingEnable = isSharedProgram ? !!data.sharedRirModePendingEnable : !!(data.customProgramConfig && data.customProgramConfig.rirModePendingEnable);
   function saveExerciseState(newState) {
     if (isSharedProgram) save(Object.assign({}, data, { sharedExerciseState: newState }));
     else saveProgram({ exerciseState: newState });
@@ -2650,6 +2660,22 @@ function App() {
     const newState = Object.assign({}, effectiveExerciseState);
     const weekAdjustments = prog.sessionAdjustments[week] || {};
     const rirEscalatedExercises = [];
+    // Hoisted once — position-in-phase is the same for every exercise this week, not per-exercise.
+    // computePhaseWeeks naturally returns an empty array (length 0) for a deload week itself, since
+    // its own isDeload check breaks the loop before ever pushing that week — a free, correct signal
+    // for "this week (or the upcoming one) is a deload" without separate special-casing.
+    const prevWeekPositionInPhase = computePhaseWeeks(week, prog.extraDeloadWeeks).length;
+    const nextWeekPositionInPhase = computePhaseWeeks(week + 1, prog.extraDeloadWeeks).length;
+    // True exactly once, on the single transition where a real new phase actually begins — not on
+    // every deload-adjacent week, and not if two deloads ever land back to back (extraDeloadWeeks
+    // could in principle stack them), since neither a queued RIR enable nor a reseed should fire
+    // until training genuinely resumes.
+    const enteringNewPhase = nextWeekPositionInPhase === 1 && prevWeekPositionInPhase !== 1;
+    // If an enable was queued (see toggleRirMode), THIS is the moment it actually takes effect — the
+    // same clean-slate boundary a new phase already begins at, so RIR mode is never mixed mid-phase
+    // with a system it wasn't tracked under all along.
+    const rirModeTurningOnNow = enteringNewPhase && rirModePendingEnable;
+    const effectiveRirModeEnabled = rirModeEnabled || rirModeTurningOnNow;
     allExercises(def.exercises).forEach(function (ex) {
       if (weekSkipped[ex.id]) return;
       const setsLogged = (weekLogs[ex.id] || []).filter(Boolean);
@@ -2665,16 +2691,44 @@ function App() {
       if (setsLogged.length === 0) return;
       const maxReps = Math.max.apply(null, setsLogged.map(function (s) { return s.reps || 0; }));
 
-      if (rirModeEnabled) {
-        // Position within the current phase — computePhaseWeeks naturally returns an empty array
-        // (length 0) for a deload week itself, since its own isDeload check breaks the loop before
-        // ever pushing that week. That gives a free, correct signal for "this week (or the upcoming
-        // one) is a deload" without any separate special-casing.
-        const prevWeekPositionInPhase = computePhaseWeeks(week, prog.extraDeloadWeeks).length;
-        const nextWeekPositionInPhase = computePhaseWeeks(week + 1, prog.extraDeloadWeeks).length;
-        if (prevWeekPositionInPhase === 0 || nextWeekPositionInPhase === 0) {
-          // A deload week just finished, or is coming up next — hold flat rather than advancing the
-          // ramp; deload weeks are recovery, not part of the progressive proximity-to-failure schedule.
+      if (effectiveRirModeEnabled) {
+        if (rirModeTurningOnNow && !rirModeEnabled) {
+          // Fresh activation — RIR mode wasn't tracked at all during the phase that just ended, so
+          // there's no valid prior RIR state to build from. Trains within the normal fixed rep range
+          // this first week; that becomes the real seed computeNextWeekRirUpdate builds from starting
+          // next week, exactly like turning RIR mode on for the very first time.
+          newState[ex.id] = Object.assign({}, cur, { rirTargetReps: null, rirMissHistory: [] });
+          return;
+        }
+        if (prevWeekPositionInPhase === 0 && enteringNewPhase) {
+          // Coming OUT of the deload just completed, into a new phase's week 1. The deload week
+          // itself has no meaningful failure-testing data (sets are halved), so this reseeds from
+          // the last REAL trained week (week - 1) — not the deload week, and not the frozen,
+          // undemanded target that would otherwise just sit there untouched. Also the moment
+          // missHistory genuinely resets for the new phase (computeNextWeekRirUpdate's own
+          // startingNewPhase check below), instead of silently carrying forward indefinitely.
+          const lastTrainedLogs = ((prog.logs[week - 1] || {})[ex.id] || []).filter(Boolean);
+          if (lastTrainedLogs.length === 0) {
+            // Nothing to reseed from (e.g. it was skipped that week) — fresh start, same as a
+            // brand-new activation, rather than guessing.
+            newState[ex.id] = Object.assign({}, cur, { rirTargetReps: null, rirMissHistory: [] });
+            return;
+          }
+          const lastTrainedMaxReps = Math.max.apply(null, lastTrainedLogs.map(function (s) { return s.reps || 0; }));
+          const lastTrainedPosition = computePhaseWeeks(week - 1, prog.extraDeloadWeeks).length;
+          const update = computeNextWeekRirUpdate(lastTrainedMaxReps, cur.rirTargetReps, cur.rirMissHistory, lastTrainedPosition, nextWeekPositionInPhase, RIR_PHASE_LENGTH, cur.weight);
+          if (update.shouldEscalateToDeload) rirEscalatedExercises.push({ exerciseId: ex.id, exerciseName: cur.nameOverride || ex.name });
+          newState[ex.id] = Object.assign({}, cur, {
+            weight: update.weightBump != null ? update.weightBump : cur.weight,
+            repsTarget: update.targetReps != null ? update.targetReps : cur.repsTarget,
+            rirTargetReps: update.targetReps,
+            rirMissHistory: update.missHistory,
+          });
+          return;
+        }
+        if (nextWeekPositionInPhase === 0) {
+          // Heading INTO a deload next week — hold flat; a recovery week isn't part of the
+          // progressive proximity-to-failure schedule, so there's nothing to compute for it.
           newState[ex.id] = cur;
           return;
         }
@@ -2758,9 +2812,14 @@ function App() {
     const newProgramPatch = { currentWeek: week + 1, undoSnapshot: snapshot, deloadRecommendation: recommendation, volumeIncreaseRecommendations: volumeIncreaseRecommendations };
     if (!isSharedProgram) newProgramPatch.exerciseState = newState;
     const newPrograms = Object.assign({}, data.programs, { [data.activeProgram]: Object.assign({}, prog, newProgramPatch) });
-    const newData = Object.assign({}, data, { programs: newPrograms }, isSharedProgram ? { sharedExerciseState: newState } : {});
+    // If an enable was queued, this is the exact moment it takes effect — same boundary the reseed
+    // above already keys off, so the flag flips at the same instant the exercises it governs do.
+    const rirFlagPatch = !rirModeTurningOnNow ? {} : isSharedProgram
+      ? { sharedRirModeEnabled: true, sharedRirModePendingEnable: false }
+      : { customProgramConfig: Object.assign({}, data.customProgramConfig, { rirModeEnabled: true, rirModePendingEnable: false }) };
+    const newData = Object.assign({}, data, { programs: newPrograms }, isSharedProgram ? { sharedExerciseState: newState } : {}, rirFlagPatch);
     save(newData);
-    showToast("Week " + week + " complete — Week " + (week + 1) + " targets updated");
+    showToast("Week " + week + " complete — Week " + (week + 1) + " targets updated" + (rirModeTurningOnNow ? " — RIR mode is now on" : ""));
     return true;
   }
 
@@ -3139,17 +3198,44 @@ function App() {
   // together (the mode changes how that state's rep targets get computed). Deliberately a separate,
   // simple action from updateProgramSettings above — flipping this shouldn't require touching
   // weight/activity/diet at the same time.
+  //
+  // Turning OFF is immediate — it doesn't corrupt anything by itself. Turning ON queues until the
+  // next deload boundary instead of flipping immediately, since re-enabling mid-phase risks mixing
+  // stale RIR state (or none at all) with a phase it was never tracked through. Tapping again while
+  // a request is queued cancels it rather than doing nothing. The actual flip to enabled happens in
+  // completeWeek, at the exact moment a new phase begins — the same clean-slate boundary a phase
+  // transition already represents.
   function toggleRirMode() {
+    if (rirModeEnabled) {
+      if (isSharedProgram) {
+        save(Object.assign({}, data, { sharedRirModeEnabled: false, sharedRirModePendingEnable: false }));
+      } else {
+        const config = data.customProgramConfig;
+        if (!config) return;
+        save(Object.assign({}, data, { customProgramConfig: Object.assign({}, config, { rirModeEnabled: false, rirModePendingEnable: false }) }));
+      }
+      showToast("RIR mode turned off — back to fixed rep ranges");
+      return;
+    }
+    if (rirModePendingEnable) {
+      if (isSharedProgram) {
+        save(Object.assign({}, data, { sharedRirModePendingEnable: false }));
+      } else {
+        const config = data.customProgramConfig;
+        if (!config) return;
+        save(Object.assign({}, data, { customProgramConfig: Object.assign({}, config, { rirModePendingEnable: false }) }));
+      }
+      showToast("RIR mode enable canceled");
+      return;
+    }
     if (isSharedProgram) {
-      save(Object.assign({}, data, { sharedRirModeEnabled: !rirModeEnabled }));
+      save(Object.assign({}, data, { sharedRirModePendingEnable: true }));
     } else {
       const config = data.customProgramConfig;
       if (!config) return;
-      save(Object.assign({}, data, { customProgramConfig: Object.assign({}, config, { rirModeEnabled: !rirModeEnabled }) }));
+      save(Object.assign({}, data, { customProgramConfig: Object.assign({}, config, { rirModePendingEnable: true }) }));
     }
-    showToast(rirModeEnabled
-      ? "RIR mode turned off — back to fixed rep ranges"
-      : "RIR mode turned on — targets will build from your logged reps starting this phase");
+    showToast("RIR mode will turn on at your next deload");
   }
 
   const groceryKey = "w" + groceryDisplayWeek;
@@ -3206,8 +3292,12 @@ function App() {
     const weekOverrides = Object.assign({}, prog.exerciseWeekOverrides);
     const thisWeek = Object.assign({}, weekOverrides[week]);
     const finalWeight = (weight !== null && weight !== "" && !isNaN(Number(weight))) ? Number(weight) : fallbackWeight;
+    // A blank name means "just changing the weight/reps, not renaming this exercise" — e.g. logging
+    // what a differently-loaded machine actually took. Leaving it null lets effectiveExercises fall
+    // back to the original exercise's own name, rather than mislabeling it a generic "Substitute
+    // Exercise" the way any blank name used to.
     thisWeek[exerciseId] = {
-      altId: exerciseId + "_alt", name: name || "Substitute Exercise", weight: finalWeight,
+      altId: exerciseId + "_alt", name: name || null, weight: finalWeight,
       repLow: repLow != null ? repLow : fallbackRepLow, repHigh: repHigh != null ? repHigh : fallbackRepHigh, bodyweight: !!bodyweight,
     };
     weekOverrides[week] = thisWeek;
@@ -3328,6 +3418,10 @@ function App() {
       mealsByWeek: mealsByWeek, groceryByWeek: groceryByWeek, trainingTime: setup.trainingTime || null,
       dietStyle: setup.dietStyle || "standard", gender: setup.gender || null, heightCm: setup.heightCm || null,
       intraWorkout: setup.intraWorkout || null,
+      // Set directly here, not via the queued toggleRirMode path — a brand-new program has no
+      // existing phase to protect from mid-phase mixing, so the wizard's choice can just take
+      // effect immediately from week 1.
+      rirModeEnabled: setup.trainingStyle === "rir",
     };
     const newPrograms = Object.assign({}, data.programs, { custom: freshProgramState(setup.exercises) });
     save(Object.assign({}, data, { customProgramConfig: config, programs: newPrograms, activeProgram: "custom" }));
@@ -3644,7 +3738,7 @@ function App() {
               pushSettings: data.pushSettings, updatePushSettings: updatePushSettings,
               reminderTimes: data.reminderTimes, updateReminderTimes: updateReminderTimes, toggleTrainingDay: toggleTrainingDay,
               isCustomProgram: def.needsSetup === false && data.activeProgram === "custom",
-              isSharedProgram: isSharedProgram, activeProgramLabel: def.label, rirModeEnabled: rirModeEnabled, toggleRirMode: toggleRirMode,
+              isSharedProgram: isSharedProgram, activeProgramLabel: def.label, rirModeEnabled: rirModeEnabled, rirModePendingEnable: rirModePendingEnable, toggleRirMode: toggleRirMode,
               showEditProgramSettings: showEditProgramSettings, setShowEditProgramSettings: setShowEditProgramSettings,
               resetCustomSetup: resetCustomSetup, customProgramConfig: data.customProgramConfig, updateProgramSettings: updateProgramSettings,
               uiPrefs: data.uiPrefs, updateUiPrefs: updateUiPrefs,
@@ -4134,16 +4228,7 @@ function EditProgramSettingsForm(props) {
         if (!numWeight || numWeight <= 0) return;
         props.onSave(numWeight, activity, dietStyle);
       },
-    }, "Save Settings"),
-    h("div", { style: { marginTop: 16, paddingTop: 16, borderTop: "1px solid #262626" } },
-      h("div", { className: "food-cat-title" }, "RIR Mode"),
-      h("p", { style: { fontSize: "11px", color: "#737373", margin: "4px 0 8px" } },
-        "Instead of a fixed rep range, your target rep count builds from what you actually logged last week, following a progressive schedule that pushes closer to failure across each phase and eases off again after each deload. Existing per-set weight adjustments turn off while this is on — reps are typed in exactly as they already are, nothing new to enter."),
-      h("button", {
-        className: "ex-action-btn", style: { width: "100%" },
-        onClick: props.onToggleRirMode,
-      }, props.rirModeEnabled ? "Turn Off RIR Mode" : "Turn On RIR Mode")
-    )
+    }, "Save Settings")
   );
 }
 function SwapForm(props) {
@@ -4647,7 +4732,7 @@ function MealSwapControl(props) {
   const likedInCat = allInCat.filter(function (f) { return props.likedFoods.indexOf(f.name) !== -1; });
   const otherInCat = allInCat.filter(function (f) { return props.likedFoods.indexOf(f.name) === -1; });
   return h("div", { style: { marginTop: 10 } },
-    h("div", { style: { display: "flex", gap: 6 } },
+    h("div", { style: { display: "flex", gap: 6, flexWrap: "wrap" } },
       ["protein", "carb", "fat"].map(function (role) {
         return h("button", {
           key: role, className: "ex-action-btn",
@@ -5290,8 +5375,19 @@ function SettingsTab(props) {
     // ---- Program (moved here from rendering on every tab). Custom programs keep their real
     // EditProgramSettingsForm (weight/activity/diet-style recalculation) — this case-study version
     // has that feature and the personal file doesn't, so it's preserved rather than flattened. ----
-    h(SettingsSection, { id: "program", title: "Program", status: props.activeProgramLabel + (props.rirModeEnabled ? " \u00b7 RIR on" : ""), uiPrefs: props.uiPrefs, updateUiPrefs: props.updateUiPrefs },
-      props.isCustomProgram && h("div", null,
+    h(SettingsSection, { id: "program", title: "Program", status: props.activeProgramLabel + (props.rirModeEnabled ? " \u00b7 RIR on" : props.rirModePendingEnable ? " \u00b7 RIR queued" : ""), uiPrefs: props.uiPrefs, updateUiPrefs: props.updateUiPrefs },
+      // RIR Mode — a headline feature of this app, so it's always visible here rather than nested
+      // behind "Edit program settings" (which is really about weight/activity/diet recalculation,
+      // a separate concern). Same control regardless of custom vs. shared program.
+      h(SettingsRow, { style: { borderBottom: "none" } },
+        h("div", null, h("div", { style: { fontSize: 13 } }, "RIR mode"),
+          h("div", { style: { fontSize: 11, color: "#737373", marginTop: 2, maxWidth: 220 } },
+            "Autoregulate reps from what you logged last week instead of a fixed range." + (props.isSharedProgram ? " Shared across Cutting, Cruise, and Hypertrophy." : ""))),
+        h(SettingsSeg, { on: props.rirModeEnabled, onChange: function () { props.toggleRirMode(); } })
+      ),
+      props.rirModePendingEnable && h("p", { style: { fontSize: 11, color: "#f0b429", margin: "0 0 4px" } },
+        "Queued — turns on at your next deload, so it never starts mid-phase. Tap On again to cancel."),
+      props.isCustomProgram && h("div", { style: { marginTop: 12, borderTop: "1px solid #262626", paddingTop: 12 } },
         h("div", { style: { display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 8 } },
           h("button", { className: "ex-action-btn", onClick: function () { props.setShowEditProgramSettings(!props.showEditProgramSettings); } }, props.showEditProgramSettings ? "Hide edit form" : "Edit program settings"),
           h("button", { className: "reset-list-btn", style: { flex: 1, marginBottom: 0 }, onClick: props.resetCustomSetup }, "Redo custom setup")
@@ -5302,15 +5398,7 @@ function SettingsTab(props) {
             props.updateProgramSettings(newWeight, newActivity, newDietStyle);
             props.setShowEditProgramSettings(false);
           },
-          rirModeEnabled: props.rirModeEnabled, onToggleRirMode: props.toggleRirMode,
         })
-      ),
-      props.isSharedProgram && h("div", null,
-        h(SettingsRow, { style: { borderBottom: "none" } },
-          h("div", null, h("div", { style: { fontSize: 13 } }, "RIR mode"),
-            h("div", { style: { fontSize: 11, color: "#737373", marginTop: 2, maxWidth: 220 } }, "Autoregulate reps from what you logged last week instead of a fixed range. Shared across Cutting, Cruise, and Hypertrophy.")),
-          h(SettingsSeg, { on: props.rirModeEnabled, onChange: function () { props.toggleRirMode(); } })
-        )
       )
     ),
 
@@ -5753,6 +5841,44 @@ function CoordinatorPlaceholder(props) {
   );
 }
 
+// Small "i" icon that pops up a short explainer on tap — used anywhere a choice needs more detail
+// available without cluttering the screen by default (e.g. the training-style picker below).
+// Fully self-contained: drop it in with just a title + body, no parent state needed.
+function InfoButton(props) {
+  const [open, setOpen] = useState(false);
+  return h(React.Fragment, null,
+    h("button", {
+      type: "button",
+      onClick: function (e) { e.stopPropagation(); setOpen(true); },
+      "aria-label": "More info about " + props.title,
+      style: {
+        width: 20, height: 20, borderRadius: "50%", border: "1px solid #737373", background: "none",
+        color: "#a3a3a3", fontSize: 11, fontWeight: 700, cursor: "pointer", display: "inline-flex",
+        alignItems: "center", justifyContent: "center", padding: 0, lineHeight: 1, flexShrink: 0,
+      },
+    }, "i"),
+    open && h("div", {
+      onClick: function () { setOpen(false); },
+      style: {
+        position: "fixed", inset: 0, background: "rgba(0,0,0,0.6)", display: "flex",
+        alignItems: "center", justifyContent: "center", zIndex: 1000, padding: 24,
+      },
+    },
+      h("div", {
+        onClick: function (e) { e.stopPropagation(); },
+        style: { background: "#171717", border: "1px solid #404040", borderRadius: 12, padding: 20, maxWidth: 340 },
+      },
+        h("h3", { style: { margin: "0 0 10px", fontSize: 15 } }, props.title),
+        h("p", { style: { fontSize: 13, color: "#d4d4d4", lineHeight: 1.5, margin: 0, whiteSpace: "pre-line" } }, props.body),
+        h("button", {
+          className: "ex-action-btn", style: { width: "100%", marginTop: 16 },
+          onClick: function () { setOpen(false); },
+        }, "Got it")
+      )
+    )
+  );
+}
+
 function CustomSetupWizard(props) {
   const [step, setStep] = useState("goals");
   const [goal, setGoal] = useState("cut");
@@ -5772,6 +5898,10 @@ function CustomSetupWizard(props) {
   const [targetBF, setTargetBF] = useState("");
   const [activity, setActivity] = useState("moderate");
   const [experience, setExperience] = useState("beginner");
+  // Defaults to the fixed range — RIR mode assumes some comfort reading your own effort level from
+  // week to week, which a first-time setup can't know yet. Switching later from Settings is easy
+  // and always safe (it waits for the next deload), so nothing is lost by starting simple.
+  const [trainingStyle, setTrainingStyle] = useState("fixed");
   const [trainingDays, setTrainingDays] = useState([]);
   const [cardioDays, setCardioDays] = useState([]);
   const [equipmentAvailable, setEquipmentAvailable] = useState(["bodyweight"]);
@@ -5878,7 +6008,7 @@ function CustomSetupWizard(props) {
       activity: activity, weeksNeeded: computed.weeksNeeded, macros: computed.macros, age: computed.age,
       exercises: computed.exercises, slots: computed.slots, milestones: computed.milestones,
       planResults: plan.results, trainingTime: trainingTime || null, intraWorkout: computed.intraWorkout || null,
-      dietStyle: dietStyle, gender: gender, heightCm: computed.heightCm,
+      dietStyle: dietStyle, gender: gender, heightCm: computed.heightCm, trainingStyle: trainingStyle,
     });
   }
 
@@ -5889,6 +6019,16 @@ function CustomSetupWizard(props) {
     { id: "beginner", label: "Beginner", note: "3 days/week, full-body sessions — 4 core lifts each time. The least intimidating way to start; consistency matters far more than volume at this stage." },
     { id: "intermediate", label: "Intermediate", note: "4 days/week, a traditional Upper/Lower split repeated twice — more volume and variety than Beginner, without the full Advanced session length." },
     { id: "advanced", label: "Advanced", note: "5 days/week, Upper/Lower/Push/Pull/Legs — the same full split used in this app's built-in programs." },
+  ];
+  const TRAINING_STYLES = [
+    {
+      id: "fixed", label: "Fixed Rep Range",
+      info: "Each exercise has a set rep range (e.g. 10\u201315) that stays the same every week. Progress comes from steadily increasing weight or reps within that range over time.\n\nSimple and predictable — a great starting point if you're new to structured training, or just prefer knowing exactly what target you're chasing every session.",
+    },
+    {
+      id: "rir", label: "RIR Mode",
+      info: "RIR = Reps In Reserve. Instead of a fixed range, your target rep count shifts week to week based on what you actually logged \u2014 following a built-in schedule that pushes closer to failure across each phase, then eases off again after every deload.\n\nBest if you're comfortable reading your own effort level and want the app to autoregulate around your real performance, rather than a range that never changes.\n\nYou can turn this on or off anytime later from Settings. Switching always waits until your next deload, so it never starts mixed mid-phase.",
+    },
   ];
   const EQUIPMENT_OPTIONS = [
     { id: "barbell", label: "Barbell" }, { id: "dumbbell", label: "Dumbbells" }, { id: "machine", label: "Machines / Cables" },
@@ -5980,6 +6120,21 @@ function CustomSetupWizard(props) {
         })
       ),
       h("p", { style: { fontSize: "11px", color: "#737373", marginTop: 4 } }, EXPERIENCES.filter(function (ex) { return ex.id === experience; })[0].note),
+      h("div", { className: "food-cat-title", style: { marginTop: 16 } }, "Training Style"),
+      h("div", { style: { display: "flex", flexDirection: "column", gap: 8 } },
+        TRAINING_STYLES.map(function (ts) {
+          return h("div", { key: ts.id, style: { display: "flex", alignItems: "center", gap: 8 } },
+            h("button", {
+              className: "food-chip" + (trainingStyle === ts.id ? " liked" : ""),
+              style: { flex: 1, textAlign: "left" },
+              onClick: function () { setTrainingStyle(ts.id); },
+            }, ts.label),
+            h(InfoButton, { title: ts.label, body: ts.info })
+          );
+        })
+      ),
+      h("p", { style: { fontSize: "11px", color: "#737373", marginTop: 4 } },
+        "Tap the \u24d8 next to each option to read what it means. You can switch this anytime later from Settings."),
       experience !== "advanced" && h(React.Fragment, null,
         h("div", { className: "food-cat-title" }, "What equipment do you have access to?"),
         h("div", { className: "food-chip-grid" },
@@ -6080,8 +6235,8 @@ function CustomSetupWizard(props) {
       plan && plan.results && plan.results.some(function (r) { return r.error; }) && h("div", { className: "plan-error" },
         "Some meals couldn't hit their targets with this food combination — try adding a different fat or carb source for that meal. Details: " +
         plan.results.filter(function (r) { return r.error; }).map(function (r) { return r.slot; }).join(", ")),
-      h("div", { style: { display: "flex", gap: 8, marginTop: 16 } },
-        h("button", { className: "ex-action-btn", onClick: function () { setStep("goals"); } }, "Back"),
+      h("div", { style: { display: "flex", gap: 8, marginTop: 16, alignItems: "stretch" } },
+        h("button", { className: "ex-action-btn", style: { flex: "0 0 auto", padding: "8px 20px" }, onClick: function () { setStep("goals"); } }, "Back"),
         h("button", { className: "generate-btn", style: { flex: 1, marginTop: 0 }, onClick: generate }, "Generate My Plan")
       )
     );
@@ -6107,7 +6262,9 @@ function CustomSetupWizard(props) {
     ),
     h("div", { className: "panel", style: { marginBottom: 16 } },
       h("h3", null, "Training Style"),
-      h("p", { style: { color: "#a3a3a3", margin: 0 } }, rules.sets + " sets × " + rules.repLow + "–" + rules.repHigh + " reps across your program, matched to a " + goal + " goal")
+      h("p", { style: { color: "#a3a3a3", margin: 0 } }, rules.sets + " sets × " + rules.repLow + "–" + rules.repHigh + " reps across your program, matched to a " + goal + " goal"),
+      trainingStyle === "rir" && h("p", { style: { fontSize: 12, color: "#3d97d3", margin: "8px 0 0" } },
+        "RIR Mode is on — starting week 1, your actual rep target will build week to week from what you log, rather than staying fixed at this range.")
     ),
     h("div", { className: "food-cat-title" }, "Generated Meals"),
     plan.results.map(function (r, i) {
@@ -6117,8 +6274,8 @@ function CustomSetupWizard(props) {
         h("div", { className: "plan-macro-row" }, Math.round(r.cal) + " cal · " + Math.round(r.p) + "p / " + Math.round(r.c) + "c / " + Math.round(r.f) + "f")
       );
     }),
-    h("div", { style: { display: "flex", gap: 8, marginTop: 16 } },
-      h("button", { className: "ex-action-btn", onClick: function () { setStep("foods"); } }, "Back"),
+    h("div", { style: { display: "flex", gap: 8, marginTop: 16, alignItems: "stretch" } },
+      h("button", { className: "ex-action-btn", style: { flex: "0 0 auto", padding: "8px 20px" }, onClick: function () { setStep("foods"); } }, "Back"),
       h("button", { className: "generate-btn", style: { flex: 1, marginTop: 0 }, onClick: confirm }, "Confirm & Start My Program")
     )
   );
