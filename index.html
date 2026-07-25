@@ -2487,7 +2487,7 @@ function programStateHasRealData(state) {
 // The build currently running. Surfaced in Settings -> Account, because "is the deploy actually
 // live?" has been the real answer to several apparent bugs, and inferring it from behaviour is slow
 // and error-prone. Compared against version.json by the update check below.
-const APP_VERSION = "2026-07-25T03:35:00";
+const APP_VERSION = "2026-07-25T04:05:00";
 
 // Signing out has to be unconditional, because every failure mode here ends the same way: a person
 // tapping a button that does nothing.
@@ -3197,6 +3197,42 @@ function App() {
   // Cutting/Cruise/Hypertrophy share exercise progression via data.sharedExerciseState (see its
   // definition in makeDefaultData for why); Custom's exercises are generated per-user and don't
   // align with anything, so it keeps its own separate, per-program exerciseState as before.
+  // ---- Coach assignments: read-only first pass ----
+  // Deliberately fetches and reports, applies nothing. Merging a coach's prescription into live
+  // program state is the risky half of this feature — it writes into the same week-keyed objects
+  // the client's own edits and the auto-backup touch — so the read path gets proven on its own
+  // first, with real rows inserted via SQL, before any merge logic exists to debug alongside it.
+  //
+  // Placed AFTER `prog` is defined on purpose: the dependency array below is evaluated during
+  // render, so referencing prog.currentWeek from above its own `const` would hit the temporal dead
+  // zone — the same class of error as the setCustomPlan and currentMeal bugs found earlier.
+  const [pendingAssignments, setPendingAssignments] = useState([]);
+  const [assignmentsError, setAssignmentsError] = useState(false);
+
+  function refreshAssignments() {
+    if (!session) { setPendingAssignments([]); return Promise.resolve(); }
+    const week = (prog && prog.currentWeek) || 1;
+    return supabaseClient.rpc("my_pending_assignments", { current_week: week })
+      .then(function (r) {
+        if (r.error) {
+          // Most likely migration 07/06 not yet run, or offline. Not worth surfacing to the person
+          // — an unapplied assignment is a delay, not a data problem.
+          setAssignmentsError(true);
+          setPendingAssignments([]);
+          return;
+        }
+        setAssignmentsError(false);
+        const rows = r.data || [];
+        setPendingAssignments(rows);
+        if (rows.length) {
+          // Temporary, for the read-only phase: makes the shape and the week filtering inspectable
+          // without any UI. Comes out once the apply path lands.
+          console.log("[coach assignments] " + rows.length + " pending for week >= " + week, rows);
+        }
+      });
+  }
+  useEffect(function () { refreshAssignments(); }, [session, prog && prog.currentWeek, data.activeProgram]);
+
   const isSharedProgram = data.activeProgram !== "custom";
   const effectiveExerciseState = isSharedProgram ? (data.sharedExerciseState || {}) : prog.exerciseState;
   // Same shared-vs-per-program split as exerciseState itself, since the toggle is fundamentally
@@ -6706,14 +6742,18 @@ function SettingsTab(props) {
       ),
 
       h("div", { style: { marginTop: 16, paddingTop: 14, borderTop: "1px solid #262626" } },
-        h(SettingsRow, { style: { padding: 0, borderBottom: "none" } },
-          h("div", null,
+        // Label and switch share a row; the explanation gets the full width beneath them. Nesting
+        // a two-line description inside a space-between row squeezes it into a narrow column beside
+        // the buttons, which is unreadable on a phone.
+        h("div", null,
+          h("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12 } },
             h("div", { style: { fontSize: 13 } }, "Back up to my account"),
-            h("div", { style: { fontSize: 11, color: "#737373", marginTop: 2, lineHeight: 1.4 } },
-              props.syncAllowed
-                ? "On. Turning this off keeps everything on this device only \u2014 nothing further is sent."
-                : "Off. Nothing is being sent. Anything already in your account stays until you delete it below.")),
-          h(SettingsSeg, { on: props.syncAllowed, onChange: function (v) { props.updateSyncAllowed(v); } })
+            h(SettingsSeg, { on: props.syncAllowed, onChange: function (v) { props.updateSyncAllowed(v); } })
+          ),
+          h("div", { style: { fontSize: 11, color: "#737373", marginTop: 8, lineHeight: 1.5 } },
+            props.syncAllowed
+              ? "On. Turning this off keeps everything on this device only \u2014 nothing further is sent."
+              : "Off. Nothing is being sent. Anything already in your account stays until you delete it below.")
         )
       ),
 
