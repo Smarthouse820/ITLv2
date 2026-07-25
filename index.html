@@ -2472,29 +2472,45 @@ function programStateHasRealData(state) {
   return false;
 }
 
-// supabase-js defaults to a GLOBAL sign-out: a server call that invalidates every session for the
-// account, on every device. That call requires a currently-valid access token — so once the JWT has
-// expired, the server answers 403, the library reports the sign-out as failed, and it leaves the
-// local session in place. The visible symptom is a Sign out button that does nothing at all, which
-// is precisely the moment someone most wants it to work (a stale session is often WHY they're
-// signing out).
-//
-// So: attempt the global sign-out, and fall back to a local one if it's refused. A local sign-out
-// clears the stored session without touching the network and cannot fail this way. The trade-off is
-// that other devices stay signed in, which is a reasonable thing to accept — arguably correct
-// behaviour anyway — and far better than a button that silently does nothing.
 // The build currently running. Surfaced in Settings -> Account, because "is the deploy actually
 // live?" has been the real answer to several apparent bugs, and inferring it from behaviour is slow
 // and error-prone. Compared against version.json by the update check below.
-const APP_VERSION = "2026-07-25T01:10:00";
+const APP_VERSION = "2026-07-25T01:25:00";
 
+// Signing out has to be unconditional, because every failure mode here ends the same way: a person
+// tapping a button that does nothing.
+//
+// What actually went wrong in practice: supabase-js defaults to a GLOBAL sign-out, a server call
+// needing a valid access token. Once the JWT expires the server returns 403, the library reports
+// failure — but has already discarded the local session. No SIGNED_OUT event fires, so AuthGate
+// never learns, App stays mounted, and the UI shows a signed-in user against a client holding
+// nothing. Tapping again then fails with AuthSessionMissingError, a different error for the same
+// underlying reason. A stale session is often precisely WHY someone is reaching for Sign out, so
+// this fails exactly when it's needed.
+//
+// So: try global, fall back to local, swallow both outcomes, then reload. The reload is the point —
+// on the next load AuthGate calls getSession(), finds nothing, and renders the sign-in screen. That
+// depends on no event, no listener ordering, and no assumption about which internal state the
+// library managed to clear. Sign-out is rare enough that a reload costs nothing.
 function signOutEverywhereOrLocally() {
-  return supabaseClient.auth.signOut().then(function (r) {
-    if (r && r.error) return supabaseClient.auth.signOut({ scope: "local" });
-    return r;
-  }).catch(function () {
-    return supabaseClient.auth.signOut({ scope: "local" });
-  });
+  function ignore() { return null; }
+  return Promise.resolve()
+    .then(function () { return supabaseClient.auth.signOut().catch(ignore); })
+    .then(function (r) {
+      if (r && r.error) return supabaseClient.auth.signOut({ scope: "local" }).catch(ignore);
+      return r;
+    })
+    .catch(ignore)
+    .then(function () {
+      // Belt and braces: if the library left a token behind, drop it, so the reload can't find a
+      // half-valid session and put us straight back where we started.
+      try {
+        Object.keys(localStorage)
+          .filter(function (k) { return k.indexOf("sb-") === 0 && k.indexOf("-auth-token") !== -1; })
+          .forEach(function (k) { localStorage.removeItem(k); });
+      } catch (e) { /* storage unavailable — the reload still lands on the gate */ }
+      window.location.reload();
+    });
 }
 
 function App() {
