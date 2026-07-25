@@ -1310,6 +1310,8 @@ const GROCERY_UNIT_INFO = {
   "Avocado": { type: "count", gramsPerUnit: 175 },
   "Ezekiel bread": { type: "slice", gramsPerUnit: 34 },
   "White rice": { type: "dry3x" }, "Brown rice": { type: "dry3x" }, "Quinoa": { type: "dry3x" },
+  // Same idea, different expansion factors: pasta roughly 2.4x, farina roughly 4x.
+  "Pasta (cooked)": { type: "dry", yield: 2.4 }, "Cream of wheat (cooked)": { type: "dry", yield: 4 },
   "Egg whites": { type: "cartons" },
 };
 function ozOf(g) { return g / 28.3495; }
@@ -1333,6 +1335,13 @@ function formatMealItem(item, source) {
     return Math.round((item.grams * food.p) / 100) + "g protein (" + item.name + ")";
   }
   if (food && food.cat === "protein") return ozOf(item.grams).toFixed(1) + "oz " + item.name;
+  // Foods stored DRY (typically scanned goods — package labels are per-100g dry) display as the
+  // cooked weight that lands on the plate, since a meal card is a cooking instruction. Same
+  // presentation-only principle as measureByProtein: item.grams stays dry because that's the basis
+  // the macros and the solver work in, and the grocery list wants dry anyway.
+  if (food && food.basis === "dry" && food.cookedYield > 0) {
+    return "~" + Math.round(item.grams * food.cookedYield) + "g cooked " + item.name + " (" + Math.round(item.grams) + "g dry)";
+  }
   return Math.round(item.grams) + "g " + item.name;
 }
 
@@ -1433,11 +1442,18 @@ function computeCustomGrocery(override, source) {
     const grams = totals[name];
     const food = db.filter(function (f) { return f.name === name; })[0];
     const isProtein = food && food.cat === "protein";
-    const info = GROCERY_UNIT_INFO[name] || { type: isProtein ? "lb" : "oz" };
+    // Custom foods carry their own basis: stored-cooked converts to dry for shopping; stored-dry is
+    // already the shopping quantity and just gets labelled. Built-ins use GROCERY_UNIT_INFO.
+    let info = GROCERY_UNIT_INFO[name];
+    if (!info && food && food.basis === "cooked" && food.cookedYield > 0) info = { type: "dry", yield: food.cookedYield };
+    if (!info && food && food.basis === "dry") info = { type: "alreadyDry" };
+    if (!info) info = { type: isProtein ? "lb" : "oz" };
     let qty;
     if (info.type === "count") qty = String(Math.ceil(grams / info.gramsPerUnit));
     else if (info.type === "slice") qty = Math.ceil(grams / info.gramsPerUnit) + " slices";
     else if (info.type === "dry3x") qty = "~" + ozOf(grams / 3).toFixed(1) + " oz (dry)";
+    else if (info.type === "dry") qty = "~" + ozOf(grams / info.yield).toFixed(1) + " oz (dry)";
+    else if (info.type === "alreadyDry") qty = "~" + ozOf(grams).toFixed(1) + " oz (dry)";
     else if (info.type === "lb") qty = "~" + lbOf(grams).toFixed(2) + " lb";
     else if (info.type === "cartons") { const c = Math.ceil(ozOf(grams) / 32); qty = c + " carton" + (c > 1 ? "s" : "") + " (32oz)"; }
     else qty = "~" + ozOf(grams).toFixed(1) + " oz";
@@ -2494,7 +2510,7 @@ function programStateHasRealData(state) {
 // The build currently running. Surfaced in Settings -> Account, because "is the deploy actually
 // live?" has been the real answer to several apparent bugs, and inferring it from behaviour is slow
 // and error-prone. Compared against version.json by the update check below.
-const APP_VERSION = "2026-07-25T23:00:00";
+const APP_VERSION = "2026-07-26T00:15:00";
 
 // Signing out has to be unconditional, because every failure mode here ends the same way: a person
 // tapping a button that does nothing.
@@ -4150,9 +4166,9 @@ function App() {
     save(Object.assign({}, data, { likedFoodsByMeal: next }));
   }
 
-  function addCustomFood(name, cat, per100) {
+  function addCustomFood(name, cat, per100, extra) {
     const filtered = (data.customFoods || []).filter(function (f) { return f.name !== name; });
-    const next = filtered.concat([{ name: name, cat: cat, cal: per100.cal, p: per100.p, c: per100.c, f: per100.f }]);
+    const next = filtered.concat([Object.assign({ name: name, cat: cat, cal: per100.cal, p: per100.p, c: per100.c, f: per100.f }, extra || {})]);
     save(Object.assign({}, data, { customFoods: next }));
   }
   function removeCustomFood(name) {
@@ -6166,23 +6182,27 @@ function CustomFoodRow(props) {
       p: String(Math.round(food.p * 10) / 10),
       c: String(Math.round(food.c * 10) / 10),
       f: String(Math.round(food.f * 10) / 10),
+      basis: food.basis || "none", // "none" | "dry" | "cooked" — which state the per-100g numbers describe
+      cookedYield: String(food.cookedYield || 3),
     });
   }
   function setField(key, val) {
     setFields(Object.assign({}, fields, (function () { const o = {}; o[key] = val; return o; })()));
   }
   function saveEdit() {
+    const yieldNum = Math.max(1, Number(fields.cookedYield) || 3);
+    const extra = fields.basis === "none" ? {} : { basis: fields.basis, cookedYield: yieldNum };
     props.addCustomFood(food.name, fields.cat, {
       cal: Math.max(0, Number(fields.cal) || 0),
       p: Math.max(0, Number(fields.p) || 0),
       c: Math.max(0, Number(fields.c) || 0),
       f: Math.max(0, Number(fields.f) || 0),
-    });
+    }, extra);
     setFields(null);
   }
   if (!fields) {
     return h("div", { className: "search-result-row", style: { cursor: "pointer" }, onClick: beginEdit },
-      h("span", null, food.name + " (" + food.cat + ")"),
+      h("span", null, food.name + " (" + food.cat + (food.basis ? " · " + food.basis + " ×" + food.cookedYield : "") + ")"),
       h("span", { style: { display: "flex", alignItems: "center", gap: 8 } },
         h("span", { style: { fontSize: 11, color: "#737373" } }, "tap to edit"),
         h("button", {
@@ -6219,6 +6239,29 @@ function CustomFoodRow(props) {
     h("div", { style: { display: "flex", gap: 8, marginTop: 8 } },
       h("button", { className: "swap-save-btn", style: { flex: 1 }, onClick: saveEdit }, "Save"),
       h("button", { className: "ex-action-btn", onClick: function () { setFields(null); } }, "Cancel")
+    ),
+    // Basis: only matters for foods that change weight when cooked (rice, pasta, oats). Nutrition
+    // labels on such packages are per-100g DRY. Setting this makes the meal cards show the cooked
+    // plate weight and keeps the grocery list in dry shopping weight.
+    h("p", { style: { fontSize: 11, color: "#737373", margin: "10px 0 4px" } },
+      "Do these numbers describe the food dry (as packaged) or cooked (as eaten)? Leave as-is for foods that don't change weight."),
+    h("div", { style: { display: "flex", gap: 6 } },
+      [["none", "as-is"], ["dry", "dry"], ["cooked", "cooked"]].map(function (pair) {
+        return h("button", {
+          key: pair[0],
+          className: "week-btn" + (fields.basis === pair[0] ? " active" : ""),
+          onClick: function () { setField("basis", pair[0]); },
+        }, pair[1]);
+      }),
+      fields.basis !== "none" && h("label", { style: { flex: 1, fontSize: 11, color: "#737373" } },
+        "cooked ÷ dry",
+        h("input", {
+          type: "number", inputMode: "decimal", step: "0.1", min: "1",
+          value: fields.cookedYield,
+          onChange: function (e) { setField("cookedYield", e.target.value); },
+          style: { width: "100%" },
+        })
+      )
     )
   );
 }
@@ -6320,31 +6363,6 @@ function NutritionTab(props) {
       );
     })(),
 
-    // Shown on EVERY program, not just Custom. The old isCustomProgram gate predates scanned foods
-    // flowing into the shared programs' liked-food pickers — with that gate, a Cutting user could
-    // scan a food (it appears in their picker with no way to correct or remove it) while the
-    // management list silently never rendered.
-    h("div", { style: { marginBottom: 16 } },
-      h("button", {
-        onClick: function () { props.updateUiPrefs({ customFoodsExpanded: !props.uiPrefs.customFoodsExpanded }); },
-        style: { display: "flex", width: "100%", justifyContent: "space-between", alignItems: "center", background: "none", border: "none", padding: "8px 0", color: "inherit", cursor: "pointer" },
-      },
-        h("span", null, "Your Foods" + (props.customFoods.length > 0 ? " (" + props.customFoods.length + ")" : "")),
-        props.uiPrefs.customFoodsExpanded ? h(ChevronUp, { size: 16 }) : h(ChevronDown, { size: 16 })
-      ),
-      props.uiPrefs.customFoodsExpanded && h("div", { style: { marginTop: 8 } },
-        props.customFoods.length > 0 ? h("div", { className: "search-results", style: { marginBottom: 12 } },
-          props.customFoods.map(function (f) {
-            return h(CustomFoodRow, {
-              key: f.name, food: f,
-              addCustomFood: props.addCustomFood, removeCustomFood: props.removeCustomFood,
-            });
-          })
-        ) : null,
-        h("p", { style: { fontSize: "11px", color: "#737373", margin: 0 } },
-          "Scan or log a food below in your daily food log, and it's saved here permanently — no need to add it twice. Tap a food to fix its macros or category.")
-      )
-    ),
 
     props.nutrientWarnings && props.nutrientWarnings.length > 0 && h("div", { className: "plan-error", style: { marginBottom: 16 } },
       h("strong", null, "Nutrient overlap — worth a look:"),
@@ -6433,6 +6451,33 @@ function NutritionTab(props) {
           onRebalance: function (multiplier) { props.rebalanceDayAroundMeal(idx, multiplier); },
         });
       })
+    ),
+    // Sits between the meal plan and the daily food log / scanner: this is the list the scanner
+    // feeds, so managing it belongs next to where foods enter it, not at the top of the tab.
+    // Shown on EVERY program, not just Custom. The old isCustomProgram gate predates scanned foods
+    // flowing into the shared programs' liked-food pickers — with that gate, a Cutting user could
+    // scan a food (it appears in their picker with no way to correct or remove it) while the
+    // management list silently never rendered.
+    h("div", { style: { marginBottom: 16 } },
+      h("button", {
+        onClick: function () { props.updateUiPrefs({ customFoodsExpanded: !props.uiPrefs.customFoodsExpanded }); },
+        style: { display: "flex", width: "100%", justifyContent: "space-between", alignItems: "center", background: "none", border: "none", padding: "8px 0", color: "inherit", cursor: "pointer" },
+      },
+        h("span", null, "Your Foods" + (props.customFoods.length > 0 ? " (" + props.customFoods.length + ")" : "")),
+        props.uiPrefs.customFoodsExpanded ? h(ChevronUp, { size: 16 }) : h(ChevronDown, { size: 16 })
+      ),
+      props.uiPrefs.customFoodsExpanded && h("div", { style: { marginTop: 8 } },
+        props.customFoods.length > 0 ? h("div", { className: "search-results", style: { marginBottom: 12 } },
+          props.customFoods.map(function (f) {
+            return h(CustomFoodRow, {
+              key: f.name, food: f,
+              addCustomFood: props.addCustomFood, removeCustomFood: props.removeCustomFood,
+            });
+          })
+        ) : null,
+        h("p", { style: { fontSize: "11px", color: "#737373", margin: 0 } },
+          "Scan or log a food below in your daily food log, and it's saved here permanently — no need to add it twice. Tap a food to fix its macros or category.")
+      )
     ),
     h(FoodSearchLog, { foodLog: props.foodLog, logFood: props.logFood, removeEntry: props.removeFoodLogEntry, updateGrams: props.updateFoodLogGrams, allFoods: props.allFoods, addCustomFood: props.addCustomFood, quickFoods: props.quickFoods }),
     !isFutureDay && h("button", { className: "complete-btn", style: { marginBottom: 16 }, onClick: props.completeNutritionDay },
