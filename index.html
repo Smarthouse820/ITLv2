@@ -2473,7 +2473,7 @@ function programStateHasRealData(state) {
 }
 
 function App() {
-  const APP_VERSION = "2026-07-24T22:00:00";
+  const APP_VERSION = "2026-07-25T00:15:00";
   const [updateAvailable, setUpdateAvailable] = useState(false);
   useEffect(function () {
     function checkVersion() {
@@ -2920,6 +2920,75 @@ function App() {
       });
     return function () { cancelled = true; };
   }, [session]);
+
+  // ---- Coaching (coach ↔ client links) ----
+  // Reads go through the SECURITY DEFINER functions from migration 04 rather than querying the
+  // tables directly, so the "which clients are mine" logic lives in one place — the database —
+  // instead of being re-implemented in the client where it could drift from the policies.
+  //
+  // Pending invites are fetched for EVERY signed-in account, coach or not: being invited is
+  // something that happens TO you, and you can't accept what you can't see. The coach panel is
+  // gated separately below.
+  const [myClients, setMyClients] = useState(null);
+  const [pendingInvites, setPendingInvites] = useState([]);
+  const [coachingBusy, setCoachingBusy] = useState(false);
+
+  function refreshCoaching() {
+    if (!session) { setMyClients(null); setPendingInvites([]); return Promise.resolve(); }
+    return Promise.all([
+      supabaseClient.rpc("my_clients"),
+      supabaseClient.rpc("my_pending_invites"),
+    ]).then(function (r) {
+      // An error here means the migration hasn't been run yet, or the account simply has no
+      // coaching relationships. Neither is worth an error state — an empty list reads the same.
+      setMyClients(r[0].error ? [] : (r[0].data || []));
+      setPendingInvites(r[1].error ? [] : (r[1].data || []));
+    });
+  }
+  useEffect(function () { refreshCoaching(); }, [session]);
+
+  function inviteClient(email) {
+    setCoachingBusy(true);
+    return supabaseClient.rpc("invite_client", { client_email: email })
+      .then(function (r) {
+        // invite_client returns null for an unknown address AND for a self-invite, deliberately
+        // indistinguishable so this can't be used to probe who has an account. The message has to
+        // stay vague for the same reason — saying "no such user" would defeat the whole point.
+        if (r.error || !r.data) { showToast("Couldn't send that invitation"); return false; }
+        showToast("Invitation sent — they'll need to accept it");
+        return refreshCoaching().then(function () { return true; });
+      })
+      .finally(function () { setCoachingBusy(false); });
+  }
+  // Accept and decline are the same operation from the client's side, differing only in the status
+  // written. The database enforces that ONLY the client can move a link to 'active' — this function
+  // is a convenience, not the safeguard.
+  function respondToInvite(linkId, accept) {
+    setCoachingBusy(true);
+    return supabaseClient.from("coaching_links")
+      .update({ status: accept ? "active" : "revoked" }).eq("id", linkId)
+      .then(function (r) {
+        showToast(r.error ? "Couldn't update that invitation" : accept ? "Coach connected" : "Invitation declined");
+        return refreshCoaching();
+      })
+      .finally(function () { setCoachingBusy(false); });
+  }
+  // Takes a CLIENT id, not a link id — `my_clients()` doesn't return the link's primary key, so
+  // filtering on `id` here would have matched nothing and failed silently: the toast would say
+  // "Connection ended" while the link stayed active and the coach kept their access. Matching on
+  // the pair is equivalent anyway, since (coach_id, client_id) is unique.
+  function endCoaching(clientId) {
+    if (!session) return Promise.resolve();
+    setCoachingBusy(true);
+    return supabaseClient.from("coaching_links").update({ status: "revoked" })
+      .eq("coach_id", session.user.id).eq("client_id", clientId).select()
+      .then(function (r) {
+        if (r.error || !(r.data || []).length) { showToast("Couldn't end that connection"); }
+        else { showToast("Connection ended"); }
+        return refreshCoaching();
+      })
+      .finally(function () { setCoachingBusy(false); });
+  }
 
   // ---- Withings ----
   const [withingsStatus, setWithingsStatus] = useState(null); // null = not yet checked; {connected, latest}
@@ -4233,6 +4302,13 @@ function App() {
     tab === "settings"
       ? h("main", null, h(SettingsTab, {
           session: session, authChecked: authChecked, signUpWithEmail: signUpWithEmail, signInWithEmail: signInWithEmail, signOut: signOut,
+          myClients: myClients, pendingInvites: pendingInvites, coachingBusy: coachingBusy,
+          inviteClient: inviteClient, respondToInvite: respondToInvite, endCoaching: endCoaching,
+          // Who may TAKE ON clients. Reusing full_program_access is a deliberate stand-in, not a
+          // design statement: during the case study the coordinator is the only coach, and that flag
+          // already distinguishes them. If coaching later opens to any user this becomes `true`, or
+          // gets its own column — one line, and nothing else here changes.
+          canCoach: fullProgramAccess === true,
           backupToSupabase: backupToSupabaseManual, restoreFromSupabase: restoreFromSupabase,
           syncStatus: syncStatus, lastSyncedAt: lastSyncedAt,
           pushSettings: data.pushSettings, updatePushSettings: updatePushSettings,
@@ -6168,6 +6244,97 @@ function FreshDeviceRestorePrompt(props) {
   );
 }
 
+// Coach-side dashboard plus the client-side invitation prompt. Both live here because they're two
+// views of the same relationship, and keeping them together makes the asymmetry legible: a coach
+// can invite and can read, a client controls whether that ever starts, and either can end it.
+//
+// What a coach sees is deliberately a summary, not raw data — program, week, sessions logged, last
+// weigh-in, last active. Enough to spot someone who has stalled or gone quiet, which is the actual
+// job. It is NOT anonymised: coaching requires knowing who you're writing a program for. Isolation
+// comes from the link instead, and an account with no link is invisible.
+function CoachingPanel(props) {
+  const [email, setEmail] = useState("");
+  const clients = props.myClients || [];
+  const invites = props.pendingInvites || [];
+
+  function fmtWhen(ts) {
+    if (!ts) return "never";
+    const days = Math.floor((Date.now() - new Date(ts).getTime()) / 86400000);
+    return days === 0 ? "today" : days === 1 ? "yesterday" : days + " days ago";
+  }
+
+  return h("div", null,
+    // ---- Client side: someone has asked to coach you ----
+    invites.length > 0 && h("div", { style: { marginBottom: 14 } },
+      h("div", { style: { fontSize: 12, color: "#f0b429", marginBottom: 8 } },
+        invites.length === 1 ? "You have a coaching invitation" : "You have " + invites.length + " coaching invitations"),
+      invites.map(function (inv) {
+        return h("div", { key: inv.link_id, style: { background: "#171717", border: "1px solid #404040", borderRadius: 8, padding: 12, marginBottom: 8 } },
+          h("div", { style: { fontSize: 13, marginBottom: 4 } }, inv.coach_email),
+          h("p", { style: { fontSize: 11, color: "#737373", margin: "0 0 10px", lineHeight: 1.5 } },
+            "Accepting lets them see your program, training history and weigh-ins. They cannot change your data, and you can end this at any time."),
+          h("div", { style: { display: "flex", gap: 8 } },
+            h("button", {
+              className: "ex-action-btn", style: { flex: 1, background: "#1d4ed8", color: "#fff", borderColor: "#1d4ed8" },
+              disabled: props.busy,
+              onClick: function () { props.respondToInvite(inv.link_id, true); },
+            }, "Accept"),
+            h("button", {
+              className: "ex-action-btn", style: { flex: "0 0 auto" }, disabled: props.busy,
+              onClick: function () { props.respondToInvite(inv.link_id, false); },
+            }, "Decline")
+          )
+        );
+      })
+    ),
+
+    // ---- Coach side ----
+    props.canCoach && h("div", null,
+      clients.length === 0
+        ? h("p", { style: { fontSize: 12, color: "#737373", margin: "0 0 10px", lineHeight: 1.5 } },
+            "No clients yet. Invite someone by the email address they signed up with — they'll need to accept before you can see anything.")
+        : h("div", { style: { marginBottom: 10 } },
+            clients.map(function (c) {
+              const stale = c.last_active && (Date.now() - new Date(c.last_active).getTime()) > 5 * 86400000;
+              return h("div", { key: c.client_id, style: { background: "#171717", border: "1px solid " + (stale ? "#7a5c1a" : "#262626"), borderRadius: 8, padding: 12, marginBottom: 8 } },
+                h("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 8 } },
+                  h("span", { style: { fontSize: 13, overflow: "hidden", textOverflow: "ellipsis" } }, c.email),
+                  h("span", { style: { fontSize: 11, color: stale ? "#f0b429" : "#737373", flexShrink: 0 } }, fmtWhen(c.last_active))
+                ),
+                h("div", { style: { fontSize: 11, color: "#a3a3a3", marginTop: 6 } },
+                  (c.active_program ? c.active_program.charAt(0).toUpperCase() + c.active_program.slice(1) : "—") +
+                  " · week " + (c.current_week != null ? c.current_week : "—") +
+                  " · " + (c.sessions_logged || 0) + " week" + ((c.sessions_logged || 0) === 1 ? "" : "s") + " logged" +
+                  (c.latest_weight != null ? " · " + c.latest_weight + " lb" : "")),
+                h("button", {
+                  className: "ex-action-btn", style: { marginTop: 8, borderColor: "#f87171", color: "#f87171", fontSize: 11, padding: "4px 8px" },
+                  disabled: props.busy,
+                  onClick: function () {
+                    if (window.confirm("End coaching with " + c.email + "? You'll lose access to their data immediately. They keep everything — nothing of theirs is deleted.")) {
+                      props.endCoaching(c.client_id);
+                    }
+                  },
+                }, "End coaching")
+              );
+            })
+          ),
+      h("div", { style: { display: "flex", gap: 8 } },
+        h("input", {
+          type: "email", placeholder: "client@email.com", value: email, autoComplete: "off",
+          onChange: function (e) { setEmail(e.target.value); },
+          style: { flex: 1, minWidth: 0, background: "#0a0a0a", border: "1px solid #404040", borderRadius: 8, padding: "8px 10px", fontSize: 13, color: "#f5f5f5" },
+        }),
+        h("button", {
+          className: "ex-action-btn", style: { flex: "0 0 auto" }, disabled: props.busy || !email,
+          onClick: function () { props.inviteClient(email).then(function (ok) { if (ok) setEmail(""); }); },
+        }, props.busy ? "…" : "Invite")
+      ),
+      h("p", { style: { fontSize: 11, color: "#525252", margin: "8px 0 0", lineHeight: 1.5 } },
+        "You'll see their program, week, sessions logged and latest weigh-in. You can't edit their data.")
+    )
+  );
+}
+
 function SettingsTab(props) {
   const ps = props.pushSettings || { enabled: false, meals: true, hydration: true, supplements: true };
   const masterOn = !!ps.enabled;
@@ -6204,6 +6371,27 @@ function SettingsTab(props) {
       h("p", { style: { fontSize: 11, color: "#737373", margin: "10px 0 0" } },
         "Your data automatically backs up to your account as you use the app. Restore replaces what's on THIS device with your account's saved copy \u2014 useful after clearing browser storage or on a new device.")
     ),
+
+    // ---- Coaching ----
+    // Shown when there's something to act on: an invitation waiting, existing clients, or the
+    // ability to take some on. Hidden entirely otherwise, so a participant who is simply using the
+    // app never sees machinery that doesn't apply to them.
+    (props.canCoach || (props.pendingInvites && props.pendingInvites.length > 0) || (props.myClients && props.myClients.length > 0)) &&
+      h(SettingsSection, {
+        id: "coaching", title: "Coaching",
+        status: (props.pendingInvites && props.pendingInvites.length > 0)
+          ? props.pendingInvites.length + " invitation" + (props.pendingInvites.length === 1 ? "" : "s")
+          : (props.myClients && props.myClients.length > 0) ? props.myClients.length + " client" + (props.myClients.length === 1 ? "" : "s") : "None",
+        statusOn: !!(props.pendingInvites && props.pendingInvites.length > 0),
+        defaultOpen: !!(props.pendingInvites && props.pendingInvites.length > 0),
+        uiPrefs: props.uiPrefs, updateUiPrefs: props.updateUiPrefs,
+      },
+        h(CoachingPanel, {
+          myClients: props.myClients, pendingInvites: props.pendingInvites, canCoach: props.canCoach,
+          inviteClient: props.inviteClient, respondToInvite: props.respondToInvite,
+          endCoaching: props.endCoaching, busy: props.coachingBusy,
+        })
+      ),
 
     // ---- Reminders — master switch owns the subscription; the three category flags just decide
     // what's included in the schedule once it's on. ----
