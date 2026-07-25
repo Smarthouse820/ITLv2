@@ -2473,7 +2473,7 @@ function programStateHasRealData(state) {
 }
 
 function App() {
-  const APP_VERSION = "2026-07-25T00:15:00";
+  const APP_VERSION = "2026-07-25T00:35:00";
   const [updateAvailable, setUpdateAvailable] = useState(false);
   useEffect(function () {
     function checkVersion() {
@@ -2932,17 +2932,26 @@ function App() {
   const [myClients, setMyClients] = useState(null);
   const [pendingInvites, setPendingInvites] = useState([]);
   const [coachingBusy, setCoachingBusy] = useState(false);
+  // Whether this account is actually designated a coach, read from the database rather than
+  // inferred from an unrelated flag. FAILS CLOSED: any error resolves to false.
+  //
+  // This governs the UI only. The enforcement lives in the insert policy on coaching_links and the
+  // guard inside invite_client(), both of which hold no matter what this value is — which is the
+  // point, since a client-side boolean is a hint, never a boundary.
+  const [amICoach, setAmICoach] = useState(false);
 
   function refreshCoaching() {
-    if (!session) { setMyClients(null); setPendingInvites([]); return Promise.resolve(); }
+    if (!session) { setMyClients(null); setPendingInvites([]); setAmICoach(false); return Promise.resolve(); }
     return Promise.all([
       supabaseClient.rpc("my_clients"),
       supabaseClient.rpc("my_pending_invites"),
+      supabaseClient.rpc("am_i_coach"),
     ]).then(function (r) {
       // An error here means the migration hasn't been run yet, or the account simply has no
       // coaching relationships. Neither is worth an error state — an empty list reads the same.
       setMyClients(r[0].error ? [] : (r[0].data || []));
       setPendingInvites(r[1].error ? [] : (r[1].data || []));
+      setAmICoach(!r[2].error && r[2].data === true);
     });
   }
   useEffect(function () { refreshCoaching(); }, [session]);
@@ -4304,11 +4313,7 @@ function App() {
           session: session, authChecked: authChecked, signUpWithEmail: signUpWithEmail, signInWithEmail: signInWithEmail, signOut: signOut,
           myClients: myClients, pendingInvites: pendingInvites, coachingBusy: coachingBusy,
           inviteClient: inviteClient, respondToInvite: respondToInvite, endCoaching: endCoaching,
-          // Who may TAKE ON clients. Reusing full_program_access is a deliberate stand-in, not a
-          // design statement: during the case study the coordinator is the only coach, and that flag
-          // already distinguishes them. If coaching later opens to any user this becomes `true`, or
-          // gets its own column — one line, and nothing else here changes.
-          canCoach: fullProgramAccess === true,
+          canCoach: amICoach,
           backupToSupabase: backupToSupabaseManual, restoreFromSupabase: restoreFromSupabase,
           syncStatus: syncStatus, lastSyncedAt: lastSyncedAt,
           pushSettings: data.pushSettings, updatePushSettings: updatePushSettings,
