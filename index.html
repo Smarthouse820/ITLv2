@@ -2494,7 +2494,7 @@ function programStateHasRealData(state) {
 // The build currently running. Surfaced in Settings -> Account, because "is the deploy actually
 // live?" has been the real answer to several apparent bugs, and inferring it from behaviour is slow
 // and error-prone. Compared against version.json by the update check below.
-const APP_VERSION = "2026-07-25T22:30:00";
+const APP_VERSION = "2026-07-25T23:00:00";
 
 // Signing out has to be unconditional, because every failure mode here ends the same way: a person
 // tapping a button that does nothing.
@@ -5509,7 +5509,12 @@ function BarcodeLogger(props) {
   // coerces "" to 0, the box renders "0", and the next digit lands after it — "05" for 5. A string
   // can be empty mid-edit, which is the whole fix.
   const [grams, setGrams] = useState("100");
-  const [macroEdits, setMacroEdits] = useState(null); // { cal, p, c, f } as strings, per 100g
+  const [macroEdits, setMacroEdits] = useState(null); // { cal, p, c, f } as strings, in macroBasis units
+  // Which basis the editable macro fields are showing. Storage is ALWAYS per-100g — this only
+  // changes what the fields display and how typed values are interpreted. US labels print per
+  // serving, so when the product declares one, per-serving is the default: the numbers on screen
+  // then match the numbers on the package, which is what makes them checkable at a glance.
+  const [macroBasis, setMacroBasis] = useState("100g"); // "100g" | "serving"
   const [errorMsg, setErrorMsg] = useState("");
   const videoRef = useRef(null);
   const streamRef = useRef(null);
@@ -5533,14 +5538,38 @@ function BarcodeLogger(props) {
   function editMacro(key, val) {
     setMacroEdits(Object.assign({}, macroEdits, (function () { const o = {}; o[key] = val; return o; })()));
   }
-  // The committed per-100g numbers: the edited strings parsed, empty or junk reading as 0.
-  function editedPer100() {
+  function roundMacros(m) {
+    return { cal: String(Math.round(m.cal)), p: String(Math.round(m.p * 10) / 10),
+             c: String(Math.round(m.c * 10) / 10), f: String(Math.round(m.f * 10) / 10) };
+  }
+  function parsedFields() {
     return {
       cal: Math.max(0, Number(macroEdits.cal) || 0),
       p: Math.max(0, Number(macroEdits.p) || 0),
       c: Math.max(0, Number(macroEdits.c) || 0),
       f: Math.max(0, Number(macroEdits.f) || 0),
     };
+  }
+  // The committed per-100g numbers, whatever basis the fields are displaying. Everything stored —
+  // the log entry and the saved food — is per-100g; the serving basis exists only on screen.
+  function editedPer100() {
+    const v = parsedFields();
+    const sg = product && product.servingGrams;
+    if (macroBasis === "serving" && sg > 0) {
+      const k = 100 / sg;
+      return { cal: v.cal * k, p: v.p * k, c: v.c * k, f: v.f * k };
+    }
+    return v;
+  }
+  // Switching basis converts what's currently in the fields rather than reloading from the lookup,
+  // so an edit made in one basis survives the flip. Rounding on each flip loses a hair of
+  // precision; against label-grade data that's noise.
+  function switchBasis(next) {
+    if (next === macroBasis || !product || !(product.servingGrams > 0)) return;
+    const v = parsedFields();
+    const k = next === "serving" ? product.servingGrams / 100 : 100 / product.servingGrams;
+    setMacroEdits(roundMacros({ cal: v.cal * k, p: v.p * k, c: v.c * k, f: v.f * k }));
+    setMacroBasis(next);
   }
 
   function handleBarcode(code) {
@@ -5555,14 +5584,17 @@ function BarcodeLogger(props) {
         // Prefill with the product's declared serving when it has one — a bar or a scoop is far
         // more often eaten as "one serving" than as 100g. Falls back to the 100g convention.
         setGrams(String(result.servingGrams || 100));
-        // Seed the editable fields from the lookup, rounded the way a label prints them —
-        // "23.0" invites retyping; "23" doesn't.
-        setMacroEdits({
-          cal: String(Math.round(result.per100.cal)),
-          p: String(Math.round(result.per100.p * 10) / 10),
-          c: String(Math.round(result.per100.c * 10) / 10),
-          f: String(Math.round(result.per100.f * 10) / 10),
-        });
+        // Seed the fields in the basis the person will compare against: per-serving when the
+        // product declares one (matching the label), per-100g otherwise. Rounded the way a label
+        // prints — "23.0" invites retyping; "23" doesn't.
+        if (result.servingGrams > 0) {
+          const k = result.servingGrams / 100;
+          setMacroBasis("serving");
+          setMacroEdits(roundMacros({ cal: result.per100.cal * k, p: result.per100.p * k, c: result.per100.c * k, f: result.per100.f * k }));
+        } else {
+          setMacroBasis("100g");
+          setMacroEdits(roundMacros(result.per100));
+        }
         setMode("found");
       }
     });
@@ -5675,8 +5707,16 @@ function BarcodeLogger(props) {
     ),
     mode === "found" && product && macroEdits && h("div", { className: "rate-panel" },
       h("p", null, product.name),
+      product.servingGrams > 0 && h("div", { style: { display: "flex", gap: 6, marginTop: 4 } },
+        h("button", { className: "week-btn" + (macroBasis === "serving" ? " active" : ""), onClick: function () { switchBasis("serving"); } },
+          "per serving (" + product.servingGrams + "g)"),
+        h("button", { className: "week-btn" + (macroBasis === "100g" ? " active" : ""), onClick: function () { switchBasis("100g"); } },
+          "per 100g")
+      ),
       h("p", { style: { color: "#525252", fontSize: 12, margin: "4px 0" } },
-        "Per 100g — check against the label and correct anything that's wrong:"),
+        macroBasis === "serving"
+          ? "Per serving — should match the label" + (product.servingLabel ? " (" + product.servingLabel + ")" : "") + ". Correct anything that's wrong:"
+          : "Per 100g — check against the label and correct anything that's wrong:"),
       h("div", { style: { display: "flex", gap: 6, marginTop: 4 } },
         [["cal", "cal"], ["p", "protein"], ["c", "carbs"], ["f", "fat"]].map(function (pair) {
           return h("label", { key: pair[0], style: { flex: 1, fontSize: 11, color: "#737373" } },
@@ -5693,10 +5733,16 @@ function BarcodeLogger(props) {
       h("div", { className: "swap-form-row", style: { marginTop: 8 } },
         h("input", { type: "number", inputMode: "numeric", value: grams, onChange: function (e) { setGrams(e.target.value); }, placeholder: "grams" }),
       ),
-      h("p", { style: { fontSize: 11, color: "#737373", margin: "4px 0 0" } },
-        product.servingGrams
-          ? "Pre-filled with the label's serving" + (product.servingLabel ? " (" + product.servingLabel + ")" : "") + " — change it to what you actually ate."
-          : "No serving size on file — pre-filled at 100g. Enter what you actually ate."),
+      (function () {
+        const g = Math.max(0, Number(grams) || 0);
+        const per100 = editedPer100();
+        const line = g > 0
+          ? "Will log " + g + "g = " + Math.round(per100.cal * g / 100) + " cal · " +
+            (Math.round(per100.p * g / 10) / 10) + "p / " + (Math.round(per100.c * g / 10) / 10) + "c / " + (Math.round(per100.f * g / 10) / 10) + "f"
+          : "Enter the grams you actually ate.";
+        const origin = product.servingGrams > 0 ? "Grams pre-filled with the label's serving." : "No serving size on file — grams pre-filled at 100.";
+        return h("p", { style: { fontSize: 11, color: "#737373", margin: "4px 0 0" } }, line + " " + origin);
+      })(),
       h("div", { style: { display: "flex", gap: 8, marginTop: 8 } },
         h("button", {
           className: "swap-save-btn", style: { flex: 1 },
