@@ -2510,7 +2510,7 @@ function programStateHasRealData(state) {
 // The build currently running. Surfaced in Settings -> Account, because "is the deploy actually
 // live?" has been the real answer to several apparent bugs, and inferring it from behaviour is slow
 // and error-prone. Compared against version.json by the update check below.
-const APP_VERSION = "2026-07-26T00:15:00";
+const APP_VERSION = "2026-07-26T00:45:00";
 
 // Signing out has to be unconditional, because every failure mode here ends the same way: a person
 // tapping a button that does nothing.
@@ -3353,9 +3353,20 @@ function App() {
   // whatever the week's normal plan already is.
   const dateOverride = prog.mealDateOverrides[nutritionSelectedDate];
   const hasDateOverride = !!(dateOverride && Object.keys(dateOverride).length);
+  // Overridden meals regenerate their display text from items[] on EVERY render. The `food` string
+  // stored inside an override is a snapshot from swap time and goes stale the moment a food it
+  // references changes — exactly what happened when a scanned rice was reclassified as dry-basis
+  // after the swap and the card kept showing the dry grams. Base (non-overridden) meals keep their
+  // hand-written prose untouched. Zero-gram items are skipped, matching how the strings were built.
+  function freshenOverrideMeal(m) {
+    if (!m || !m.items || !m.items.length) return m;
+    const txt = m.items.filter(function (it) { return it.grams > 0; })
+      .map(function (it) { return formatMealItem(it, allFoods); }).join(" + ");
+    return Object.assign({}, m, { food: txt });
+  }
   const baseMeals = def.mealsByWeek[nutritionDisplayWeek].map(function (m) {
-    if (dateOverride && dateOverride[m.id]) return dateOverride[m.id];
-    return (weekOverride && weekOverride[m.id]) ? weekOverride[m.id] : m;
+    if (dateOverride && dateOverride[m.id]) return freshenOverrideMeal(dateOverride[m.id]);
+    return (weekOverride && weekOverride[m.id]) ? freshenOverrideMeal(weekOverride[m.id]) : m;
   });
   // Training-time macro bias: only for the Custom program, only when a training time was entered in
   // the wizard, only on days that actually have a lifting session, and only when nothing on this
