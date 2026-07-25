@@ -2494,7 +2494,7 @@ function programStateHasRealData(state) {
 // The build currently running. Surfaced in Settings -> Account, because "is the deploy actually
 // live?" has been the real answer to several apparent bugs, and inferring it from behaviour is slow
 // and error-prone. Compared against version.json by the update check below.
-const APP_VERSION = "2026-07-25T22:00:00";
+const APP_VERSION = "2026-07-25T22:30:00";
 
 // Signing out has to be unconditional, because every failure mode here ends the same way: a person
 // tapping a button that does nothing.
@@ -5451,7 +5451,7 @@ function isPlausibleBarcodeLength(code) {
 }
 
 function lookupBarcode(barcode) {
-  const url = "https://world.openfoodfacts.org/api/v2/product/" + encodeURIComponent(barcode) + ".json?fields=product_name,brands,nutriments";
+  const url = "https://world.openfoodfacts.org/api/v2/product/" + encodeURIComponent(barcode) + ".json?fields=product_name,brands,nutriments,serving_size,serving_quantity";
   return fetch(url, { headers: { "User-Agent": "CuttingTracker/1.0 (personal fitness app)" } })
     .then(function (res) { return res.json(); })
     .then(function (data) {
@@ -5461,8 +5461,23 @@ function lookupBarcode(barcode) {
         return { error: "Product found, but it doesn't have nutrition data on file." };
       }
       const name = data.product.product_name || "Unknown product" + (data.product.brands ? " (" + data.product.brands + ")" : "");
+      // The label's serving size, when the product declares one (a bar, a scoop, a slice).
+      // Community data, so trusted only within reason: serving_quantity preferred (numeric grams),
+      // falling back to parsing "40 g" out of the serving_size string. Anything missing, non-gram
+      // (e.g. "2 cookies" with no weight), or implausible (<1g or >1500g) is treated as absent and
+      // the panel falls back to the 100g convention the nutrition data itself uses.
+      let servingGrams = null;
+      const sq = Number(data.product.serving_quantity);
+      if (sq >= 1 && sq <= 1500) servingGrams = Math.round(sq);
+      else {
+        const sm = /([\d.]+)\s*g/i.exec(data.product.serving_size || "");
+        const sg = sm ? Number(sm[1]) : NaN;
+        if (sg >= 1 && sg <= 1500) servingGrams = Math.round(sg);
+      }
       return {
         name: name,
+        servingGrams: servingGrams, // null when the product doesn't declare a usable one
+        servingLabel: (data.product.serving_size || "").trim() || null,
         per100: {
           cal: n["energy-kcal_100g"] || 0,
           p: n["proteins_100g"] || 0,
@@ -5537,7 +5552,9 @@ function BarcodeLogger(props) {
         setMode("error");
       } else {
         setProduct(result);
-        setGrams("100");
+        // Prefill with the product's declared serving when it has one — a bar or a scoop is far
+        // more often eaten as "one serving" than as 100g. Falls back to the 100g convention.
+        setGrams(String(result.servingGrams || 100));
         // Seed the editable fields from the lookup, rounded the way a label prints them —
         // "23.0" invites retyping; "23" doesn't.
         setMacroEdits({
@@ -5676,6 +5693,10 @@ function BarcodeLogger(props) {
       h("div", { className: "swap-form-row", style: { marginTop: 8 } },
         h("input", { type: "number", inputMode: "numeric", value: grams, onChange: function (e) { setGrams(e.target.value); }, placeholder: "grams" }),
       ),
+      h("p", { style: { fontSize: 11, color: "#737373", margin: "4px 0 0" } },
+        product.servingGrams
+          ? "Pre-filled with the label's serving" + (product.servingLabel ? " (" + product.servingLabel + ")" : "") + " — change it to what you actually ate."
+          : "No serving size on file — pre-filled at 100g. Enter what you actually ate."),
       h("div", { style: { display: "flex", gap: 8, marginTop: 8 } },
         h("button", {
           className: "swap-save-btn", style: { flex: 1 },
