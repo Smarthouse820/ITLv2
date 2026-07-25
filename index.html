@@ -2487,7 +2487,7 @@ function programStateHasRealData(state) {
 // The build currently running. Surfaced in Settings -> Account, because "is the deploy actually
 // live?" has been the real answer to several apparent bugs, and inferring it from behaviour is slow
 // and error-prone. Compared against version.json by the update check below.
-const APP_VERSION = "2026-07-25T03:00:00";
+const APP_VERSION = "2026-07-25T03:15:00";
 
 // Signing out has to be unconditional, because every failure mode here ends the same way: a person
 // tapping a button that does nothing.
@@ -7685,6 +7685,34 @@ function ConsentGate(props) {
   const [state, setState] = useState("checking"); // checking | needed | error | ok
   const [saving, setSaving] = useState(false);
   const [scrolledToEnd, setScrolledToEnd] = useState(false);
+  const scrollRef = useRef(null);
+
+  // Two ways the "scroll to the end" gate can strand someone, both of which it did:
+  //
+  //   1. The outer container was minHeight:100vh, so it grew past the viewport and the PAGE
+  //      scrolled rather than the inner div. The div's onScroll never fired, so reaching the bottom
+  //      did nothing. Fixed by pinning the outer height and letting only the middle pane scroll.
+  //   2. On a tall screen the text may not overflow at all — no scroll is possible, so no scroll
+  //      event can ever arrive, and the button stays disabled forever with no way forward.
+  //
+  // So: enable immediately when there's nothing to scroll, and listen in the capture phase at the
+  // window level, which catches scrolls from any element regardless of which one is actually moving.
+  function checkAtEnd() {
+    const el = scrollRef.current;
+    if (!el) return;
+    if (el.scrollHeight <= el.clientHeight + 4) { setScrolledToEnd(true); return; }
+    if (el.scrollHeight - el.scrollTop - el.clientHeight < 48) setScrolledToEnd(true);
+  }
+  useEffect(function () {
+    if (state !== "needed") return;
+    checkAtEnd();
+    window.addEventListener("scroll", checkAtEnd, true);
+    window.addEventListener("resize", checkAtEnd);
+    return function () {
+      window.removeEventListener("scroll", checkAtEnd, true);
+      window.removeEventListener("resize", checkAtEnd);
+    };
+  }, [state]);
 
   function check() {
     setState("checking");
@@ -7722,7 +7750,7 @@ function ConsentGate(props) {
     h("button", { className: "ex-action-btn", style: { marginTop: 12, background: "#1d4ed8", color: "#fff", borderColor: "#1d4ed8" }, onClick: check }, "Try again")
   ));
 
-  return h("div", { style: { minHeight: "100vh", background: "#0a0a0a", color: "#f5f5f5", display: "flex", flexDirection: "column", fontFamily: "inherit" } },
+  return h("div", { style: { height: "100vh", maxHeight: "100vh", background: "#0a0a0a", color: "#f5f5f5", display: "flex", flexDirection: "column", fontFamily: "inherit", overflow: "hidden" } },
     h("div", { style: { padding: "20px 20px 12px", borderBottom: "1px solid #262626", flexShrink: 0 } },
       h("img", { src: LOGO_HEADER_URI, alt: "In The Lab Fitness", style: { height: 32, marginBottom: 12 } }),
       h("h2", { style: { margin: 0, fontSize: 17 } }, "Before you start"),
@@ -7732,11 +7760,9 @@ function ConsentGate(props) {
     // Scrolling to the end is required before the button enables. Not a legal device — it just
     // means nobody agrees to a wall of text they haven't seen the bottom of.
     h("div", {
-      onScroll: function (e) {
-        const el = e.target;
-        if (el.scrollHeight - el.scrollTop - el.clientHeight < 40) setScrolledToEnd(true);
-      },
-      style: { flex: 1, overflowY: "auto", padding: "16px 20px", WebkitOverflowScrolling: "touch" },
+      ref: scrollRef,
+      onScroll: checkAtEnd,
+      style: { flex: 1, minHeight: 0, overflowY: "auto", padding: "16px 20px", WebkitOverflowScrolling: "touch" },
     },
       CONSENT_SECTIONS.map(function (s, i) {
         return h("div", { key: i, style: { marginBottom: 18 } },
