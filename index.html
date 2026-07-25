@@ -2465,7 +2465,7 @@ function programStateHasRealData(state) {
 }
 
 function App() {
-  const APP_VERSION = "2026-07-24T20:25:00";
+  const APP_VERSION = "2026-07-24T20:40:00";
   const [updateAvailable, setUpdateAvailable] = useState(false);
   useEffect(function () {
     function checkVersion() {
@@ -3657,7 +3657,7 @@ function App() {
       return Object.assign({}, slot, { p: Math.round(perMeal.p), c: Math.round(perMeal.c), f: Math.round(perMeal.f) });
     });
     save(Object.assign({}, data, { customProgramConfig: Object.assign({}, config, { macros: newMacros, slots: newSlots, currentWeight: latestWeight }) }));
-    showToast("Target updated to " + newMacros.cal + " cal — regenerate your meals from each meal card's Customize section to match.");
+    showToast("Target updated to " + newMacros.cal + " cal — regenerate your meals from each meal card's Replace Food Item section to match.");
   }
   // Lightweight settings edit — updates just the inputs that can change on their own (current
   // weight, activity level, diet style) and recalculates macros the same way the original wizard
@@ -3685,7 +3685,7 @@ function App() {
         macros: newMacros, slots: newSlots, currentWeight: newWeight, activity: newActivity, dietStyle: newDietStyle,
       }),
     }));
-    showToast("Settings updated, target now " + newMacros.cal + " cal — regenerate your meals from each meal card's Customize section to match.");
+    showToast("Settings updated, target now " + newMacros.cal + " cal — regenerate your meals from each meal card's Replace Food Item section to match.");
   }
   // Toggles RIR mode for whichever program is currently active — routes to the same shared-vs-
   // per-program storage exerciseState itself already uses, since the two are fundamentally tied
@@ -4956,7 +4956,7 @@ function AdaptiveTDEESection(props) {
             props.isCustomProgram && h("button", {
               className: "swap-save-btn", style: { width: "100%" },
               onClick: function () {
-                if (window.confirm("Update your target to " + tdee.impliedTDEE + " cal/day (adjusted for your cut/bulk/maintain goal)? You'll still need to regenerate your meals from each meal card's Customize section to match the new numbers.")) {
+                if (window.confirm("Update your target to " + tdee.impliedTDEE + " cal/day (adjusted for your cut/bulk/maintain goal)? You'll still need to regenerate your meals from each meal card's Replace Food Item section to match the new numbers.")) {
                   props.updateMacrosFromAdaptiveTDEE();
                 }
               },
@@ -5577,8 +5577,20 @@ function MealCard(props) {
   const status = props.status;
   const supplements = props.supplements || [];
   const hasSupplements = supplements.length > 0;
+  // The chevron used to appear only when a meal had supplements attached. It now governs
+  // everything secondary on the card — supplements, the ingredient swap, and the food picker —
+  // so a meal card at rest shows what you're eating and how much of it you ate, and nothing else.
+  // The status buttons (Ate all / ¾ / ½ / Skip) deliberately stay outside it: those are the
+  // reason the card exists, and burying the primary action behind a tap would be a bad trade.
+  const hasCollapsibleExtras = hasSupplements || !!props.mealSwapControl || !!props.showCustomize;
   const allSuppsChecked = hasSupplements && supplements.every(function (s) { return !!props.logsToday[s.id]; });
-  const [expanded, setExpanded] = useState(!allSuppsChecked);
+  // `!allSuppsChecked` was fine when this collapse only ever held supplements: a meal with none
+  // computed allSuppsChecked === false and started expanded, which showed nothing either way. Now
+  // that the swap and food-picker controls live in here too, that same default would leave them
+  // open on every meal that has no supplements — i.e. most of them — which is exactly what this
+  // change is meant to stop. Expanded on load now means one thing only: there are supplements
+  // still to take.
+  const [expanded, setExpanded] = useState(hasSupplements && !allSuppsChecked);
   const prevAllChecked = useRef(allSuppsChecked);
   useEffect(function () {
     if (allSuppsChecked && !prevAllChecked.current) setExpanded(false); // just finished — hide
@@ -5607,7 +5619,7 @@ function MealCard(props) {
         h("span", null, m.name),
         h("div", { style: { display: "flex", alignItems: "center", gap: 6 } },
           h("span", null, m.time),
-          hasSupplements && h("button", {
+          hasCollapsibleExtras && h("button", {
             onClick: function () { setExpanded(!expanded); },
             style: { display: "flex", background: "none", border: "none", padding: 0, color: "#737373", cursor: "pointer" },
           }, expanded ? h(ChevronUp, { size: 16 }) : h(ChevronDown, { size: 16 }))
@@ -5628,7 +5640,7 @@ function MealCard(props) {
           }, opt.label);
         })
       ),
-      props.mealSwapControl ? props.mealSwapControl : null,
+      expanded && props.mealSwapControl ? props.mealSwapControl : null,
       hasSupplements && expanded && h(SupplementSection, {
         title: "Also take", supplements: supplements,
         logsToday: props.logsToday, toggleLog: props.toggleLog, disabled: props.disabled,
@@ -5638,12 +5650,12 @@ function MealCard(props) {
       // tab — collapsed by default, same as every other collapsible section in this app. Regenerating
       // here applies immediately to whichever week is currently on screen; there's no separate
       // "apply to week" step, since this tab already knows which week that is.
-      props.showCustomize && h("div", { style: { marginTop: 8 } },
+      expanded && props.showCustomize && h("div", { style: { marginTop: 8 } },
         h("button", {
           onClick: function () { props.onToggleCustomize(); },
           style: { display: "flex", width: "100%", justifyContent: "space-between", alignItems: "center", background: "none", border: "none", padding: "4px 0", color: "#737373", cursor: "pointer", fontSize: 12 },
         },
-          h("span", null, "Customize" + (likedForMeal.length > 0 ? " (" + likedForMeal.length + " liked)" : "")),
+          h("span", null, "Replace Food Item" + (likedForMeal.length > 0 ? " (" + likedForMeal.length + " liked)" : "")),
           customizeExpanded ? h(ChevronUp, { size: 14 }) : h(ChevronDown, { size: 14 })
         ),
         customizeExpanded && h("div", { style: { marginTop: 8 } },
