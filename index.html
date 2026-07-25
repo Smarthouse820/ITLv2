@@ -2494,7 +2494,7 @@ function programStateHasRealData(state) {
 // The build currently running. Surfaced in Settings -> Account, because "is the deploy actually
 // live?" has been the real answer to several apparent bugs, and inferring it from behaviour is slow
 // and error-prone. Compared against version.json by the update check below.
-const APP_VERSION = "2026-07-25T04:35:00";
+const APP_VERSION = "2026-07-25T21:30:00";
 
 // Signing out has to be unconditional, because every failure mode here ends the same way: a person
 // tapping a button that does nothing.
@@ -5489,7 +5489,12 @@ function BarcodeLogger(props) {
   const [mode, setMode] = useState("idle"); // idle | scanning | loading | found | error | manual
   const [manualCode, setManualCode] = useState("");
   const [product, setProduct] = useState(null);
-  const [grams, setGrams] = useState(100);
+  // grams and the macro fields hold RAW TEXT while the panel is open, parsed to numbers only when
+  // "Log It" commits. Storing them as numbers looks tidier but breaks typing: clearing the field
+  // coerces "" to 0, the box renders "0", and the next digit lands after it — "05" for 5. A string
+  // can be empty mid-edit, which is the whole fix.
+  const [grams, setGrams] = useState("100");
+  const [macroEdits, setMacroEdits] = useState(null); // { cal, p, c, f } as strings, per 100g
   const [errorMsg, setErrorMsg] = useState("");
   const videoRef = useRef(null);
   const streamRef = useRef(null);
@@ -5506,6 +5511,23 @@ function BarcodeLogger(props) {
 
   useEffect(function () { return stopCamera; }, []);
 
+  // Open Food Facts data is community-entered and sometimes wrong (stale label, per-serving values
+  // entered as per-100g, unit mixups). The found panel therefore shows the macros as EDITABLE
+  // fields, and whatever is showing when "Log It" is tapped is what gets logged and saved — so a
+  // correction made here persists to the reusable food list too, not just to today's entry.
+  function editMacro(key, val) {
+    setMacroEdits(Object.assign({}, macroEdits, (function () { const o = {}; o[key] = val; return o; })()));
+  }
+  // The committed per-100g numbers: the edited strings parsed, empty or junk reading as 0.
+  function editedPer100() {
+    return {
+      cal: Math.max(0, Number(macroEdits.cal) || 0),
+      p: Math.max(0, Number(macroEdits.p) || 0),
+      c: Math.max(0, Number(macroEdits.c) || 0),
+      f: Math.max(0, Number(macroEdits.f) || 0),
+    };
+  }
+
   function handleBarcode(code) {
     stopCamera();
     setMode("loading");
@@ -5515,7 +5537,15 @@ function BarcodeLogger(props) {
         setMode("error");
       } else {
         setProduct(result);
-        setGrams(100);
+        setGrams("100");
+        // Seed the editable fields from the lookup, rounded the way a label prints them —
+        // "23.0" invites retyping; "23" doesn't.
+        setMacroEdits({
+          cal: String(Math.round(result.per100.cal)),
+          p: String(Math.round(result.per100.p * 10) / 10),
+          c: String(Math.round(result.per100.c * 10) / 10),
+          f: String(Math.round(result.per100.f * 10) / 10),
+        });
         setMode("found");
       }
     });
@@ -5556,6 +5586,7 @@ function BarcodeLogger(props) {
     stopCamera();
     setMode("idle");
     setProduct(null);
+    setMacroEdits(null);
   }
 
   return h("div", { className: "barcode-box" },
@@ -5625,25 +5656,45 @@ function BarcodeLogger(props) {
       errorMsg, " ",
       h("button", { onClick: function () { setMode("manual"); }, style: { color: "#3d97d3", background: "none", border: "none", textDecoration: "underline", cursor: "pointer" } }, "Try again")
     ),
-    mode === "found" && product && h("div", { className: "rate-panel" },
+    mode === "found" && product && macroEdits && h("div", { className: "rate-panel" },
       h("p", null, product.name),
-      h("p", { style: { color: "#525252" } },
-        Math.round(product.per100.cal) + " cal · " + product.per100.p.toFixed(1) + "p / " + product.per100.c.toFixed(1) + "c / " + product.per100.f.toFixed(1) + "f per 100g"),
-      h("div", { className: "swap-form-row" },
-        h("input", { type: "number", inputMode: "numeric", value: grams, onChange: function (e) { setGrams(Number(e.target.value) || 0); }, placeholder: "grams" }),
+      h("p", { style: { color: "#525252", fontSize: 12, margin: "4px 0" } },
+        "Per 100g — check against the label and correct anything that's wrong:"),
+      h("div", { style: { display: "flex", gap: 6, marginTop: 4 } },
+        [["cal", "cal"], ["p", "protein"], ["c", "carbs"], ["f", "fat"]].map(function (pair) {
+          return h("label", { key: pair[0], style: { flex: 1, fontSize: 11, color: "#737373" } },
+            pair[1],
+            h("input", {
+              type: "number", inputMode: "decimal", step: "0.1", min: "0",
+              value: macroEdits[pair[0]],
+              onChange: function (e) { editMacro(pair[0], e.target.value); },
+              style: { width: "100%" },
+            })
+          );
+        })
+      ),
+      h("div", { className: "swap-form-row", style: { marginTop: 8 } },
+        h("input", { type: "number", inputMode: "numeric", value: grams, onChange: function (e) { setGrams(e.target.value); }, placeholder: "grams" }),
       ),
       h("div", { style: { display: "flex", gap: 8, marginTop: 8 } },
         h("button", {
           className: "swap-save-btn", style: { flex: 1 },
           onClick: function () {
-            props.logFood(product.name, grams, product.per100);
+            const gramsNum = Math.max(0, Number(grams) || 0);
+            if (!gramsNum) return; // empty or zero grams: nothing meaningful to log
+            const per100 = editedPer100();
+            props.logFood(product.name, gramsNum, per100);
             // Also save it into the reusable food list — otherwise a food scanned here is invisible
             // when picking liked foods for meal planning later, and would need to be re-scanned there.
-            const alreadyKnown = (props.allFoods || []).some(function (f) { return f.name === product.name; });
-            if (props.addCustomFood && !alreadyKnown) {
-              props.addCustomFood(product.name, guessFoodCategory(product.per100), product.per100);
+            // Deliberately saves EVEN IF the name already exists as a custom food: addCustomFood
+            // replaces same-name entries, so a macro correction made above fixes the saved copy
+            // rather than leaving the stale one behind. Built-in foods are the one exception —
+            // FOOD_DB wins name lookups in allFoods, so a shadowing custom row would never be read.
+            const inBuiltInDb = FOOD_DB.some(function (f) { return f.name === product.name; });
+            if (props.addCustomFood && !inBuiltInDb) {
+              props.addCustomFood(product.name, guessFoodCategory(per100), per100);
             }
-            setMode("idle"); setProduct(null);
+            setMode("idle"); setProduct(null); setMacroEdits(null);
           },
         }, "Log It"),
         h("button", { className: "ex-action-btn", onClick: cancel }, "Cancel")
