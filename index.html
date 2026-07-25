@@ -351,36 +351,36 @@ const TRAINING_DAY_ORDER = ["Monday", "Tuesday", "Thursday", "Friday", "Saturday
 
 const MEALS_CUTTING = {
   1: [
-    { id: "m1", time: "4:00 AM", name: "Meal 1", food: "1½ scoops whey + ½ cup dry oats + 7g peanut butter", items: [{ name: "Whey isolate", grams: 49.5 }, { name: "Oats (dry)", grams: 36 }, { name: "Peanut butter", grams: 7 }], cal: 329, p: 45, c: 25, f: 6 },
+    { id: "m1", time: "4:00 AM", name: "Meal 1", food: "1½ scoops whey + ½ cup dry oats + 7g peanut butter", slot: "cm1", items: [{ name: "Whey isolate", grams: 49.5 }, { name: "Oats (dry)", grams: 36 }, { name: "Peanut butter", grams: 7 }], cal: 329, p: 45, c: 25, f: 6 },
     { id: "iw", time: "5:45–7:00 AM", name: "Intra-Workout", food: "40g protein isolate + ½ scoop Cluster Dextrin + electrolytes", cal: 220, p: 40, c: 15, f: 0.5 },
-    { id: "m2", time: "7:30 AM", name: "Meal 2", food: "6.8oz chicken breast + 153g banana", items: [{ name: "Chicken breast", grams: 192.8 }, { name: "Banana", grams: 153 }, { name: "Peanut butter", grams: 0 }], cal: 445, p: 61, c: 35, f: 7 },
-    { id: "m3", time: "12:00 PM", name: "Meal 3", food: "6.7oz chicken breast + 105g brown rice + 100g broccoli + 3g peanut butter", items: [{ name: "Chicken breast", grams: 189.9 }, { name: "Brown rice", grams: 105 }, { name: "Peanut butter", grams: 3 }, { name: "Broccoli", grams: 100 }], cal: 498, p: 65, c: 35, f: 10 },
+    { id: "m2", time: "7:30 AM", name: "Meal 2", food: "6.8oz chicken breast + 153g banana", slot: "cm2", items: [{ name: "Chicken breast", grams: 192.8 }, { name: "Banana", grams: 153 }, { name: "Peanut butter", grams: 0 }], cal: 445, p: 61, c: 35, f: 7 },
+    { id: "m3", time: "12:00 PM", name: "Meal 3", food: "6.7oz chicken breast + 105g brown rice + 100g broccoli + 3g peanut butter", slot: "cm3", items: [{ name: "Chicken breast", grams: 189.9 }, { name: "Brown rice", grams: 105 }, { name: "Peanut butter", grams: 3 }, { name: "Broccoli", grams: 100 }], cal: 498, p: 65, c: 35, f: 10 },
     { id: "snack", time: "1:30 PM", name: "Snack", food: "1 SimplyFuel protein ball", cal: 95, p: 4, c: 12, f: 4.5 },
-    { id: "m4", time: "3:00 PM", name: "Meal 4", food: "7.9oz lean beef (93/7) + 64g low-carb tortilla + 39g peanut butter + 1 scoop whey protein", items: [{ name: "Lean beef (93/7)", grams: 224.0 }, { name: "Low-carb tortilla", grams: 64 }, { name: "Peanut butter", grams: 39 }, { name: "Whey isolate", grams: 33 }], cal: 767, p: 91, c: 26, f: 42 },
+    { id: "m4", time: "3:00 PM", name: "Meal 4", food: "7.9oz lean beef (93/7) + 64g low-carb tortilla + 39g peanut butter + 1 scoop whey protein", slot: "cm4", items: [{ name: "Lean beef (93/7)", grams: 224.0 }, { name: "Low-carb tortilla", grams: 64 }, { name: "Peanut butter", grams: 39 }, { name: "Whey isolate", grams: 33 }], cal: 767, p: 91, c: 26, f: 42 },
   ],
   2: [
-    { id: "m1", time: "4:00 AM", name: "Meal 1", food: "1½ scoops whey + 28g dry Cream of Rice + 12g peanut butter", items: [{ name: "Whey isolate", grams: 49.5 }, { name: "Creamy Rice (dry)", grams: 28 }, { name: "Peanut butter", grams: 12 }], cal: 332, p: 45, c: 25, f: 6 },
+    { id: "m1", time: "4:00 AM", name: "Meal 1", food: "1½ scoops whey + 28g dry Cream of Rice + 12g peanut butter", slot: "cm1", items: [{ name: "Whey isolate", grams: 49.5 }, { name: "Creamy Rice (dry)", grams: 28 }, { name: "Peanut butter", grams: 12 }], cal: 332, p: 45, c: 25, f: 6 },
     { id: "iw", time: "5:45–7:00 AM", name: "Intra-Workout", food: "40g protein isolate + ½ scoop Cluster Dextrin + electrolytes", cal: 220, p: 40, c: 15, f: 0.5 },
-    { id: "m2", time: "7:30 AM", name: "Meal 2", food: "6.1oz turkey breast + 145g banana + 8g peanut butter", items: [{ name: "Turkey breast", grams: 172.9 }, { name: "Banana", grams: 145 }, { name: "Peanut butter", grams: 8 }], cal: 406, p: 55, c: 35, f: 6 },
-    { id: "m3", time: "12:00 PM", name: "Meal 3", food: "7.2oz chicken breast + 133g cooked quinoa + 100g green beans", items: [{ name: "Chicken breast", grams: 204.1 }, { name: "Quinoa", grams: 133 }, { name: "Peanut butter", grams: 0 }, { name: "Green beans", grams: 100 }], cal: 537, p: 71, c: 35, f: 11 },
+    { id: "m2", time: "7:30 AM", name: "Meal 2", food: "6.1oz turkey breast + 145g banana + 8g peanut butter", slot: "cm2", items: [{ name: "Turkey breast", grams: 172.9 }, { name: "Banana", grams: 145 }, { name: "Peanut butter", grams: 8 }], cal: 406, p: 55, c: 35, f: 6 },
+    { id: "m3", time: "12:00 PM", name: "Meal 3", food: "7.2oz chicken breast + 133g cooked quinoa + 100g green beans", slot: "cm3", items: [{ name: "Chicken breast", grams: 204.1 }, { name: "Quinoa", grams: 133 }, { name: "Peanut butter", grams: 0 }, { name: "Green beans", grams: 100 }], cal: 537, p: 71, c: 35, f: 11 },
     { id: "snack", time: "1:30 PM", name: "Snack", food: "1 SimplyFuel protein ball", cal: 95, p: 4, c: 12, f: 4.5 },
-    { id: "m4", time: "3:00 PM", name: "Meal 4", food: "7.9oz lean beef (93/7) + 64g low-carb tortilla + 39g peanut butter + 1 scoop whey protein", items: [{ name: "Lean beef (93/7)", grams: 224.0 }, { name: "Low-carb tortilla", grams: 64 }, { name: "Peanut butter", grams: 39 }, { name: "Whey isolate", grams: 33 }], cal: 767, p: 91, c: 26, f: 42 },
+    { id: "m4", time: "3:00 PM", name: "Meal 4", food: "7.9oz lean beef (93/7) + 64g low-carb tortilla + 39g peanut butter + 1 scoop whey protein", slot: "cm4", items: [{ name: "Lean beef (93/7)", grams: 224.0 }, { name: "Low-carb tortilla", grams: 64 }, { name: "Peanut butter", grams: 39 }, { name: "Whey isolate", grams: 33 }], cal: 767, p: 91, c: 26, f: 42 },
   ],
   3: [
-    { id: "m1", time: "4:00 AM", name: "Meal 1", food: "12.2oz egg whites + ⅓ cup dry oats + 6g peanut butter", items: [{ name: "Egg whites", grams: 345.9 }, { name: "Oats (dry)", grams: 24 }, { name: "Peanut butter", grams: 6 }], cal: 341, p: 45, c: 25, f: 6 },
+    { id: "m1", time: "4:00 AM", name: "Meal 1", food: "12.2oz egg whites + ⅓ cup dry oats + 6g peanut butter", slot: "cm1", items: [{ name: "Egg whites", grams: 345.9 }, { name: "Oats (dry)", grams: 24 }, { name: "Peanut butter", grams: 6 }], cal: 341, p: 45, c: 25, f: 6 },
     { id: "iw", time: "5:45–7:00 AM", name: "Intra-Workout", food: "40g protein isolate + ½ scoop Cluster Dextrin + electrolytes", cal: 220, p: 40, c: 15, f: 0.5 },
-    { id: "m2", time: "7:30 AM", name: "Meal 2", food: "5.9oz turkey breast + 94g white rice + 8g peanut butter + 50g berries", items: [{ name: "Turkey breast", grams: 167.3 }, { name: "White rice", grams: 94 }, { name: "Peanut butter", grams: 8 }, { name: "Berries (mixed)", grams: 50 }], cal: 424, p: 55, c: 35, f: 6 },
-    { id: "m3", time: "12:00 PM", name: "Meal 3", food: "7oz chicken breast + 89g white rice + 2g olive oil + 100g carrots", items: [{ name: "Chicken breast", grams: 198.4 }, { name: "White rice", grams: 89 }, { name: "Olive oil", grams: 2 }, { name: "Carrots", grams: 100 }], cal: 508, p: 65, c: 35, f: 10 },
+    { id: "m2", time: "7:30 AM", name: "Meal 2", food: "5.9oz turkey breast + 94g white rice + 8g peanut butter + 50g berries", slot: "cm2", items: [{ name: "Turkey breast", grams: 167.3 }, { name: "White rice", grams: 94 }, { name: "Peanut butter", grams: 8 }, { name: "Berries (mixed)", grams: 50 }], cal: 424, p: 55, c: 35, f: 6 },
+    { id: "m3", time: "12:00 PM", name: "Meal 3", food: "7oz chicken breast + 89g white rice + 2g olive oil + 100g carrots", slot: "cm3", items: [{ name: "Chicken breast", grams: 198.4 }, { name: "White rice", grams: 89 }, { name: "Olive oil", grams: 2 }, { name: "Carrots", grams: 100 }], cal: 508, p: 65, c: 35, f: 10 },
     { id: "snack", time: "1:30 PM", name: "Snack", food: "1 SimplyFuel protein ball", cal: 95, p: 4, c: 12, f: 4.5 },
-    { id: "m4", time: "3:00 PM", name: "Meal 4", food: "9.5oz pork tenderloin + 29g low-carb tortilla + 65g peanut butter", items: [{ name: "Pork tenderloin", grams: 269.3 }, { name: "Low-carb tortilla", grams: 29 }, { name: "Peanut butter", grams: 65 }], cal: 802, p: 91, c: 21, f: 43 },
+    { id: "m4", time: "3:00 PM", name: "Meal 4", food: "9.5oz pork tenderloin + 29g low-carb tortilla + 65g peanut butter", slot: "cm4", items: [{ name: "Pork tenderloin", grams: 269.3 }, { name: "Low-carb tortilla", grams: 29 }, { name: "Peanut butter", grams: 65 }], cal: 802, p: 91, c: 21, f: 43 },
   ],
   4: [
-    { id: "m1", time: "4:00 AM", name: "Meal 1", food: "12.4oz egg whites + 31g Ezekiel bread + 9g peanut butter + 50g berries", items: [{ name: "Egg whites", grams: 351.5 }, { name: "Ezekiel bread", grams: 31 }, { name: "Peanut butter", grams: 9 }, { name: "Berries (mixed)", grams: 50 }], cal: 339, p: 45, c: 25, f: 6 },
+    { id: "m1", time: "4:00 AM", name: "Meal 1", food: "12.4oz egg whites + 31g Ezekiel bread + 9g peanut butter + 50g berries", slot: "cm1", items: [{ name: "Egg whites", grams: 351.5 }, { name: "Ezekiel bread", grams: 31 }, { name: "Peanut butter", grams: 9 }, { name: "Berries (mixed)", grams: 50 }], cal: 339, p: 45, c: 25, f: 6 },
     { id: "iw", time: "5:45–7:00 AM", name: "Intra-Workout", food: "40g protein isolate + ½ scoop Cluster Dextrin + electrolytes", cal: 220, p: 40, c: 15, f: 0.5 },
-    { id: "m2", time: "7:30 AM", name: "Meal 2", food: "6.6oz chicken breast + 126g white rice", items: [{ name: "Chicken breast", grams: 187.1 }, { name: "White rice", grams: 126 }, { name: "Peanut butter", grams: 0 }], cal: 467, p: 61, c: 35, f: 7 },
-    { id: "m3", time: "12:00 PM", name: "Meal 3", food: "8.4oz pork tenderloin + 125g potato + 100g carrots", items: [{ name: "Pork tenderloin", grams: 238.1 }, { name: "Potato", grams: 125 }, { name: "Peanut butter", grams: 0 }, { name: "Carrots", grams: 100 }], cal: 501, p: 65, c: 35, f: 10 },
+    { id: "m2", time: "7:30 AM", name: "Meal 2", food: "6.6oz chicken breast + 126g white rice", slot: "cm2", items: [{ name: "Chicken breast", grams: 187.1 }, { name: "White rice", grams: 126 }, { name: "Peanut butter", grams: 0 }], cal: 467, p: 61, c: 35, f: 7 },
+    { id: "m3", time: "12:00 PM", name: "Meal 3", food: "8.4oz pork tenderloin + 125g potato + 100g carrots", slot: "cm3", items: [{ name: "Pork tenderloin", grams: 238.1 }, { name: "Potato", grams: 125 }, { name: "Peanut butter", grams: 0 }, { name: "Carrots", grams: 100 }], cal: 501, p: 65, c: 35, f: 10 },
     { id: "snack", time: "1:30 PM", name: "Snack", food: "1 SimplyFuel protein ball", cal: 95, p: 4, c: 12, f: 4.5 },
-    { id: "m4", time: "3:00 PM", name: "Meal 4", food: "8.2oz ground turkey (93/7) + 54g low-carb tortilla + 54.5g peanut butter + 1 scoop whey protein", items: [{ name: "Ground turkey (93/7)", grams: 232.5 }, { name: "Low-carb tortilla", grams: 54 }, { name: "Peanut butter", grams: 54.5 }, { name: "Whey isolate", grams: 33 }], cal: 779, p: 92, c: 26, f: 43 },
+    { id: "m4", time: "3:00 PM", name: "Meal 4", food: "8.2oz ground turkey (93/7) + 54g low-carb tortilla + 54.5g peanut butter + 1 scoop whey protein", slot: "cm4", items: [{ name: "Ground turkey (93/7)", grams: 232.5 }, { name: "Low-carb tortilla", grams: 54 }, { name: "Peanut butter", grams: 54.5 }, { name: "Whey isolate", grams: 33 }], cal: 779, p: 92, c: 26, f: 43 },
   ],
 };
 
@@ -2465,7 +2465,7 @@ function programStateHasRealData(state) {
 }
 
 function App() {
-  const APP_VERSION = "2026-07-24T20:05:00";
+  const APP_VERSION = "2026-07-24T20:25:00";
   const [updateAvailable, setUpdateAvailable] = useState(false);
   useEffect(function () {
     function checkVersion() {
@@ -4057,9 +4057,28 @@ function App() {
   function swapMealIngredient(mealIndex, role, newFoodName) {
     const newFood = allFoods.filter(function (f) { return f.name === newFoodName; })[0];
     if (!newFood) return;
-    const slot = def.slots[mealIndex];
+    // Resolve the macro slot by ID where the meal declares one, falling back to array position.
+    //
+    // Position only works when meals and slots line up 1:1, which is true for Custom (its plan is
+    // generated straight from its slots) but NOT for the built-in programs: those have six entries
+    // a day (m1, intra-workout, m2, m3, snack, m4) against four macro slots, so m2 would have been
+    // solved against Meal 3's targets, m3 against Meal 4's, and m4 against nothing at all. Every
+    // built-in meal converted to structured items carries an explicit `slot`, so the ambiguity
+    // simply doesn't arise.
     const currentMeal = meals[mealIndex];
-    if (!slot || !currentMeal || !currentMeal.items) return; // e.g. the intra-workout entry, which isn't one of the 4 solver slots
+    if (!currentMeal) return;
+    // Resolve the macro slot by ID where the meal declares one, falling back to array position.
+    //
+    // Position only works when meals and slots line up 1:1, which is true for Custom (its plan is
+    // generated straight from its slots) but NOT for the built-in programs: those have six entries
+    // a day (m1, intra-workout, m2, m3, snack, m4) against four macro slots, so m2 would have been
+    // solved against Meal 3's targets, m3 against Meal 4's, and m4 against nothing at all. Every
+    // built-in meal converted to structured items carries an explicit `slot`, so the ambiguity
+    // simply doesn't arise.
+    const slot = currentMeal.slot
+      ? def.slots.filter(function (s) { return s.id === currentMeal.slot; })[0]
+      : def.slots[mealIndex];
+    if (!slot || !currentMeal.items) return; // e.g. the intra-workout entry, which isn't one of the 4 solver slots
     const items = currentMeal.items;
     const roleIdx = { protein: 0, carb: 1, fat: 2 }[role];
     const vegItem = items[3] || null;
@@ -5873,14 +5892,21 @@ function NutritionTab(props) {
         const entry = props.nToday[m.id];
         const status = entry ? (entry.status === "partial" ? (entry.pct === 75 ? "three_quarter" : "half") : entry.status) : null;
         const expandedMeals = (props.uiPrefs && props.uiPrefs.foodPlanExpandedMeals) || { m1: false, m2: false, m3: false, m4: false };
-        const mealSwapControl = props.isCustomProgram && !isFutureWeek && !isFutureDay && m.id !== "iw"
+        // Swapping used to be Custom-only, because only Custom's meals existed as structured
+        // ingredient lists — the built-in programs stored theirs as a prose sentence the solver
+        // couldn't take apart. Now that Cutting's meals carry `items` and an explicit `slot`, the
+        // real precondition is simply "is this meal solvable", which is a property of the meal
+        // rather than of the program. That also excludes intra-workout and the snack automatically:
+        // they have no items, so they're skipped without needing a special case for each id.
+        const mealIsSolvable = !!(m.items && m.items.length >= 3 && (m.slot || props.isCustomProgram));
+        const mealSwapControl = mealIsSolvable && !isFutureWeek && !isFutureDay
           ? h(MealSwapControl, {
               allFoods: props.allFoods, likedFoods: (props.likedFoods && props.likedFoods[m.id]) || [],
               onSwap: function (role, foodName) { props.swapIngredient(idx, role, foodName); },
               onAutoLike: function (foodName) { props.toggleLiked(m.id, foodName); },
             })
           : null;
-        const showCustomize = props.isCustomProgram && !isFutureWeek && !isFutureDay && m.id !== "iw";
+        const showCustomize = mealIsSolvable && !isFutureWeek && !isFutureDay;
         return h(MealCard, {
           key: m.id, meal: m, status: status, disabled: isFutureDay, statusOpts: STATUS_OPTS,
           onSetStatus: function (st, pct) { props.setMealStatus(m.id, st, pct); },
@@ -5897,6 +5923,10 @@ function NutritionTab(props) {
           onRegenerate: function () { props.regenerateAndApplyMeal(idx); },
           canUndoRegenerate: !!(props.mealRegenerateUndo && props.mealRegenerateUndo.week === props.nutritionDisplayWeek && props.mealRegenerateUndo.mealId === m.id),
           onUndoRegenerate: props.undoMealRegenerate,
+          // Rebalance deliberately stays Custom-only for now: unlike a single-meal swap it re-solves
+          // EVERY meal in the day to redistribute macros, and the built-in programs' days include
+          // fixed entries (intra-workout, snack) that have no items and can't participate. Enabling
+          // it here would silently rebalance around them rather than with them.
           canRebalance: props.isCustomProgram && !isFutureWeek && !isFutureDay && props.isToday && m.id !== "iw",
           onRebalance: function (multiplier) { props.rebalanceDayAroundMeal(idx, multiplier); },
         });
