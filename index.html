@@ -2487,7 +2487,7 @@ function programStateHasRealData(state) {
 // The build currently running. Surfaced in Settings -> Account, because "is the deploy actually
 // live?" has been the real answer to several apparent bugs, and inferring it from behaviour is slow
 // and error-prone. Compared against version.json by the update check below.
-const APP_VERSION = "2026-07-25T04:05:00";
+const APP_VERSION = "2026-07-25T04:20:00";
 
 // Signing out has to be unconditional, because every failure mode here ends the same way: a person
 // tapping a button that does nothing.
@@ -2710,6 +2710,15 @@ function App() {
   // personal file, since in this file a missing session means the whole app is gated behind sign-in.
   const [session, setSession] = useState(null);
   const [authChecked, setAuthChecked] = useState(false);
+  // Effects that fetch per-account data key off THIS, not off `session` itself.
+  //
+  // supabase-js hands back a new session OBJECT on every auth event — initial load, sign-in, and
+  // each silent token refresh — and both AuthGate and App hold listeners. Depending on the object
+  // means every one of those re-fires every dependent effect: the read-only assignment fetch logged
+  // five times on a single page load. Harmless while it only logs; not harmless once it starts
+  // merging a coach's changes into someone's program. The user id is a stable string — it changes
+  // when the account changes, and not otherwise.
+  const userId = session ? session.user.id : null;
   useEffect(function () {
     supabaseClient.auth.getSession().then(function (result) {
       setSession(result.data.session);
@@ -2844,7 +2853,7 @@ function App() {
     }
     window.addEventListener("online", handleOnline);
     return function () { window.removeEventListener("online", handleOnline); };
-  }, [session, syncStatus, data]);
+  }, [userId, syncStatus, data]);
   // Pulls the account's stored data down and OVERWRITES whatever is currently on this device —
   // the mirror image of backupToSupabase, and the more consequential direction: backup only adds
   // to the cloud, this replaces what's local. Routes the fetched data through normalizeV2, the
@@ -2954,7 +2963,7 @@ function App() {
           setFreshDeviceCheckDone(true);
         }
       });
-  }, [session]);
+  }, [userId]);
 
   // ---- Program access level ----
   // The case study deliberately restricts participants to the Custom program — Cutting, Cruise and
@@ -2980,7 +2989,7 @@ function App() {
         setFullProgramAccess(!result.error && result.data ? !!result.data.full_program_access : false);
       });
     return function () { cancelled = true; };
-  }, [session]);
+  }, [userId]);
 
   // ---- Coaching (coach ↔ client links) ----
   // Reads go through the SECURITY DEFINER functions from migration 04 rather than querying the
@@ -3015,7 +3024,7 @@ function App() {
       setAmICoach(!r[2].error && r[2].data === true);
     });
   }
-  useEffect(function () { refreshCoaching(); }, [session]);
+  useEffect(function () { refreshCoaching(); }, [userId]);
 
   function inviteClient(email) {
     setCoachingBusy(true);
@@ -3069,7 +3078,7 @@ function App() {
     supabaseClient.rpc("my_coach").then(function (r) {
       setMyCoach(!r.error && r.data && r.data.length ? r.data[0] : null);
     });
-  }, [session]);
+  }, [userId]);
 
   function updateSyncAllowed(on) {
     setCloudSyncAllowed(on);
@@ -3105,7 +3114,7 @@ function App() {
     supabaseClient.rpc("my_coach").then(function (r) {
       setMyCoachRow(!r.error && r.data && r.data.length ? r.data[0] : null);
     });
-  }, [session, myClients, pendingInvites]);
+  }, [userId, myClients, pendingInvites]);
 
   // Revoking from the CLIENT side. Deliberately separate from endCoaching(), which is the coach's
   // action — the consent document promises the participant can withdraw, so it can't be something
@@ -3231,7 +3240,7 @@ function App() {
         }
       });
   }
-  useEffect(function () { refreshAssignments(); }, [session, prog && prog.currentWeek, data.activeProgram]);
+  useEffect(function () { refreshAssignments(); }, [userId, prog && prog.currentWeek, data.activeProgram]);
 
   const isSharedProgram = data.activeProgram !== "custom";
   const effectiveExerciseState = isSharedProgram ? (data.sharedExerciseState || {}) : prog.exerciseState;
