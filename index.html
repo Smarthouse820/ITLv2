@@ -2472,8 +2472,32 @@ function programStateHasRealData(state) {
   return false;
 }
 
+// supabase-js defaults to a GLOBAL sign-out: a server call that invalidates every session for the
+// account, on every device. That call requires a currently-valid access token — so once the JWT has
+// expired, the server answers 403, the library reports the sign-out as failed, and it leaves the
+// local session in place. The visible symptom is a Sign out button that does nothing at all, which
+// is precisely the moment someone most wants it to work (a stale session is often WHY they're
+// signing out).
+//
+// So: attempt the global sign-out, and fall back to a local one if it's refused. A local sign-out
+// clears the stored session without touching the network and cannot fail this way. The trade-off is
+// that other devices stay signed in, which is a reasonable thing to accept — arguably correct
+// behaviour anyway — and far better than a button that silently does nothing.
+// The build currently running. Surfaced in Settings -> Account, because "is the deploy actually
+// live?" has been the real answer to several apparent bugs, and inferring it from behaviour is slow
+// and error-prone. Compared against version.json by the update check below.
+const APP_VERSION = "2026-07-25T01:10:00";
+
+function signOutEverywhereOrLocally() {
+  return supabaseClient.auth.signOut().then(function (r) {
+    if (r && r.error) return supabaseClient.auth.signOut({ scope: "local" });
+    return r;
+  }).catch(function () {
+    return supabaseClient.auth.signOut({ scope: "local" });
+  });
+}
+
 function App() {
-  const APP_VERSION = "2026-07-25T00:35:00";
   const [updateAvailable, setUpdateAvailable] = useState(false);
   useEffect(function () {
     function checkVersion() {
@@ -2678,7 +2702,7 @@ function App() {
     return supabaseClient.auth.signInWithPassword({ email: email, password: password });
   }
   function signOut() {
-    return supabaseClient.auth.signOut();
+    return signOutEverywhereOrLocally();
   }
   // Uploads a snapshot of everything currently on THIS device into the signed-in account's rows —
   // purely additive, never destructive: the app still reads from and writes to localStorage exactly
@@ -6373,6 +6397,8 @@ function SettingsTab(props) {
         label: "Restore from cloud", loadingLabel: "Restoring\u2026",
         confirmMessage: "Overwrite everything on THIS device with what's saved in your account? Only do this if this device's local data is stale, wrong, or missing \u2014 e.g. after clearing browser storage or setting up on a new device. Anything on this device not yet backed up will be lost.",
       }),
+      h("p", { style: { fontSize: 10, color: "#525252", margin: "10px 0 0", fontFamily: "ui-monospace, monospace" } },
+        "build " + APP_VERSION),
       h("p", { style: { fontSize: 11, color: "#737373", margin: "10px 0 0" } },
         "Your data automatically backs up to your account as you use the app. Restore replaces what's on THIS device with your account's saved copy \u2014 useful after clearing browser storage or on a new device.")
     ),
@@ -7419,7 +7445,7 @@ function AuthGate() {
         session: null, authChecked: true,
         signUpWithEmail: function (email, password) { return supabaseClient.auth.signUp({ email: email, password: password }); },
         signInWithEmail: function (email, password) { return supabaseClient.auth.signInWithPassword({ email: email, password: password }); },
-        signOut: function () { return supabaseClient.auth.signOut(); },
+        signOut: function () { return signOutEverywhereOrLocally(); },
       }),
       h("p", { style: { fontSize: 11, color: "#525252", marginTop: 16, textAlign: "center", lineHeight: 1.5 } },
         "Your account keeps your program and logs backed up, so nothing is lost if you switch phones or clear your browser.")
