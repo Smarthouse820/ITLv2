@@ -2494,7 +2494,7 @@ function programStateHasRealData(state) {
 // The build currently running. Surfaced in Settings -> Account, because "is the deploy actually
 // live?" has been the real answer to several apparent bugs, and inferring it from behaviour is slow
 // and error-prone. Compared against version.json by the update check below.
-const APP_VERSION = "2026-07-25T21:30:00";
+const APP_VERSION = "2026-07-25T22:00:00";
 
 // Signing out has to be unconditional, because every failure mode here ends the same way: a person
 // tapping a button that does nothing.
@@ -6083,6 +6083,79 @@ function MealCard(props) {
 }
 
 
+// One saved (scanned/custom) food in the "Your Foods" list. Tap the name to open an inline editor
+// for category and per-100g macros — the after-the-fact fix for a bad Open Food Facts import when
+// the barcode isn't around to re-scan. Field values are held as STRINGS while editing and parsed
+// on save, the same pattern as the barcode panel: storing numbers coerces a cleared field to 0 and
+// the next keystroke lands after it ("05"). Name is deliberately NOT editable — liked-food picks
+// reference foods by name, so a rename here would silently orphan them.
+function CustomFoodRow(props) {
+  const food = props.food;
+  const [fields, setFields] = useState(null); // null = closed; { cat, cal, p, c, f } strings while editing
+  function beginEdit() {
+    setFields({
+      cat: food.cat,
+      cal: String(Math.round(food.cal)),
+      p: String(Math.round(food.p * 10) / 10),
+      c: String(Math.round(food.c * 10) / 10),
+      f: String(Math.round(food.f * 10) / 10),
+    });
+  }
+  function setField(key, val) {
+    setFields(Object.assign({}, fields, (function () { const o = {}; o[key] = val; return o; })()));
+  }
+  function saveEdit() {
+    props.addCustomFood(food.name, fields.cat, {
+      cal: Math.max(0, Number(fields.cal) || 0),
+      p: Math.max(0, Number(fields.p) || 0),
+      c: Math.max(0, Number(fields.c) || 0),
+      f: Math.max(0, Number(fields.f) || 0),
+    });
+    setFields(null);
+  }
+  if (!fields) {
+    return h("div", { className: "search-result-row", style: { cursor: "pointer" }, onClick: beginEdit },
+      h("span", null, food.name + " (" + food.cat + ")"),
+      h("span", { style: { display: "flex", alignItems: "center", gap: 8 } },
+        h("span", { style: { fontSize: 11, color: "#737373" } }, "tap to edit"),
+        h("button", {
+          className: "logged-food-remove",
+          onClick: function (e) { e.stopPropagation(); props.removeCustomFood(food.name); },
+        }, "✕")
+      )
+    );
+  }
+  return h("div", { className: "search-result-row", style: { cursor: "default", display: "block" } },
+    h("span", null, food.name),
+    h("div", { style: { display: "flex", gap: 6, marginTop: 6 } },
+      ["protein", "carb", "fat"].map(function (cat) {
+        return h("button", {
+          key: cat,
+          className: "week-btn" + (fields.cat === cat ? " active" : ""),
+          onClick: function () { setField("cat", cat); },
+        }, cat);
+      })
+    ),
+    h("div", { style: { display: "flex", gap: 6, marginTop: 6 } },
+      [["cal", "cal"], ["p", "protein"], ["c", "carbs"], ["f", "fat"]].map(function (pair) {
+        return h("label", { key: pair[0], style: { flex: 1, fontSize: 11, color: "#737373" } },
+          pair[1] + " /100g",
+          h("input", {
+            type: "number", inputMode: "decimal", step: "0.1", min: "0",
+            value: fields[pair[0]],
+            onChange: function (e) { setField(pair[0], e.target.value); },
+            style: { width: "100%" },
+          })
+        );
+      })
+    ),
+    h("div", { style: { display: "flex", gap: 8, marginTop: 8 } },
+      h("button", { className: "swap-save-btn", style: { flex: 1 }, onClick: saveEdit }, "Save"),
+      h("button", { className: "ex-action-btn", onClick: function () { setFields(null); } }, "Cancel")
+    )
+  );
+}
+
 function NutritionTab(props) {
   const STATUS_OPTS = [
     { id: "full", label: "Full" }, { id: "three_quarter", label: "¾", pct: 75 },
@@ -6180,7 +6253,11 @@ function NutritionTab(props) {
       );
     })(),
 
-    props.isCustomProgram && h("div", { style: { marginBottom: 16 } },
+    // Shown on EVERY program, not just Custom. The old isCustomProgram gate predates scanned foods
+    // flowing into the shared programs' liked-food pickers — with that gate, a Cutting user could
+    // scan a food (it appears in their picker with no way to correct or remove it) while the
+    // management list silently never rendered.
+    h("div", { style: { marginBottom: 16 } },
       h("button", {
         onClick: function () { props.updateUiPrefs({ customFoodsExpanded: !props.uiPrefs.customFoodsExpanded }); },
         style: { display: "flex", width: "100%", justifyContent: "space-between", alignItems: "center", background: "none", border: "none", padding: "8px 0", color: "inherit", cursor: "pointer" },
@@ -6191,14 +6268,14 @@ function NutritionTab(props) {
       props.uiPrefs.customFoodsExpanded && h("div", { style: { marginTop: 8 } },
         props.customFoods.length > 0 ? h("div", { className: "search-results", style: { marginBottom: 12 } },
           props.customFoods.map(function (f) {
-            return h("div", { key: f.name, className: "search-result-row", style: { cursor: "default" } },
-              h("span", null, f.name + " (" + f.cat + ")"),
-              h("button", { className: "logged-food-remove", onClick: function () { props.removeCustomFood(f.name); } }, "✕")
-            );
+            return h(CustomFoodRow, {
+              key: f.name, food: f,
+              addCustomFood: props.addCustomFood, removeCustomFood: props.removeCustomFood,
+            });
           })
         ) : null,
         h("p", { style: { fontSize: "11px", color: "#737373", margin: 0 } },
-          "Scan or log a food below in your daily food log, and it's saved here permanently — no need to add it twice.")
+          "Scan or log a food below in your daily food log, and it's saved here permanently — no need to add it twice. Tap a food to fix its macros or category.")
       )
     ),
 
