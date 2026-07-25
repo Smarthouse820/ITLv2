@@ -2487,7 +2487,7 @@ function programStateHasRealData(state) {
 // The build currently running. Surfaced in Settings -> Account, because "is the deploy actually
 // live?" has been the real answer to several apparent bugs, and inferring it from behaviour is slow
 // and error-prone. Compared against version.json by the update check below.
-const APP_VERSION = "2026-07-25T03:15:00";
+const APP_VERSION = "2026-07-25T03:35:00";
 
 // Signing out has to be unconditional, because every failure mode here ends the same way: a person
 // tapping a button that does nothing.
@@ -2811,6 +2811,11 @@ function App() {
   // the prompt exists to rescue.
   const [freshDeviceCheckDone, setFreshDeviceCheckDone] = useState(false);
   function attemptSync() {
+    // Respect the "Back up to my account" switch. This check was missing: the toggle existed in
+    // Settings and in state, but nothing consulted it, so turning it off changed the label and
+    // nothing else — the app kept uploading. A privacy control that silently does nothing is worse
+    // than not offering one, because someone reads "Off" and believes it.
+    if (!syncAllowed) { setSyncStatus("idle"); return; }
     // Skip the network call entirely when the browser already knows it's offline — no point
     // waiting on a request doomed to fail, and "Offline" is a more honest status than "failed".
     if (typeof navigator !== "undefined" && navigator.onLine === false) { setSyncStatus("offline"); return; }
@@ -6513,7 +6518,10 @@ function SettingsTab(props) {
           : props.syncStatus === "error" ? "Last sync failed \u2014 will retry automatically"
           : props.lastSyncedAt ? "Last synced " + formatRelativeTime(props.lastSyncedAt)
           : "Not yet synced this session"),
-      props.session && h(CloudSyncButton, {
+      // Hidden when backup is switched off in Privacy & Health Data. Offering a working "Sync now"
+      // there would contradict what that setting promises — "nothing further is sent" has to mean
+      // it, including when the button is tapped deliberately.
+      props.session && props.syncAllowed && h(CloudSyncButton, {
         onAction: props.backupToSupabase,
         label: "Sync now", loadingLabel: "Syncing\u2026",
       }),
@@ -6526,63 +6534,6 @@ function SettingsTab(props) {
         "build " + APP_VERSION),
       h("p", { style: { fontSize: 11, color: "#737373", margin: "10px 0 0" } },
         "Your data automatically backs up to your account as you use the app. Restore replaces what's on THIS device with your account's saved copy \u2014 useful after clearing browser storage or on a new device.")
-    ),
-
-    // ---- Privacy & health data ----
-    // The section the consent document points at. Written to be readable by someone who isn't
-    // technical and is trying to work out what they've agreed to.
-    h(SettingsSection, { id: "privacy", title: "Privacy & Health Data",
-      status: props.myCoachRow ? "Shared with coach" : "Private",
-      statusOn: !props.myCoachRow, uiPrefs: props.uiPrefs, updateUiPrefs: props.updateUiPrefs },
-
-      h("div", { style: { fontSize: 12, color: "#a3a3a3", lineHeight: 1.6 } },
-        h("div", { style: { fontSize: 13, color: "#f5f5f5", marginBottom: 6 } }, "What this app records"),
-        h("div", null, "Body weight and body fat percentage · training sessions, sets, weights and reps · meals and hydration logged · sleep entries · supplements taken"),
-        props.withingsConnected && h("div", { style: { marginTop: 6, color: "#737373" } },
-          "Your connected Withings scale also sends weight and body composition readings automatically."),
-        h("div", { style: { marginTop: 10, color: "#737373" } },
-          "This is used to build your program and track progress. It is not sold, and it is not shared with advertisers.")
-      ),
-
-      h("div", { style: { marginTop: 16, paddingTop: 14, borderTop: "1px solid #262626" } },
-        h("div", { style: { fontSize: 13, marginBottom: 6 } }, "Who else can see it"),
-        props.myCoachRow
-          ? h("div", null,
-              h("p", { style: { fontSize: 12, color: "#a3a3a3", margin: "0 0 4px", lineHeight: 1.6 } },
-                h("strong", null, props.myCoachRow.coach_email), " is your coach and can see your program, current week, sessions logged and most recent weigh-in. They cannot change your data or see anyone else's."),
-              h("p", { style: { fontSize: 11, color: "#737373", margin: "0 0 10px" } },
-                "Connected since " + new Date(props.myCoachRow.linked_since).toLocaleDateString()),
-              h("button", {
-                className: "ex-action-btn", style: { width: "100%", borderColor: "#f87171", color: "#f87171" },
-                onClick: function () {
-                  if (window.confirm("Revoke your coach's access? They will immediately stop being able to see your data. Nothing of yours is deleted, and you can be invited again later.")) {
-                    props.revokeMyCoach();
-                  }
-                },
-              }, "Revoke coach access")
-            )
-          : h("p", { style: { fontSize: 12, color: "#737373", margin: 0, lineHeight: 1.6 } },
-              "Nobody. Your data is visible only to you. If a coach invites you, you'll be asked before anything is shared \u2014 and you can revoke it here at any time.")
-      ),
-
-      h("div", { style: { marginTop: 16, paddingTop: 14, borderTop: "1px solid #262626" } },
-        h("div", { style: { fontSize: 13, marginBottom: 6 } }, "What you agreed to"),
-        h("p", { style: { fontSize: 12, color: "#a3a3a3", margin: 0, lineHeight: 1.6 } },
-          "You accepted version " + CONSENT_VERSION + " of the health data notice. If it is ever revised, you'll be shown the new version and asked again before continuing.")
-      ),
-
-      h("div", { style: { marginTop: 16, paddingTop: 14, borderTop: "1px solid #262626" } },
-        h("div", { style: { fontSize: 13, marginBottom: 6 } }, "Deleting your data"),
-        h("p", { style: { fontSize: 12, color: "#a3a3a3", margin: "0 0 10px", lineHeight: 1.6 } },
-          "This removes the copy stored in your account. Data on this device is not affected \u2014 use \u201cReset progress\u201d under Data & backup for that."),
-        h(CloudSyncButton, {
-          onAction: props.deleteCloudData, danger: true,
-          label: "Delete my cloud data", loadingLabel: "Deleting\u2026",
-          confirmMessage: "Delete everything stored in your account? Your program, logs and weigh-ins will be removed from the cloud. This cannot be undone, and anything not on this device will be lost.",
-        }),
-        h("p", { style: { fontSize: 11, color: "#737373", margin: "10px 0 0", lineHeight: 1.5 } },
-          "Closing your account entirely \u2014 removing your sign-in as well as your data \u2014 has to be done for you. Email itlfitnessapp@gmail.com and it will be handled.")
-      )
     ),
 
     // ---- Coaching ----
@@ -6612,56 +6563,6 @@ function SettingsTab(props) {
     // Withdrawal is split into three distinct actions rather than one ambiguous "revoke", because
     // they're genuinely different intentions: stop sending, delete what's held, and end the human
     // who can see it. Someone may well want one without the others.
-    h(SettingsSection, { id: "privacy", title: "Privacy & Health Data",
-      status: props.syncAllowed ? "Backing up" : "Device only", statusOn: !props.syncAllowed,
-      uiPrefs: props.uiPrefs, updateUiPrefs: props.updateUiPrefs },
-
-      h("p", { style: { fontSize: 11, color: "#a3a3a3", margin: "0 0 12px", lineHeight: 1.6 } },
-        "This app stores: your weight and body-fat entries, meals and foods logged, training logs " +
-        "(weights, reps, difficulty ratings), supplement and hydration logs, sleep entries, your " +
-        "program settings, and — if you connect a smart scale — readings from it. It's held in your " +
-        "account on Supabase, hosted in the United States."),
-
-      props.myCoach
-        ? h("div", { style: { background: "#171717", border: "1px solid #f0b429", borderRadius: 8, padding: 12, marginBottom: 12 } },
-            h("div", { style: { fontSize: 12, color: "#f0b429", marginBottom: 6 } }, "Someone can see your data"),
-            h("p", { style: { fontSize: 12, color: "#d4d4d4", margin: "0 0 10px", lineHeight: 1.5 } },
-              h("strong", null, props.myCoach.coach_email),
-              " is your coach. They can see your email, program, training history, weigh-ins and how " +
-              "consistently you log. They cannot change your data. You can end this at any time and " +
-              "their access stops immediately."),
-            h("button", {
-              className: "ex-action-btn", style: { borderColor: "#f87171", color: "#f87171" },
-              onClick: function () {
-                if (window.confirm("End coaching with " + props.myCoach.coach_email + "? They lose access to your data immediately. Nothing of yours is deleted.")) {
-                  props.endCoachingAsClient();
-                }
-              },
-            }, "End coaching")
-          )
-        : h("p", { style: { fontSize: 11, color: "#525252", margin: "0 0 12px" } },
-            "No one else has access to your data."),
-
-      h(SettingsRow, null,
-        h("div", null,
-          h("div", { style: { fontSize: 13 } }, "Back up to my account"),
-          h("div", { style: { fontSize: 11, color: "#737373", marginTop: 2, lineHeight: 1.4 } },
-            props.syncAllowed
-              ? "On. Turning this off keeps everything on this device only — nothing further is sent."
-              : "Off. Nothing is being sent. Anything already in your account stays until you delete it below.")),
-        h(SettingsSeg, { on: props.syncAllowed, onChange: function (v) { props.updateSyncAllowed(v); } })
-      ),
-
-      h(CloudSyncButton, {
-        onAction: props.deleteCloudCopy, danger: true,
-        label: "Delete my cloud copy", loadingLabel: "Deleting\u2026",
-        confirmMessage: "Delete everything stored in your account? What's on THIS device is kept and stays usable, but the copy in the cloud is erased and cannot be recovered. Backing up will be switched off so it isn't immediately re-uploaded.",
-      }),
-      h("p", { style: { fontSize: 11, color: "#737373", margin: "10px 0 0", lineHeight: 1.5 } },
-        "Deleting the cloud copy keeps your account and everything on this device. To take a copy " +
-        "with you first, use Export backup under Data & backup.")
-    ),
-
     // ---- Reminders — master switch owns the subscription; the three category flags just decide
     // what's included in the schedule once it's on. ----
     h(SettingsSection, { id: "reminders", title: "Reminders", status: masterOn ? onCount + " on" : "Off", statusOn: masterOn, defaultOpen: true, uiPrefs: props.uiPrefs, updateUiPrefs: props.updateUiPrefs },
@@ -6766,6 +6667,76 @@ function SettingsTab(props) {
     ),
 
     // ---- Data & backup (moved here from the header icon row) ----
+    // ---- Privacy & health data ----
+    // The section the consent document points participants at, and the merge of two earlier
+    // attempts that had drifted into existing side by side. Sits down here with Data & backup
+    // rather than up top: it's a place you go deliberately, not something to scroll past daily.
+    h(SettingsSection, { id: "privacy", title: "Privacy & Health Data",
+      status: !props.syncAllowed ? "Device only" : props.myCoachRow ? "Shared with coach" : "Private",
+      statusOn: !props.myCoachRow, uiPrefs: props.uiPrefs, updateUiPrefs: props.updateUiPrefs },
+
+      h("div", { style: { fontSize: 12, color: "#a3a3a3", lineHeight: 1.6 } },
+        h("div", { style: { fontSize: 13, color: "#f5f5f5", marginBottom: 6 } }, "What this app records"),
+        h("div", null, "Body weight and body fat percentage \u00b7 training sessions, sets, weights and reps \u00b7 meals and hydration logged \u00b7 sleep entries \u00b7 supplements taken"),
+        props.withingsConnected && h("div", { style: { marginTop: 6, color: "#737373" } },
+          "Your connected Withings scale also sends weight and body composition readings automatically."),
+        h("div", { style: { marginTop: 10, color: "#737373" } },
+          "Held on this device and in your account (Supabase, hosted in the United States). It is not sold, not shared with advertisers, and not used to train machine learning models.")
+      ),
+
+      h("div", { style: { marginTop: 16, paddingTop: 14, borderTop: "1px solid #262626" } },
+        h("div", { style: { fontSize: 13, marginBottom: 6 } }, "Who else can see it"),
+        props.myCoachRow
+          ? h("div", null,
+              h("p", { style: { fontSize: 12, color: "#a3a3a3", margin: "0 0 4px", lineHeight: 1.6 } },
+                h("strong", null, props.myCoachRow.coach_email), " is your coach and can see your program, current week, sessions logged and most recent weigh-in. They cannot change your logged history or see anyone else's data."),
+              h("p", { style: { fontSize: 11, color: "#737373", margin: "0 0 10px" } },
+                "Connected since " + new Date(props.myCoachRow.linked_since).toLocaleDateString()),
+              h("button", {
+                className: "ex-action-btn", style: { width: "100%", borderColor: "#f87171", color: "#f87171" },
+                onClick: function () {
+                  if (window.confirm("Revoke your coach's access? They will immediately stop being able to see your data. Nothing of yours is deleted, and you can be invited again later.")) {
+                    props.revokeMyCoach();
+                  }
+                },
+              }, "Revoke coach access")
+            )
+          : h("p", { style: { fontSize: 12, color: "#737373", margin: 0, lineHeight: 1.6 } },
+              "Nobody. Your data is visible only to you. If a coach invites you, you'll be asked before anything is shared \u2014 and you can revoke it here at any time.")
+      ),
+
+      h("div", { style: { marginTop: 16, paddingTop: 14, borderTop: "1px solid #262626" } },
+        h(SettingsRow, { style: { padding: 0, borderBottom: "none" } },
+          h("div", null,
+            h("div", { style: { fontSize: 13 } }, "Back up to my account"),
+            h("div", { style: { fontSize: 11, color: "#737373", marginTop: 2, lineHeight: 1.4 } },
+              props.syncAllowed
+                ? "On. Turning this off keeps everything on this device only \u2014 nothing further is sent."
+                : "Off. Nothing is being sent. Anything already in your account stays until you delete it below.")),
+          h(SettingsSeg, { on: props.syncAllowed, onChange: function (v) { props.updateSyncAllowed(v); } })
+        )
+      ),
+
+      h("div", { style: { marginTop: 16, paddingTop: 14, borderTop: "1px solid #262626" } },
+        h("div", { style: { fontSize: 13, marginBottom: 6 } }, "What you agreed to"),
+        h("p", { style: { fontSize: 12, color: "#a3a3a3", margin: 0, lineHeight: 1.6 } },
+          "You accepted version " + CONSENT_VERSION + " of the health data notice. If it is ever revised, you'll be shown the new version and asked again before continuing.")
+      ),
+
+      h("div", { style: { marginTop: 16, paddingTop: 14, borderTop: "1px solid #262626" } },
+        h("div", { style: { fontSize: 13, marginBottom: 6 } }, "Deleting your data"),
+        h("p", { style: { fontSize: 12, color: "#a3a3a3", margin: "0 0 10px", lineHeight: 1.6 } },
+          "This removes the copy stored in your account. What's on this device is kept and stays usable \u2014 use \u201cReset progress\u201d under Data & backup for that. To take a copy with you first, use Export backup."),
+        h(CloudSyncButton, {
+          onAction: props.deleteCloudData, danger: true,
+          label: "Delete my cloud data", loadingLabel: "Deleting\u2026",
+          confirmMessage: "Delete everything stored in your account? What's on THIS device is kept, but the cloud copy is erased and cannot be recovered.",
+        }),
+        h("p", { style: { fontSize: 11, color: "#737373", margin: "10px 0 0", lineHeight: 1.5 } },
+          "Closing your account entirely \u2014 removing your sign-in as well as your data \u2014 has to be done for you. Email itlfitnessapp@gmail.com and it will be handled.")
+      )
+    ),
+
     h(SettingsSection, { id: "data", title: "Data & backup", uiPrefs: props.uiPrefs, updateUiPrefs: props.updateUiPrefs },
       h(SettingsRow, null, h("button", { className: "ex-action-btn", style: { width: "100%", textAlign: "left" }, onClick: props.exportData }, "Export backup")),
       h(SettingsRow, null,
