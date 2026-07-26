@@ -280,6 +280,11 @@ function Lock(p) { return h(Icon, p,
 function ShoppingCart(p) { return h(Icon, p,
   h("circle", { cx: "8", cy: "21", r: "1" }), h("circle", { cx: "19", cy: "21", r: "1" }),
   h("path", { d: "M2.05 2.05h2l2.66 12.42a2 2 0 0 0 2 1.58h9.78a2 2 0 0 0 1.95-1.57l1.65-7.43H5.12" })); }
+function Users(p) { return h(Icon, p,
+  h("path", { d: "M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" }),
+  h("circle", { cx: "9", cy: "7", r: "4" }),
+  h("path", { d: "M22 21v-2a4 4 0 0 0-3-3.87" }),
+  h("path", { d: "M16 3.13a4 4 0 0 1 0 7.75" })); }
 function Sparkles(p) { return h(Icon, p,
   h("path", { d: "M9.937 15.5A2 2 0 0 0 8.5 14.063l-6.135-1.582a.5.5 0 0 1 0-.962L8.5 9.936A2 2 0 0 0 9.937 8.5l1.582-6.135a.5.5 0 0 1 .963 0L14.063 8.5A2 2 0 0 0 15.5 9.937l6.135 1.581a.5.5 0 0 1 0 .964L15.5 14.063a2 2 0 0 0-1.437 1.437l-1.582 6.135a.5.5 0 0 1-.963 0z" })); }
 
@@ -2515,7 +2520,7 @@ function programStateHasRealData(state) {
 // The build currently running. Surfaced in Settings -> Account, because "is the deploy actually
 // live?" has been the real answer to several apparent bugs, and inferring it from behaviour is slow
 // and error-prone. Compared against version.json by the update check below.
-const APP_VERSION = "2026-07-26T06:00:00";
+const APP_VERSION = "2026-07-26T07:30:00";
 
 // Signing out has to be unconditional, because every failure mode here ends the same way: a person
 // tapping a button that does nothing.
@@ -2551,6 +2556,47 @@ function signOutEverywhereOrLocally() {
       } catch (e) { /* storage unavailable — the reload still lands on the gate */ }
       window.location.reload();
     });
+}
+
+// Builds the complete customProgramConfig from a wizard completion. Pure and module-level so the
+// SAME function serves both paths: the client running their own wizard (completeCustomSetup below)
+// and a coach running it on a client's behalf (CoachPrescriptionEditor) — the prescribed config is
+// byte-for-byte what the client would have built themselves.
+function buildWizardConfig(setup, foods) {
+  const idMap = ["m1", "m2", "m3", "m4"];
+  const nameMap = { m1: "Meal 1", m2: "Meal 2", m3: "Meal 3", m4: "Meal 4" };
+  const mealsWeek = idMap.map(function (id, i) {
+    const r = setup.planResults[i];
+    const foodStr = r.items.map(function (it) { return formatMealItem(it, foods); }).join(" + ");
+    return { id: id, time: setup.slots[i].time, name: nameMap[id], food: foodStr, cal: Math.round(r.cal), p: Math.round(r.p), c: Math.round(r.c), f: Math.round(r.f), items: r.items };
+  });
+  const intraWorkoutEntry = setup.intraWorkout ? {
+    id: "iw", name: "Intra-Workout",
+    time: setup.trainingTime ? formatTimeHM(setup.trainingTime) : "",
+    food: setup.intraWorkout.p + "g protein isolate + " + setup.intraWorkout.c + "g fast carbs (e.g. Cluster Dextrin) + electrolytes" +
+      (setup.trainingTime ? "" : " — add a Training Time in your program settings to slot this into your workout window"),
+    cal: Math.round(setup.intraWorkout.p * 4 + setup.intraWorkout.c * 4 + setup.intraWorkout.f * 9),
+    p: setup.intraWorkout.p, c: setup.intraWorkout.c, f: setup.intraWorkout.f,
+  } : null;
+  const fullMealsWeek = intraWorkoutEntry ? mealsWeek.concat([intraWorkoutEntry]) : mealsWeek;
+  const mealsByWeek = { 1: fullMealsWeek, 2: fullMealsWeek, 3: fullMealsWeek, 4: fullMealsWeek };
+  const overrideForGrocery = {};
+  idMap.forEach(function (id, i) { overrideForGrocery[id] = mealsWeek[i]; });
+  const groceryList = computeCustomGrocery(overrideForGrocery, foods);
+  const groceryByWeek = { 1: groceryList, 2: groceryList, 3: groceryList, 4: groceryList };
+  return {
+    setupComplete: true,
+    goal: setup.goal, currentWeight: setup.currentWeight, targetWeight: setup.targetWeight,
+    activity: setup.activity, weeksNeeded: setup.weeksNeeded, macros: setup.macros, age: setup.age,
+    exercises: setup.exercises, slots: setup.slots, milestones: setup.milestones,
+    mealsByWeek: mealsByWeek, groceryByWeek: groceryByWeek, trainingTime: setup.trainingTime || null,
+    dietStyle: setup.dietStyle || "standard", gender: setup.gender || null, heightCm: setup.heightCm || null,
+    intraWorkout: setup.intraWorkout || null,
+    // Set directly here, not via the queued toggleRirMode path — a brand-new program has no
+    // existing phase to protect from mid-phase mixing, so the wizard's choice can just take
+    // effect immediately from week 1.
+    rirModeEnabled: setup.trainingStyle === "rir",
+  };
 }
 
 function App() {
@@ -3053,6 +3099,13 @@ function App() {
     });
   }
   useEffect(function () { refreshCoaching(); }, [userId]);
+  // The Clients tab exists only while clients exist; ending the last relationship while standing
+  // on it would strand the view, so fall back to Workouts the moment the condition goes false.
+  // Placed HERE, after myClients' declaration — the deps array is evaluated during render, so
+  // referencing it from above its own const is the same TDZ class as setCustomPlan/currentMeal.
+  useEffect(function () {
+    if (tab === "clients" && !(myClients && myClients.length)) setTab("workouts");
+  }, [tab, myClients]);
   // The invite badge on the gear (below) is only honest if the list stays current while the app is
   // open — refreshCoaching keyed on userId alone means an invite sent mid-session would sit
   // invisible until the next full reload. Same cadence as the version check: every 5 minutes plus
@@ -3305,7 +3358,16 @@ function App() {
   // resolveAssignmentWeekKey, computed once per assignment so capture, merge and a later restore
   // all address the same slot even if the client's week advances in between.
   function captureAssignmentTarget(cur, a, weekKey) {
-    if (a.kind === "program_config") return cur.customProgramConfig;
+    if (a.kind === "program_config") {
+      // Composite snapshot: a full-setup payload touches all four regions; a plain config payload
+      // touches one, and restoring the untouched three is a no-op — so one shape serves both.
+      return {
+        config: cur.customProgramConfig,
+        liked: cur.likedFoodsByMeal,
+        activeProgram: cur.activeProgram,
+        customProgram: cur.programs.custom,
+      };
+    }
     if (a.kind === "exercise_state") {
       return a.program_key === "custom" ? (cur.programs.custom && cur.programs.custom.exerciseState) : cur.sharedExerciseState;
     }
@@ -3317,7 +3379,23 @@ function App() {
   // Merge one assignment into a data object. Payloads are shaped exactly like the data they target
   // (migration 06), so this is assignment-into-slot, not translation.
   function mergeAssignment(cur, a, weekKey) {
-    if (a.kind === "program_config") return Object.assign({}, cur, { customProgramConfig: a.payload });
+    if (a.kind === "program_config") {
+      let next = Object.assign({}, cur, { customProgramConfig: a.payload });
+      // A coach-run wizard prescribes the WHOLE setup, not just settings: the payload is the exact
+      // config the client's own wizard would have built (same buildWizardConfig), plus their liked
+      // foods. Seeding programs.custom happens ONLY when the existing custom state has no real
+      // data — a coach re-running setup for an active client must never erase logged history.
+      if (a.payload && a.payload.setupComplete) {
+        if (a.payload.likedFoodsByMeal) next = Object.assign({}, next, { likedFoodsByMeal: a.payload.likedFoodsByMeal });
+        if (!programStateHasRealData(cur.programs.custom)) {
+          const progs = Object.assign({}, next.programs);
+          progs.custom = freshProgramState(a.payload.exercises);
+          next = Object.assign({}, next, { programs: progs });
+        }
+        next = Object.assign({}, next, { activeProgram: "custom" });
+      }
+      return next;
+    }
     if (a.kind === "exercise_state") {
       const base = a.program_key === "custom" ? ((cur.programs.custom && cur.programs.custom.exerciseState) || {}) : (cur.sharedExerciseState || {});
       const merged = Object.assign({}, base);
@@ -3335,7 +3413,17 @@ function App() {
     return withProgramPatch(cur, a.program_key, patch);
   }
   function restoreAssignmentTarget(cur, b) {
-    if (b.kind === "program_config") return Object.assign({}, cur, { customProgramConfig: b.snapshot === undefined ? null : b.snapshot });
+    if (b.kind === "program_config") {
+      const s = b.snapshot || {};
+      const progs = Object.assign({}, cur.programs);
+      progs.custom = s.customProgram;
+      return Object.assign({}, cur, {
+        customProgramConfig: s.config === undefined ? null : s.config,
+        likedFoodsByMeal: s.liked || cur.likedFoodsByMeal,
+        activeProgram: s.activeProgram || cur.activeProgram,
+        programs: progs,
+      });
+    }
     if (b.kind === "exercise_state") {
       return b.program_key === "custom"
         ? withProgramPatch(cur, "custom", { exerciseState: b.snapshot || {} })
@@ -3375,7 +3463,7 @@ function App() {
     const newResolutions = Object.assign({}, resolutions);
     toApply.forEach(function (a) {
       const weekKey = resolveAssignmentWeekKey(next, a);
-      banners.push({ id: a.id, kind: a.kind, program_key: a.program_key, effective_week: a.effective_week, weekKey: weekKey, note: a.note, coach_email: a.coach_email, snapshot: captureAssignmentTarget(next, a, weekKey) });
+      banners.push({ id: a.id, kind: a.kind, program_key: a.program_key, effective_week: a.effective_week, weekKey: weekKey, full: !!(a.payload && a.payload.setupComplete), note: a.note, coach_email: a.coach_email, snapshot: captureAssignmentTarget(next, a, weekKey) });
       next = mergeAssignment(next, a, weekKey);
       newResolutions[a.id] = "applied";
     });
@@ -4328,47 +4416,14 @@ function App() {
   }
 
   function completeCustomSetup(setup) {
-    const idMap = ["m1", "m2", "m3", "m4"];
-    const nameMap = { m1: "Meal 1", m2: "Meal 2", m3: "Meal 3", m4: "Meal 4" };
-    const mealsWeek = idMap.map(function (id, i) {
-      const r = setup.planResults[i];
-      const foodStr = r.items.map(function (it) { return formatMealItem(it, allFoods); }).join(" + ");
-      return { id: id, time: setup.slots[i].time, name: nameMap[id], food: foodStr, cal: Math.round(r.cal), p: Math.round(r.p), c: Math.round(r.c), f: Math.round(r.f), items: r.items };
-    });
-    // Intra-workout drink: a fixed functional item (not solved from liked foods, like Meal 1-4 are) —
-    // same treatment as a hand-built personal plan's intra-workout shake. Slotted at the entered
-    // training time if there is one; otherwise it has no parseable time, which the day's chronological
-    // timeline already sorts to the bottom, with a note explaining why right in its description.
-    const intraWorkoutEntry = setup.intraWorkout ? {
-      id: "iw", name: "Intra-Workout",
-      time: setup.trainingTime ? formatTimeHM(setup.trainingTime) : "",
-      food: setup.intraWorkout.p + "g protein isolate + " + setup.intraWorkout.c + "g fast carbs (e.g. Cluster Dextrin) + electrolytes" +
-        (setup.trainingTime ? "" : " — add a Training Time in your program settings to slot this into your workout window"),
-      cal: Math.round(setup.intraWorkout.p * 4 + setup.intraWorkout.c * 4 + setup.intraWorkout.f * 9),
-      p: setup.intraWorkout.p, c: setup.intraWorkout.c, f: setup.intraWorkout.f,
-    } : null;
-    const fullMealsWeek = intraWorkoutEntry ? mealsWeek.concat([intraWorkoutEntry]) : mealsWeek;
-    const mealsByWeek = { 1: fullMealsWeek, 2: fullMealsWeek, 3: fullMealsWeek, 4: fullMealsWeek };
-    const overrideForGrocery = {};
-    idMap.forEach(function (id, i) { overrideForGrocery[id] = mealsWeek[i]; });
-    const groceryList = computeCustomGrocery(overrideForGrocery, allFoods);
-    const groceryByWeek = { 1: groceryList, 2: groceryList, 3: groceryList, 4: groceryList };
-
-    const config = {
-      setupComplete: true,
-      goal: setup.goal, currentWeight: setup.currentWeight, targetWeight: setup.targetWeight,
-      activity: setup.activity, weeksNeeded: setup.weeksNeeded, macros: setup.macros, age: setup.age,
-      exercises: setup.exercises, slots: setup.slots, milestones: setup.milestones,
-      mealsByWeek: mealsByWeek, groceryByWeek: groceryByWeek, trainingTime: setup.trainingTime || null,
-      dietStyle: setup.dietStyle || "standard", gender: setup.gender || null, heightCm: setup.heightCm || null,
-      intraWorkout: setup.intraWorkout || null,
-      // Set directly here, not via the queued toggleRirMode path — a brand-new program has no
-      // existing phase to protect from mid-phase mixing, so the wizard's choice can just take
-      // effect immediately from week 1.
-      rirModeEnabled: setup.trainingStyle === "rir",
-    };
+    const config = buildWizardConfig(setup, allFoods);
     const newPrograms = Object.assign({}, data.programs, { custom: freshProgramState(setup.exercises) });
-    save(Object.assign({}, data, { customProgramConfig: config, programs: newPrograms, activeProgram: "custom" }));
+    save(Object.assign({}, data, {
+      customProgramConfig: config, programs: newPrograms, activeProgram: "custom",
+      // Persist the wizard's picks — previously dropped after the solve, leaving later
+      // "regenerate" with nothing to draw on.
+      likedFoodsByMeal: setup.likedFoodsByMeal || data.likedFoodsByMeal,
+    }));
     showToast("Your custom program is ready!");
   }
 
@@ -4612,7 +4667,7 @@ function App() {
       onClick: function () { window.location.reload(); },
     }, "A new version is available — tap to refresh"),
     appliedBanners.map(function (b) {
-      const what = b.kind === "meal_overrides" ? "meal plan" : b.kind === "exercise_week" ? "training week" : b.kind === "exercise_state" ? "weights & rep targets" : "program settings";
+      const what = b.kind === "meal_overrides" ? "meal plan" : b.kind === "exercise_week" ? "training week" : b.kind === "exercise_state" ? "weights & rep targets" : b.full ? "custom program — full setup, built from your preferences" : "program settings";
       return h("div", { key: b.id, className: "plan-error", style: { margin: "8px 12px", borderColor: "#3d97d3", fontSize: 13 } },
         h("strong", null, "Your coach updated your " + what + (b.kind === "meal_overrides" || b.kind === "exercise_week" ? " for Week " + b.effective_week : "")),
         b.coach_email && h("span", { style: { color: "#737373" } }, " (" + b.coach_email + ")"),
@@ -4805,6 +4860,14 @@ function App() {
               isCustomProgram: data.activeProgram === "custom", updateMacrosFromAdaptiveTDEE: updateMacrosFromAdaptiveTDEE,
               uiPrefs: data.uiPrefs, updateUiPrefs: updateUiPrefs,
             }),
+            tab === "clients" && h("div", null,
+              h("h2", { className: "section-title" }, "Clients"),
+              h(CoachingPanel, {
+                coachId: userId,
+                myClients: myClients, pendingInvites: pendingInvites, canCoach: amICoach,
+                inviteClient: inviteClient, respondToInvite: respondToInvite,
+                endCoaching: endCoaching, busy: coachingBusy,
+              })),
             tab === "grocery" && h(GroceryTab, {
               list: groceryList, checked: groceryChecked, toggle: toggleGrocery, reset: resetGroceryList,
               rotationWeek: rotationWeek, displayWeek: groceryDisplayWeek, viewWeek: groceryViewWeek, setViewWeek: setGroceryViewWeek,
@@ -4816,7 +4879,11 @@ function App() {
             h(TabButton, { Icon: UtensilsCrossed, label: "Nutrition", active: tab === "nutrition", onClick: function () { setTab("nutrition"); } }),
             h(TabButton, { Icon: Droplet, label: "Hydration", active: tab === "hydration", onClick: function () { setTab("hydration"); } }),
             h(TabButton, { Icon: TrendingUp, label: "Milestones", active: tab === "milestones", onClick: function () { setTab("milestones"); } }),
-            h(TabButton, { Icon: ShoppingCart, label: "Grocery", active: tab === "grocery", onClick: function () { setTab("grocery"); } })
+            h(TabButton, { Icon: ShoppingCart, label: "Grocery", active: tab === "grocery", onClick: function () { setTab("grocery"); } }),
+            // Only rendered when the coach actually has active clients — for everyone else (all
+            // clients, and coaches between clients) the tab simply doesn't exist. Invite flow
+            // stays reachable from Settings → Coaching, which is where the first client comes from.
+            !!(myClients && myClients.length) && h(TabButton, { Icon: Users, label: "Clients", active: tab === "clients", onClick: function () { setTab("clients"); } })
           )
         )
   );
@@ -6935,6 +7002,34 @@ function CoachPrescriptionEditor(props) {
   const [status, setStatus] = useState(""); // inline feedback — this panel has no toast
   const [queued, setQueued] = useState(null); // pending rows already written for this client
   const [busy, setBusy] = useState(false);
+  const [wizardOpen, setWizardOpen] = useState(false);
+
+  // The coach runs the SAME wizard the client would, answering with the client's stats and
+  // preferences (liked foods included), but completion writes a program_config assignment instead
+  // of touching local state. Foods offered are FOOD_DB only — the coach's personal scanned foods
+  // are excluded, because a plan referencing foods the client's device doesn't have would break
+  // their solver on the first swap.
+  function writeSetupAssignment(setup) {
+    const config = buildWizardConfig(setup, FOOD_DB);
+    const payload = Object.assign({}, config, { likedFoodsByMeal: setup.likedFoodsByMeal || null });
+    const wk = Math.max(1, clientWeek);
+    setBusy(true); setWizardOpen(false);
+    supabaseClient.from("coach_assignments")
+      .select("id").eq("client_id", c.client_id).eq("kind", "program_config").eq("status", "pending")
+      .then(function (r) {
+        const existing = (r.data || [])[0];
+        const op = existing
+          ? supabaseClient.from("coach_assignments").update({ payload: payload, effective_week: wk, note: "Full program setup from your coach" }).eq("id", existing.id).eq("status", "pending")
+          : supabaseClient.from("coach_assignments").insert({ coach_id: props.coachId, client_id: c.client_id, kind: "program_config", program_key: "custom", effective_week: wk, payload: payload, note: "Full program setup from your coach" });
+        return op;
+      })
+      .then(function (r) {
+        setBusy(false);
+        if (r && r.error) { setStatus("Couldn't save the program: " + (r.error.message || "unknown error")); return; }
+        setStatus("Program built — applies when " + c.email + " next opens the app. Their liked foods and plan are ready.");
+        loadQueued();
+      });
+  }
 
   function loadQueued() {
     supabaseClient.from("coach_assignments")
@@ -6994,7 +7089,16 @@ function CoachPrescriptionEditor(props) {
 
   const inputStyle = { width: "100%", background: "#0a0a0a", border: "1px solid #404040", borderRadius: 8, padding: "8px 10px", fontSize: 13, color: "#f5f5f5" };
   return h("div", { style: { borderTop: "1px solid #262626", marginTop: 10, paddingTop: 10 } },
-    h("p", { style: { fontSize: 12, color: "#a3a3a3", margin: "0 0 8px" } }, "Prescribe a meal change"),
+    h("button", { className: "ex-action-btn", style: { width: "100%", marginBottom: 10 }, disabled: busy,
+      onClick: function () { setWizardOpen(!wizardOpen); } },
+      wizardOpen ? "Close setup wizard" : "Run setup wizard for this client"),
+    wizardOpen && h("div", { style: { border: "1px solid #262626", borderRadius: 8, padding: 8, marginBottom: 10 } },
+      h("p", { style: { fontSize: 11, color: "#f0b429", margin: "0 0 8px" } },
+        "Answer as " + c.email + " — their stats, their liked foods. The finished program is prescribed to them, not applied to you." +
+        (c.current_week != null && c.active_program === "custom" ? " They have an existing Custom program: settings and plan will be replaced, but their logged history is never touched." : "")),
+      h(CustomSetupWizard, { onComplete: writeSetupAssignment, allFoods: FOOD_DB })),
+    !wizardOpen && h("p", { style: { fontSize: 12, color: "#a3a3a3", margin: "0 0 8px" } }, "Prescribe a meal change"),
+    !wizardOpen && h(React.Fragment, null,
     h("div", { style: { display: "flex", gap: 6, marginBottom: 8 } },
       h("label", { style: { flex: 1, fontSize: 11, color: "#737373" } }, "effective week",
         h("input", Object.assign({ type: "number", inputMode: "numeric", min: String(clientWeek + 1), value: week,
@@ -7020,13 +7124,14 @@ function CoachPrescriptionEditor(props) {
     h("input", Object.assign({ placeholder: "Note to client (optional)", value: note,
       onChange: function (e) { setNote(e.target.value); } }, { style: Object.assign({}, inputStyle, { marginBottom: 8 }) })),
     h("button", { className: "swap-save-btn", style: { width: "100%" }, disabled: busy || weekIsPast || !food, onClick: saveMeal },
-      busy ? "…" : "Prescribe for week " + weekNum),
+      busy ? "…" : "Prescribe for week " + weekNum)
+    ),
     status && h("p", { style: { fontSize: 11, color: status.indexOf("Couldn't") === 0 || status.indexOf("Target") === 0 || status.indexOf("Describe") === 0 ? "#f87171" : "#4eba6f", margin: "8px 0 0" } }, status),
     queued && queued.length > 0 && h("div", { style: { marginTop: 10 } },
       h("p", { style: { fontSize: 11, color: "#737373", margin: "0 0 4px" } }, "Waiting for the client to open the app:"),
       queued.map(function (q) {
         return h("div", { key: q.id, style: { display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: 11, color: "#a3a3a3", padding: "4px 0", borderBottom: "1px solid #1a1a1a" } },
-          h("span", null, "Week " + q.effective_week + " · " + (q.kind === "meal_overrides" ? Object.keys(q.payload || {}).map(function (k) { return "Meal " + k.slice(1); }).join(", ") : q.kind)),
+          h("span", null, "Week " + q.effective_week + " · " + (q.kind === "meal_overrides" ? Object.keys(q.payload || {}).map(function (k) { return "Meal " + k.slice(1); }).join(", ") : q.kind === "program_config" ? "Full program setup" : q.kind)),
           h("button", { className: "logged-food-remove", disabled: busy, onClick: function () { withdraw(q); } }, "✕"));
       }))
   );
@@ -7964,6 +8069,10 @@ function CustomSetupWizard(props) {
       exercises: computed.exercises, slots: computed.slots, milestones: computed.milestones,
       planResults: plan.results, trainingTime: trainingTime || null, intraWorkout: computed.intraWorkout || null,
       dietStyle: dietStyle, gender: gender, heightCm: computed.heightCm, trainingStyle: trainingStyle,
+      // The picks the plan was solved FROM. Previously discarded after the solve — which left
+      // "regenerate" with no liked foods to draw on — and required by the coach-run wizard, whose
+      // whole point is capturing the client's preferences.
+      likedFoodsByMeal: likedFoodsByMealCustom,
     });
   }
 
