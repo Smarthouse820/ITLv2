@@ -2520,7 +2520,7 @@ function programStateHasRealData(state) {
 // The build currently running. Surfaced in Settings -> Account, because "is the deploy actually
 // live?" has been the real answer to several apparent bugs, and inferring it from behaviour is slow
 // and error-prone. Compared against version.json by the update check below.
-const APP_VERSION = "2026-07-26T18:00:00";
+const APP_VERSION = "2026-07-26T19:00:00";
 
 // Signing out has to be unconditional, because every failure mode here ends the same way: a person
 // tapping a button that does nothing.
@@ -7009,35 +7009,48 @@ function CoachPrescriptionEditor(props) {
   // state (custom exercise state + week). All coach-readable under migration 04's link-scoped
   // SELECT policies — read-only here, always; prescriptions go through coach_assignments.
   const [clientPlan, setClientPlan] = useState(null);
-  const [exDay, setExDay] = useState("");
-  const [exId, setExId] = useState("");
+  // Multi-select day pills (default: all collapsed). Selecting several days lists their exercises
+  // side by side — sets, target reps, current weight, and any queued prescription — for comparison.
+  const [selectedDays, setSelectedDays] = useState([]);
+  const [editingExId, setEditingExId] = useState(null);
   const [exWeight, setExWeight] = useState(""); const [exRepLow, setExRepLow] = useState(""); const [exRepHigh, setExRepHigh] = useState("");
+  const [copyTargets, setCopyTargets] = useState({}); // { [sourceDay]: targetDay } for the copy selects
 
-  function loadClientPlan() {
-    Promise.all([
-      supabaseClient.from("profiles").select("custom_program_config, shared_exercise_state").eq("id", c.client_id).limit(1),
-      supabaseClient.from("program_states").select("state").eq("user_id", c.client_id).eq("program_key", programKey).limit(1),
-    ]).then(function (r) {
-      const prof = (r[0].data || [])[0] || {};
-      const ps = (r[1].data || [])[0] || {};
-      setClientPlan({ config: prof.custom_program_config || null, sharedState: prof.shared_exercise_state || {}, progState: ps.state || {} });
-    });
+  function toggleDay(d) {
+    setSelectedDays(function (cur) { return cur.indexOf(d) >= 0 ? cur.filter(function (x) { return x !== d; }) : cur.concat([d]); });
   }
-  useEffect(loadClientPlan, [c.client_id]);
 
   const exerciseSource = programKey === "custom"
     ? (clientPlan && clientPlan.config && clientPlan.config.exercises) || null
     : (PROGRAM_DEFS[programKey] && PROGRAM_DEFS[programKey].exercises) || null;
   const exDays = exerciseSource ? Object.keys(exerciseSource) : [];
-  const dayExercises = (exerciseSource && exerciseSource[exDay] && exerciseSource[exDay].exercises) || [];
-  const selectedEx = dayExercises.filter(function (e) { return e.id === exId; })[0] || null;
-  const clientExState = selectedEx
-    ? ((programKey === "custom" ? (clientPlan && clientPlan.progState.exerciseState) : (clientPlan && clientPlan.sharedState)) || {})[selectedEx.id] || {}
-    : {};
+  function clientStateOf(id) {
+    return ((programKey === "custom" ? (clientPlan && clientPlan.progState.exerciseState) : (clientPlan && clientPlan.sharedState)) || {})[id] || {};
+  }
 
-  function saveTraining() {
-    if (weekIsPast) { setStatus("Target week must be after the client's current week."); return; }
-    if (!selectedEx) { setStatus("Pick an exercise first."); return; }
+  // The single live pending exercise_state row for the target week (unique constraint guarantees
+  // at most one). Its payload drives the "queued" markers, the duplicate warning, and day-copy.
+  const pendingTrainingRow = (queued || []).filter(function (q) { return q.kind === "exercise_state" && q.effective_week === weekNum; })[0] || null;
+  const pendingPayload = (pendingTrainingRow && pendingTrainingRow.payload) || {};
+
+  function upsertTraining(entries, doneMsg) {
+    setBusy(true); setStatus("");
+    const merged = Object.assign({}, pendingPayload);
+    Object.keys(entries).forEach(function (id) { merged[id] = Object.assign({}, merged[id], entries[id]); });
+    const op = pendingTrainingRow
+      ? supabaseClient.from("coach_assignments").update({ payload: merged, note: note || pendingTrainingRow.note }).eq("id", pendingTrainingRow.id).eq("status", "pending")
+      : supabaseClient.from("coach_assignments").insert({ coach_id: props.coachId, client_id: c.client_id, kind: "exercise_state", program_key: programKey, effective_week: weekNum, payload: merged, note: note || null });
+    op.then(function (r) {
+      setBusy(false);
+      if (r.error) { setStatus("Couldn\u2019t save: " + (r.error.message || "unknown error")); return; }
+      setStatus(doneMsg + " \u2014 applies when " + c.email + " next opens the app.");
+      setExWeight(""); setExRepLow(""); setExRepHigh(""); setNote(""); setEditingExId(null);
+      loadQueued();
+    });
+  }
+
+  function prescribeExercise(ex) {
+    if (weekIsPast) { setStatus("Target week must be after the client\u2019s current week."); return; }
     const change = {};
     if (exWeight !== "") change.weight = Math.max(0, Number(exWeight) || 0);
     if (exRepLow !== "" && exRepHigh !== "") {
@@ -7045,19 +7058,41 @@ function CoachPrescriptionEditor(props) {
       change.repHighOverride = Math.max(change.repLowOverride, Math.round(Number(exRepHigh) || 0));
     }
     if (!Object.keys(change).length) { setStatus("Set a weight or a rep range to prescribe."); return; }
-    setBusy(true); setStatus("");
-    const existing = (queued || []).filter(function (q) { return q.kind === "exercise_state" && q.effective_week === weekNum; })[0];
-    const merged = Object.assign({}, existing ? existing.payload : {}, (function () { const o = {}; o[selectedEx.id] = Object.assign({}, existing && existing.payload && existing.payload[selectedEx.id], change); return o; })());
-    const op = existing
-      ? supabaseClient.from("coach_assignments").update({ payload: merged, note: note || existing.note }).eq("id", existing.id).eq("status", "pending")
-      : supabaseClient.from("coach_assignments").insert({ coach_id: props.coachId, client_id: c.client_id, kind: "exercise_state", program_key: programKey, effective_week: weekNum, payload: merged, note: note || null });
-    op.then(function (r) {
-      setBusy(false);
-      if (r.error) { setStatus("Couldn't save: " + (r.error.message || "unknown error")); return; }
-      setStatus("Prescribed " + selectedEx.name + " — applies when " + c.email + " next opens the app.");
-      setExWeight(""); setExRepLow(""); setExRepHigh(""); setNote("");
-      loadQueued();
+    // The requested duplicate guard: adding an exercise that already has a queued prescription for
+    // this week asks before overwriting, instead of silently replacing it.
+    const already = pendingPayload[ex.id];
+    if (already) {
+      const desc = (already.weight != null ? already.weight + "lb" : "") + (already.repLowOverride != null ? (already.weight != null ? " / " : "") + already.repLowOverride + "\u2013" + already.repHighOverride + " reps" : "");
+      if (!window.confirm(ex.name + " already has a prescription queued for week " + weekNum + (desc ? " (" + desc + ")" : "") + ". Overwrite it?")) return;
+    }
+    const entry = {}; entry[ex.id] = change;
+    upsertTraining(entry, "Prescribed " + ex.name);
+  }
+
+  // Copies QUEUED prescriptions from one day onto another day\u2019s exercises, matched by NAME \u2014
+  // exercise ids are per-day, so name matching is what makes "two leg days share targets" work.
+  // Unmatched source exercises are reported, not guessed at.
+  function copyDayTargets(fromDay, toDay) {
+    if (!toDay || toDay === fromDay || !exerciseSource) return;
+    const srcExercises = (exerciseSource[fromDay] && exerciseSource[fromDay].exercises) || [];
+    const dstExercises = (exerciseSource[toDay] && exerciseSource[toDay].exercises) || [];
+    const entries = {}; const copied = []; const skipped = [];
+    srcExercises.forEach(function (se) {
+      const pres = pendingPayload[se.id];
+      if (!pres) return;
+      const match = dstExercises.filter(function (de) { return de.name === se.name; })[0];
+      if (match) { entries[match.id] = Object.assign({}, pres); copied.push(se.name); }
+      else skipped.push(se.name);
     });
+    if (!copied.length) {
+      setStatus(skipped.length
+        ? "No matching exercises on " + toDay + " for: " + skipped.join(", ")
+        : "Nothing to copy \u2014 prescribe targets on " + fromDay + " first; only queued prescriptions copy.");
+      return;
+    }
+    const dupes = Object.keys(entries).filter(function (id) { return pendingPayload[id]; });
+    if (dupes.length && !window.confirm(dupes.length + " exercise(s) on " + toDay + " already have queued prescriptions for week " + weekNum + ". Overwrite them?")) return;
+    upsertTraining(entries, "Copied " + copied.length + " target(s) " + fromDay + " \u2192 " + toDay + (skipped.length ? " (no match: " + skipped.join(", ") + ")" : ""));
   }
 
   // The coach runs the SAME wizard the client would, answering with the client's stats and
@@ -7189,38 +7224,60 @@ function CoachPrescriptionEditor(props) {
       h("div", { style: { display: "flex", gap: 6, marginBottom: 8 } },
         h("label", { style: { flex: 1, fontSize: 11, color: "#737373" } }, "effective week",
           h("input", Object.assign({ type: "number", inputMode: "numeric", min: String(clientWeek + 1), value: week,
-            onChange: function (e) { setWeek(e.target.value); } }, { style: inputStyle }))),
-        h("label", { style: { flex: 1, fontSize: 11, color: "#737373" } }, "day",
-          h("select", { value: exDay, onChange: function (e) { setExDay(e.target.value); setExId(""); }, style: inputStyle },
-            [h("option", { key: "", value: "" }, "…")].concat(exDays.map(function (d) { return h("option", { key: d, value: d }, d); }))))
-      ),
+            onChange: function (e) { setWeek(e.target.value); } }, { style: inputStyle })))),
       weekIsPast && h("p", { style: { fontSize: 11, color: "#f87171", margin: "0 0 8px" } },
-        "Client is on week " + clientWeek + " — prescriptions target a future week, never the current one."),
+        "Client is on week " + clientWeek + " \u2014 prescriptions target a future week, never the current one."),
       !weekIsPast && weekIsDeload && h("p", { style: { fontSize: 11, color: "#4eba6f", margin: "0 0 8px" } },
-        "Week " + weekNum + " is a deload — the suggested anchor for training changes."),
+        "Week " + weekNum + " is a deload \u2014 the suggested anchor for training changes."),
       !exerciseSource && h("p", { style: { fontSize: 11, color: "#737373", margin: "0 0 8px" } },
-        programKey === "custom" ? "Loading their program… (or their Custom setup hasn't been built yet — run the wizard above first.)" : "Loading…"),
-      exDay && h("select", { value: exId, onChange: function (e) { setExId(e.target.value); }, style: Object.assign({}, inputStyle, { marginBottom: 6 }) },
-        [h("option", { key: "", value: "" }, "Pick an exercise…")].concat(dayExercises.map(function (e2) { return h("option", { key: e2.id, value: e2.id }, e2.name); }))),
-      selectedEx && h("p", { style: { fontSize: 11, color: "#525252", margin: "0 0 8px" } },
-        "Currently: " + (clientExState.weight != null ? clientExState.weight : selectedEx.weight) + "lb · " + selectedEx.sets + "×" +
-        (clientExState.repLowOverride != null ? clientExState.repLowOverride + "–" + clientExState.repHighOverride : selectedEx.repLow + "–" + selectedEx.repHigh) +
-        (clientExState.nameOverride ? " · client subbed: " + clientExState.nameOverride : "")),
-      selectedEx && h("div", { style: { display: "flex", gap: 6, marginBottom: 6 } },
-        h("label", { style: { flex: 1, fontSize: 11, color: "#737373" } }, "weight (lb)",
-          h("input", Object.assign({ type: "number", inputMode: "decimal", min: "0", value: exWeight, placeholder: String(clientExState.weight != null ? clientExState.weight : selectedEx.weight),
-            onChange: function (e) { setExWeight(e.target.value); } }, { style: inputStyle }))),
-        h("label", { style: { flex: 1, fontSize: 11, color: "#737373" } }, "rep low",
-          h("input", Object.assign({ type: "number", inputMode: "numeric", min: "1", value: exRepLow, placeholder: String(selectedEx.repLow),
-            onChange: function (e) { setExRepLow(e.target.value); } }, { style: inputStyle }))),
-        h("label", { style: { flex: 1, fontSize: 11, color: "#737373" } }, "rep high",
-          h("input", Object.assign({ type: "number", inputMode: "numeric", min: "1", value: exRepHigh, placeholder: String(selectedEx.repHigh),
-            onChange: function (e) { setExRepHigh(e.target.value); } }, { style: inputStyle })))
-      ),
-      selectedEx && h("input", Object.assign({ placeholder: "Note to client (optional)", value: note,
-        onChange: function (e) { setNote(e.target.value); } }, { style: Object.assign({}, inputStyle, { marginBottom: 8 }) })),
-      selectedEx && h("button", { className: "swap-save-btn", style: { width: "100%" }, disabled: busy || weekIsPast, onClick: saveTraining },
-        busy ? "…" : "Prescribe for week " + weekNum)
+        programKey === "custom" ? "Loading their program\u2026 (or their Custom setup hasn\u2019t been built yet \u2014 run the wizard above first.)" : "Loading\u2026"),
+      // Day pills, same shape as the Workouts/Nutrition tabs, but multi-select and default
+      // collapsed: nothing shows until a day is chosen, and several open at once for comparing
+      // sets, target reps, and prescribed weight across days.
+      exDays.length > 0 && h("div", { style: { display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 8 } },
+        exDays.map(function (d) {
+          return h("button", { key: d, className: "week-btn" + (selectedDays.indexOf(d) >= 0 ? " active" : ""), onClick: function () { toggleDay(d); } }, d.slice(0, 3));
+        })),
+      selectedDays.filter(function (d) { return exDays.indexOf(d) >= 0; }).map(function (d) {
+        const dayDef = exerciseSource[d] || {};
+        const others = exDays.filter(function (x) { return x !== d; });
+        return h("div", { key: d, style: { border: "1px solid #262626", borderRadius: 8, padding: 8, marginBottom: 8 } },
+          h("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 } },
+            h("span", { style: { fontSize: 12, color: "#f5f5f5" } }, d + (dayDef.label ? " \u2014 " + dayDef.label : "")),
+            h("span", { style: { display: "flex", gap: 4, alignItems: "center", fontSize: 11, color: "#737373" } },
+              "copy targets \u2192",
+              h("select", { value: copyTargets[d] || "", style: Object.assign({}, inputStyle, { width: "auto", padding: "4px 6px" }),
+                onChange: function (e) { const v = e.target.value; setCopyTargets(Object.assign({}, copyTargets, (function () { const o = {}; o[d] = v; return o; })())); if (v) copyDayTargets(d, v); } },
+                [h("option", { key: "", value: "" }, "\u2026")].concat(others.map(function (o) { return h("option", { key: o, value: o }, o.slice(0, 3)); }))))),
+          (dayDef.exercises || []).map(function (ex) {
+            const st = clientStateOf(ex.id);
+            const pres = pendingPayload[ex.id];
+            const curWeight = st.weight != null ? st.weight : ex.weight;
+            const curRange = st.repLowOverride != null ? st.repLowOverride + "\u2013" + st.repHighOverride : ex.repLow + "\u2013" + ex.repHigh;
+            const isEditing = editingExId === ex.id;
+            return h("div", { key: ex.id, style: { borderTop: "1px solid #1a1a1a", padding: "6px 0" } },
+              h("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "center", cursor: "pointer" },
+                onClick: function () { setEditingExId(isEditing ? null : ex.id); setExWeight(""); setExRepLow(""); setExRepHigh(""); } },
+                h("span", { style: { fontSize: 12 } }, ex.name + (st.nameOverride ? " \u00b7 subbed: " + st.nameOverride : "")),
+                h("span", { style: { fontSize: 11, color: pres ? "#4eba6f" : "#737373", textAlign: "right" } },
+                  curWeight + "lb \u00b7 " + ex.sets + "\u00d7" + curRange + (pres ? " \u2192 " + (pres.weight != null ? pres.weight + "lb" : "") + (pres.repLowOverride != null ? (pres.weight != null ? " / " : "") + pres.repLowOverride + "\u2013" + pres.repHighOverride : "") + " queued" : ""))),
+              isEditing && h("div", { style: { marginTop: 6 } },
+                h("div", { style: { display: "flex", gap: 6, marginBottom: 6 } },
+                  h("label", { style: { flex: 1, fontSize: 11, color: "#737373" } }, "weight (lb)",
+                    h("input", Object.assign({ type: "number", inputMode: "decimal", min: "0", value: exWeight, placeholder: String(curWeight),
+                      onChange: function (e) { setExWeight(e.target.value); } }, { style: inputStyle }))),
+                  h("label", { style: { flex: 1, fontSize: 11, color: "#737373" } }, "rep low",
+                    h("input", Object.assign({ type: "number", inputMode: "numeric", min: "1", value: exRepLow, placeholder: String(ex.repLow),
+                      onChange: function (e) { setExRepLow(e.target.value); } }, { style: inputStyle }))),
+                  h("label", { style: { flex: 1, fontSize: 11, color: "#737373" } }, "rep high",
+                    h("input", Object.assign({ type: "number", inputMode: "numeric", min: "1", value: exRepHigh, placeholder: String(ex.repHigh),
+                      onChange: function (e) { setExRepHigh(e.target.value); } }, { style: inputStyle })))),
+                h("input", Object.assign({ placeholder: "Note to client (optional)", value: note,
+                  onChange: function (e) { setNote(e.target.value); } }, { style: Object.assign({}, inputStyle, { marginBottom: 6 }) })),
+                h("button", { className: "swap-save-btn", style: { width: "100%" }, disabled: busy || weekIsPast, onClick: function () { prescribeExercise(ex); } },
+                  busy ? "\u2026" : "Prescribe for week " + weekNum)));
+          }));
+      })
     ),
     status && h("p", { style: { fontSize: 11, color: status.indexOf("Couldn't") === 0 || status.indexOf("Target") === 0 || status.indexOf("Describe") === 0 || status.indexOf("Pick") === 0 || status.indexOf("Set a") === 0 ? "#f87171" : "#4eba6f", margin: "8px 0 0" } }, status),
     queued && queued.length > 0 && h("div", { style: { marginTop: 10 } },
