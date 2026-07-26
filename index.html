@@ -2520,7 +2520,7 @@ function programStateHasRealData(state) {
 // The build currently running. Surfaced in Settings -> Account, because "is the deploy actually
 // live?" has been the real answer to several apparent bugs, and inferring it from behaviour is slow
 // and error-prone. Compared against version.json by the update check below.
-const APP_VERSION = "2026-07-26T07:30:00";
+const APP_VERSION = "2026-07-26T18:00:00";
 
 // Signing out has to be unconditional, because every failure mode here ends the same way: a person
 // tapping a button that does nothing.
@@ -7003,6 +7003,62 @@ function CoachPrescriptionEditor(props) {
   const [queued, setQueued] = useState(null); // pending rows already written for this client
   const [busy, setBusy] = useState(false);
   const [wizardOpen, setWizardOpen] = useState(false);
+  const [mode, setMode] = useState("meal"); // "meal" | "training"
+  // The client's plan, fetched for the training editor: custom config (their exercise list, if
+  // custom), shared exercise state (their current weights on shared programs), and their program
+  // state (custom exercise state + week). All coach-readable under migration 04's link-scoped
+  // SELECT policies — read-only here, always; prescriptions go through coach_assignments.
+  const [clientPlan, setClientPlan] = useState(null);
+  const [exDay, setExDay] = useState("");
+  const [exId, setExId] = useState("");
+  const [exWeight, setExWeight] = useState(""); const [exRepLow, setExRepLow] = useState(""); const [exRepHigh, setExRepHigh] = useState("");
+
+  function loadClientPlan() {
+    Promise.all([
+      supabaseClient.from("profiles").select("custom_program_config, shared_exercise_state").eq("id", c.client_id).limit(1),
+      supabaseClient.from("program_states").select("state").eq("user_id", c.client_id).eq("program_key", programKey).limit(1),
+    ]).then(function (r) {
+      const prof = (r[0].data || [])[0] || {};
+      const ps = (r[1].data || [])[0] || {};
+      setClientPlan({ config: prof.custom_program_config || null, sharedState: prof.shared_exercise_state || {}, progState: ps.state || {} });
+    });
+  }
+  useEffect(loadClientPlan, [c.client_id]);
+
+  const exerciseSource = programKey === "custom"
+    ? (clientPlan && clientPlan.config && clientPlan.config.exercises) || null
+    : (PROGRAM_DEFS[programKey] && PROGRAM_DEFS[programKey].exercises) || null;
+  const exDays = exerciseSource ? Object.keys(exerciseSource) : [];
+  const dayExercises = (exerciseSource && exerciseSource[exDay] && exerciseSource[exDay].exercises) || [];
+  const selectedEx = dayExercises.filter(function (e) { return e.id === exId; })[0] || null;
+  const clientExState = selectedEx
+    ? ((programKey === "custom" ? (clientPlan && clientPlan.progState.exerciseState) : (clientPlan && clientPlan.sharedState)) || {})[selectedEx.id] || {}
+    : {};
+
+  function saveTraining() {
+    if (weekIsPast) { setStatus("Target week must be after the client's current week."); return; }
+    if (!selectedEx) { setStatus("Pick an exercise first."); return; }
+    const change = {};
+    if (exWeight !== "") change.weight = Math.max(0, Number(exWeight) || 0);
+    if (exRepLow !== "" && exRepHigh !== "") {
+      change.repLowOverride = Math.max(1, Math.round(Number(exRepLow) || 0));
+      change.repHighOverride = Math.max(change.repLowOverride, Math.round(Number(exRepHigh) || 0));
+    }
+    if (!Object.keys(change).length) { setStatus("Set a weight or a rep range to prescribe."); return; }
+    setBusy(true); setStatus("");
+    const existing = (queued || []).filter(function (q) { return q.kind === "exercise_state" && q.effective_week === weekNum; })[0];
+    const merged = Object.assign({}, existing ? existing.payload : {}, (function () { const o = {}; o[selectedEx.id] = Object.assign({}, existing && existing.payload && existing.payload[selectedEx.id], change); return o; })());
+    const op = existing
+      ? supabaseClient.from("coach_assignments").update({ payload: merged, note: note || existing.note }).eq("id", existing.id).eq("status", "pending")
+      : supabaseClient.from("coach_assignments").insert({ coach_id: props.coachId, client_id: c.client_id, kind: "exercise_state", program_key: programKey, effective_week: weekNum, payload: merged, note: note || null });
+    op.then(function (r) {
+      setBusy(false);
+      if (r.error) { setStatus("Couldn't save: " + (r.error.message || "unknown error")); return; }
+      setStatus("Prescribed " + selectedEx.name + " — applies when " + c.email + " next opens the app.");
+      setExWeight(""); setExRepLow(""); setExRepHigh(""); setNote("");
+      loadQueued();
+    });
+  }
 
   // The coach runs the SAME wizard the client would, answering with the client's stats and
   // preferences (liked foods included), but completion writes a program_config assignment instead
@@ -7097,8 +7153,11 @@ function CoachPrescriptionEditor(props) {
         "Answer as " + c.email + " — their stats, their liked foods. The finished program is prescribed to them, not applied to you." +
         (c.current_week != null && c.active_program === "custom" ? " They have an existing Custom program: settings and plan will be replaced, but their logged history is never touched." : "")),
       h(CustomSetupWizard, { onComplete: writeSetupAssignment, allFoods: FOOD_DB })),
-    !wizardOpen && h("p", { style: { fontSize: 12, color: "#a3a3a3", margin: "0 0 8px" } }, "Prescribe a meal change"),
-    !wizardOpen && h(React.Fragment, null,
+    !wizardOpen && h("div", { style: { display: "flex", gap: 6, marginBottom: 8 } },
+      [["meal", "Meal change"], ["training", "Training targets"]].map(function (m) {
+        return h("button", { key: m[0], className: "week-btn" + (mode === m[0] ? " active" : ""), onClick: function () { setMode(m[0]); setStatus(""); } }, m[1]);
+      })),
+    !wizardOpen && mode === "meal" && h(React.Fragment, null,
     h("div", { style: { display: "flex", gap: 6, marginBottom: 8 } },
       h("label", { style: { flex: 1, fontSize: 11, color: "#737373" } }, "effective week",
         h("input", Object.assign({ type: "number", inputMode: "numeric", min: String(clientWeek + 1), value: week,
@@ -7126,12 +7185,49 @@ function CoachPrescriptionEditor(props) {
     h("button", { className: "swap-save-btn", style: { width: "100%" }, disabled: busy || weekIsPast || !food, onClick: saveMeal },
       busy ? "…" : "Prescribe for week " + weekNum)
     ),
-    status && h("p", { style: { fontSize: 11, color: status.indexOf("Couldn't") === 0 || status.indexOf("Target") === 0 || status.indexOf("Describe") === 0 ? "#f87171" : "#4eba6f", margin: "8px 0 0" } }, status),
+    !wizardOpen && mode === "training" && h(React.Fragment, null,
+      h("div", { style: { display: "flex", gap: 6, marginBottom: 8 } },
+        h("label", { style: { flex: 1, fontSize: 11, color: "#737373" } }, "effective week",
+          h("input", Object.assign({ type: "number", inputMode: "numeric", min: String(clientWeek + 1), value: week,
+            onChange: function (e) { setWeek(e.target.value); } }, { style: inputStyle }))),
+        h("label", { style: { flex: 1, fontSize: 11, color: "#737373" } }, "day",
+          h("select", { value: exDay, onChange: function (e) { setExDay(e.target.value); setExId(""); }, style: inputStyle },
+            [h("option", { key: "", value: "" }, "…")].concat(exDays.map(function (d) { return h("option", { key: d, value: d }, d); }))))
+      ),
+      weekIsPast && h("p", { style: { fontSize: 11, color: "#f87171", margin: "0 0 8px" } },
+        "Client is on week " + clientWeek + " — prescriptions target a future week, never the current one."),
+      !weekIsPast && weekIsDeload && h("p", { style: { fontSize: 11, color: "#4eba6f", margin: "0 0 8px" } },
+        "Week " + weekNum + " is a deload — the suggested anchor for training changes."),
+      !exerciseSource && h("p", { style: { fontSize: 11, color: "#737373", margin: "0 0 8px" } },
+        programKey === "custom" ? "Loading their program… (or their Custom setup hasn't been built yet — run the wizard above first.)" : "Loading…"),
+      exDay && h("select", { value: exId, onChange: function (e) { setExId(e.target.value); }, style: Object.assign({}, inputStyle, { marginBottom: 6 }) },
+        [h("option", { key: "", value: "" }, "Pick an exercise…")].concat(dayExercises.map(function (e2) { return h("option", { key: e2.id, value: e2.id }, e2.name); }))),
+      selectedEx && h("p", { style: { fontSize: 11, color: "#525252", margin: "0 0 8px" } },
+        "Currently: " + (clientExState.weight != null ? clientExState.weight : selectedEx.weight) + "lb · " + selectedEx.sets + "×" +
+        (clientExState.repLowOverride != null ? clientExState.repLowOverride + "–" + clientExState.repHighOverride : selectedEx.repLow + "–" + selectedEx.repHigh) +
+        (clientExState.nameOverride ? " · client subbed: " + clientExState.nameOverride : "")),
+      selectedEx && h("div", { style: { display: "flex", gap: 6, marginBottom: 6 } },
+        h("label", { style: { flex: 1, fontSize: 11, color: "#737373" } }, "weight (lb)",
+          h("input", Object.assign({ type: "number", inputMode: "decimal", min: "0", value: exWeight, placeholder: String(clientExState.weight != null ? clientExState.weight : selectedEx.weight),
+            onChange: function (e) { setExWeight(e.target.value); } }, { style: inputStyle }))),
+        h("label", { style: { flex: 1, fontSize: 11, color: "#737373" } }, "rep low",
+          h("input", Object.assign({ type: "number", inputMode: "numeric", min: "1", value: exRepLow, placeholder: String(selectedEx.repLow),
+            onChange: function (e) { setExRepLow(e.target.value); } }, { style: inputStyle }))),
+        h("label", { style: { flex: 1, fontSize: 11, color: "#737373" } }, "rep high",
+          h("input", Object.assign({ type: "number", inputMode: "numeric", min: "1", value: exRepHigh, placeholder: String(selectedEx.repHigh),
+            onChange: function (e) { setExRepHigh(e.target.value); } }, { style: inputStyle })))
+      ),
+      selectedEx && h("input", Object.assign({ placeholder: "Note to client (optional)", value: note,
+        onChange: function (e) { setNote(e.target.value); } }, { style: Object.assign({}, inputStyle, { marginBottom: 8 }) })),
+      selectedEx && h("button", { className: "swap-save-btn", style: { width: "100%" }, disabled: busy || weekIsPast, onClick: saveTraining },
+        busy ? "…" : "Prescribe for week " + weekNum)
+    ),
+    status && h("p", { style: { fontSize: 11, color: status.indexOf("Couldn't") === 0 || status.indexOf("Target") === 0 || status.indexOf("Describe") === 0 || status.indexOf("Pick") === 0 || status.indexOf("Set a") === 0 ? "#f87171" : "#4eba6f", margin: "8px 0 0" } }, status),
     queued && queued.length > 0 && h("div", { style: { marginTop: 10 } },
       h("p", { style: { fontSize: 11, color: "#737373", margin: "0 0 4px" } }, "Waiting for the client to open the app:"),
       queued.map(function (q) {
         return h("div", { key: q.id, style: { display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: 11, color: "#a3a3a3", padding: "4px 0", borderBottom: "1px solid #1a1a1a" } },
-          h("span", null, "Week " + q.effective_week + " · " + (q.kind === "meal_overrides" ? Object.keys(q.payload || {}).map(function (k) { return "Meal " + k.slice(1); }).join(", ") : q.kind === "program_config" ? "Full program setup" : q.kind)),
+          h("span", null, "Week " + q.effective_week + " · " + (q.kind === "meal_overrides" ? Object.keys(q.payload || {}).map(function (k) { return "Meal " + k.slice(1); }).join(", ") : q.kind === "program_config" ? "Full program setup" : q.kind === "exercise_state" ? "Training targets: " + Object.keys(q.payload || {}).length + " exercise(s)" : q.kind)),
           h("button", { className: "logged-food-remove", disabled: busy, onClick: function () { withdraw(q); } }, "✕"));
       }))
   );
