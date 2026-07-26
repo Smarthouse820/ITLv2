@@ -1340,7 +1340,7 @@ function formatMealItem(item, source) {
   // presentation-only principle as measureByProtein: item.grams stays dry because that's the basis
   // the macros and the solver work in, and the grocery list wants dry anyway.
   if (food && food.basis === "dry" && food.cookedYield > 0) {
-    return "~" + Math.round(item.grams * food.cookedYield) + "g cooked " + item.name + " (" + Math.round(item.grams) + "g dry)";
+    return "~" + Math.round(item.grams * food.cookedYield) + "g cooked " + item.name;
   }
   return Math.round(item.grams) + "g " + item.name;
 }
@@ -2510,7 +2510,7 @@ function programStateHasRealData(state) {
 // The build currently running. Surfaced in Settings -> Account, because "is the deploy actually
 // live?" has been the real answer to several apparent bugs, and inferring it from behaviour is slow
 // and error-prone. Compared against version.json by the update check below.
-const APP_VERSION = "2026-07-26T01:15:00";
+const APP_VERSION = "2026-07-26T02:15:00";
 
 // Signing out has to be unconditional, because every failure mode here ends the same way: a person
 // tapping a button that does nothing.
@@ -5484,7 +5484,13 @@ function isPlausibleBarcodeLength(code) {
 
 function lookupBarcode(barcode) {
   const url = "https://world.openfoodfacts.org/api/v2/product/" + encodeURIComponent(barcode) + ".json?fields=product_name,brands,nutriments,serving_size,serving_quantity";
-  return fetch(url, { headers: { "User-Agent": "CuttingTracker/1.0 (personal fitness app)" } })
+  // A fetch with no timeout can pend forever on a flaky mobile connection — and by this point the
+  // camera is already closed, so the panel would sit on "Looking up product…" indefinitely with no
+  // way out. Abort at 12s and fall through to the same catch as any other network failure, which
+  // shows the error message and the "Try again" path.
+  const ctrl = typeof AbortController !== "undefined" ? new AbortController() : null;
+  const timer = ctrl ? setTimeout(function () { ctrl.abort(); }, 12000) : null;
+  return fetch(url, { headers: { "User-Agent": "CuttingTracker/1.0 (personal fitness app)" }, signal: ctrl ? ctrl.signal : undefined })
     .then(function (res) { return res.json(); })
     .then(function (data) {
       if (data.status !== 1 || !data.product) return { error: "No product found for that barcode." };
@@ -5518,7 +5524,13 @@ function lookupBarcode(barcode) {
         },
       };
     })
-    .catch(function () { return { error: "Couldn't reach the food database — check your connection and try again." }; });
+    .catch(function (e) {
+      const timedOut = e && e.name === "AbortError";
+      return { error: timedOut
+        ? "The food database is taking too long to respond — try again in a moment, or type the barcode number."
+        : "Couldn't reach the food database — check your connection and try again." };
+    })
+    .finally(function () { if (timer) clearTimeout(timer); });
 }
 
 // A rough heuristic for auto-categorizing a barcode-scanned food when logging it (the daily-logging
@@ -5608,10 +5620,14 @@ function BarcodeLogger(props) {
     stopCamera();
     setMode("loading");
     lookupBarcode(code).then(function (result) {
-      if (result.error) {
-        setErrorMsg(result.error);
-        setMode("error");
-      } else {
+      // Belt and braces: ANY exception below would otherwise be swallowed by the promise chain and
+      // leave the panel stuck on "Looking up product…" with the camera already closed. Every
+      // outcome must land in a state the user can act on.
+      try {
+        if (result.error) {
+          setErrorMsg(result.error);
+          setMode("error");
+        } else {
         setProduct(result);
         // Prefill with the product's declared serving when it has one — a bar or a scoop is far
         // more often eaten as "one serving" than as 100g. Falls back to the 100g convention.
@@ -5628,6 +5644,10 @@ function BarcodeLogger(props) {
           setMacroEdits(roundMacros(result.per100));
         }
         setMode("found");
+      }
+      } catch (e) {
+        setErrorMsg("Something went wrong reading that product's data — try again, or type the barcode number.");
+        setMode("error");
       }
     });
   }
