@@ -2515,7 +2515,7 @@ function programStateHasRealData(state) {
 // The build currently running. Surfaced in Settings -> Account, because "is the deploy actually
 // live?" has been the real answer to several apparent bugs, and inferring it from behaviour is slow
 // and error-prone. Compared against version.json by the update check below.
-const APP_VERSION = "2026-07-26T04:30:00";
+const APP_VERSION = "2026-07-26T05:00:00";
 
 // Signing out has to be unconditional, because every failure mode here ends the same way: a person
 // tapping a button that does nothing.
@@ -3053,6 +3053,18 @@ function App() {
     });
   }
   useEffect(function () { refreshCoaching(); }, [userId]);
+  // The invite badge on the gear (below) is only honest if the list stays current while the app is
+  // open — refreshCoaching keyed on userId alone means an invite sent mid-session would sit
+  // invisible until the next full reload. Same cadence as the version check: every 5 minutes plus
+  // whenever the tab regains focus (the moment someone switches back after their coach texts
+  // "sent you an invite"). Still keyed on userId — never the session object.
+  useEffect(function () {
+    if (!userId) return;
+    const interval = setInterval(refreshCoaching, 5 * 60 * 1000);
+    function onVisible() { if (document.visibilityState === "visible") refreshCoaching(); }
+    document.addEventListener("visibilitychange", onVisible);
+    return function () { clearInterval(interval); document.removeEventListener("visibilitychange", onVisible); };
+  }, [userId]);
 
   function inviteClient(email) {
     setCoachingBusy(true);
@@ -4600,10 +4612,17 @@ function App() {
       h("div", { className: "header-top", style: { display: "flex", justifyContent: "space-between", alignItems: "center" } },
         h("img", { src: LOGO_HEADER_URI, className: "app-logo", alt: "In The Lab Fitness" }),
         h("button", {
-          className: "icon-btn", "aria-label": "Settings",
-          style: tab === "settings" ? { color: "#60a5fa" } : {},
+          className: "icon-btn", "aria-label": "Settings" + (pendingInvites.length ? " — " + pendingInvites.length + " pending coaching invitation" + (pendingInvites.length > 1 ? "s" : "") : ""),
+          style: Object.assign({ position: "relative" }, tab === "settings" ? { color: "#60a5fa" } : {}),
           onClick: function () { setTab(tab === "settings" ? "workouts" : "settings"); },
-        }, h(Gear, { size: 22 }))
+        },
+          h(Gear, { size: 22 }),
+          pendingInvites.length > 0 && h("span", {
+            style: { position: "absolute", top: 2, right: 2, background: "#ef4444", color: "#fff",
+                     fontSize: 10, fontWeight: 700, lineHeight: "16px", minWidth: 16, height: 16,
+                     borderRadius: 999, textAlign: "center", padding: "0 3px", pointerEvents: "none" },
+          }, pendingInvites.length)
+        )
       ),
       h("div", { className: "header-bottom" },
         h("select", {
