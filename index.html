@@ -2515,7 +2515,7 @@ function programStateHasRealData(state) {
 // The build currently running. Surfaced in Settings -> Account, because "is the deploy actually
 // live?" has been the real answer to several apparent bugs, and inferring it from behaviour is slow
 // and error-prone. Compared against version.json by the update check below.
-const APP_VERSION = "2026-07-26T03:00:00";
+const APP_VERSION = "2026-07-26T04:00:00";
 
 // Signing out has to be unconditional, because every failure mode here ends the same way: a person
 // tapping a button that does nothing.
@@ -3099,14 +3099,9 @@ function App() {
 
   // ---- Privacy & health data ----
   const [syncAllowed, setSyncAllowed] = useState(cloudSyncAllowed());
-  const [myCoach, setMyCoach] = useState(null);
-
-  useEffect(function () {
-    if (!session) { setMyCoach(null); return; }
-    supabaseClient.rpc("my_coach").then(function (r) {
-      setMyCoach(!r.error && r.data && r.data.length ? r.data[0] : null);
-    });
-  }, [userId]);
+  // NOTE: my_coach() is fetched ONCE, into myCoachRow (declared with the privacy section below).
+  // A second fetcher used to live here feeding a separate `myCoach` state — two states, one fact,
+  // the same class of bug as the twin Privacy sections. Everything now reads myCoachRow.
 
   function updateSyncAllowed(on) {
     setCloudSyncAllowed(on);
@@ -4669,11 +4664,11 @@ function App() {
       ? h("main", null, h(SettingsTab, {
           session: session, authChecked: authChecked, signUpWithEmail: signUpWithEmail, signInWithEmail: signInWithEmail, signOut: signOut,
           syncAllowed: syncAllowed, updateSyncAllowed: updateSyncAllowed,
-          myCoach: myCoach, deleteCloudCopy: deleteCloudCopy,
+          myCoach: myCoachRow, deleteCloudCopy: deleteCloudCopy,
           endCoachingAsClient: function () {
             return supabaseClient.from("coaching_links").update({ status: "revoked" })
               .eq("client_id", session.user.id).eq("status", "active")
-              .then(function () { setMyCoach(null); showToast("Coaching ended"); return refreshCoaching(); });
+              .then(function () { setMyCoachRow(null); showToast("Coaching ended"); return refreshCoaching(); });
           },
           myClients: myClients, pendingInvites: pendingInvites, coachingBusy: coachingBusy,
           inviteClient: inviteClient, respondToInvite: respondToInvite, endCoaching: endCoaching,
@@ -4702,7 +4697,17 @@ function App() {
             ? h("div", { style: { textAlign: "center", padding: "60px 24px", color: "#737373", fontSize: 13 } }, "Loading\u2026")
             : h(CoordinatorPlaceholder, { programLabel: def.label }))
       : def.needsSetup
-      ? h("main", null, h(CustomSetupWizard, { onComplete: completeCustomSetup, allFoods: allFoods }))
+      ? h("main", null,
+          // Program editing locks while a coach link is active. A PRODUCT boundary, not a security
+          // one: the assignment record is canonical, so divergence is detectable even if someone
+          // edits the JS — and locking harder (coach copy overwriting the device on load) would
+          // reintroduce the exact clobber this design exists to avoid.
+          myCoachRow
+            ? h("div", { style: { textAlign: "center", padding: "60px 24px", color: "#a3a3a3", fontSize: 14, lineHeight: 1.6 } },
+                h("p", { style: { fontSize: 16, color: "#f5f5f5", marginBottom: 12 } }, "Your program is managed by your coach"),
+                h("p", null, (myCoachRow.coach_email || "Your coach") + " sets up your training and meal plan — it will appear here once they've prescribed it. You'll see every change they make, with an undo."),
+                h("p", { style: { fontSize: 12, color: "#737373", marginTop: 16 } }, "Want to set it up yourself instead? Revoke coach access in Settings → Privacy & Health Data, and the setup wizard unlocks."))
+            : h(CustomSetupWizard, { onComplete: completeCustomSetup, allFoods: allFoods }))
       : h(React.Fragment, null,
           h("main", null,
             tab === "workouts" && h(WorkoutsTab, {
@@ -7068,11 +7073,19 @@ function SettingsTab(props) {
         h("div", null, h("div", { style: { fontSize: 13 } }, "RIR mode"),
           h("div", { style: { fontSize: 11, color: "#737373", marginTop: 2, maxWidth: 220 } },
             "Autoregulate reps from what you logged last week instead of a fixed range." + (props.isSharedProgram ? " Shared across Cutting, Cruise, and Hypertrophy." : ""))),
-        h(SettingsSeg, { on: props.rirModeEnabled, onChange: function () { props.toggleRirMode(); } })
+        props.myCoach
+          ? h("span", { style: { fontSize: 11, color: "#737373" } }, props.rirModeEnabled ? "On · set by coach" : "Off · set by coach")
+          : h(SettingsSeg, { on: props.rirModeEnabled, onChange: function () { props.toggleRirMode(); } })
       ),
+      // The coach owns macro targets and training structure; the client owns which foods hit those
+      // numbers (swaps stay available — structurally safe via the slot solver). So while a coach
+      // link is active, the wizard, program-settings edit, and RIR toggle lock, and this note says
+      // why and how to take control back.
+      props.myCoach && h("p", { style: { fontSize: 11, color: "#737373", margin: "8px 0 4px" } },
+        "Your program is managed by your coach (" + (props.myCoach.coach_email || "") + "). Changes to targets and training arrive as prescriptions you can undo. To take back control, revoke coach access under Privacy & Health Data."),
       props.rirModePendingEnable && h("p", { style: { fontSize: 11, color: "#f0b429", margin: "0 0 4px" } },
         "Queued — turns on at your next deload, so it never starts mid-phase. Tap On again to cancel."),
-      props.isCustomProgram && h("div", { style: { marginTop: 12, borderTop: "1px solid #262626", paddingTop: 12 } },
+      props.isCustomProgram && !props.myCoach && h("div", { style: { marginTop: 12, borderTop: "1px solid #262626", paddingTop: 12 } },
         h("div", { style: { display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 8 } },
           h("button", { className: "ex-action-btn", onClick: function () { props.setShowEditProgramSettings(!props.showEditProgramSettings); } }, props.showEditProgramSettings ? "Hide edit form" : "Edit program settings"),
           h("button", { className: "reset-list-btn", style: { flex: 1, marginBottom: 0 }, onClick: props.resetCustomSetup }, "Redo custom setup")
