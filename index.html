@@ -2520,7 +2520,7 @@ function programStateHasRealData(state) {
 // The build currently running. Surfaced in Settings -> Account, because "is the deploy actually
 // live?" has been the real answer to several apparent bugs, and inferring it from behaviour is slow
 // and error-prone. Compared against version.json by the update check below.
-const APP_VERSION = "2026-07-26T19:00:00";
+const APP_VERSION = "2026-07-26T19:20:00";
 
 // Signing out has to be unconditional, because every failure mode here ends the same way: a person
 // tapping a button that does nothing.
@@ -7009,6 +7009,17 @@ function CoachPrescriptionEditor(props) {
   // state (custom exercise state + week). All coach-readable under migration 04's link-scoped
   // SELECT policies — read-only here, always; prescriptions go through coach_assignments.
   const [clientPlan, setClientPlan] = useState(null);
+  function loadClientPlan() {
+    Promise.all([
+      supabaseClient.from("profiles").select("custom_program_config, shared_exercise_state").eq("id", c.client_id).limit(1),
+      supabaseClient.from("program_states").select("state").eq("user_id", c.client_id).eq("program_key", programKey).limit(1),
+    ]).then(function (r) {
+      const prof = (r[0].data || [])[0] || {};
+      const ps = (r[1].data || [])[0] || {};
+      setClientPlan({ config: prof.custom_program_config || null, sharedState: prof.shared_exercise_state || {}, progState: ps.state || {} });
+    });
+  }
+  useEffect(loadClientPlan, [c.client_id]);
   // Multi-select day pills (default: all collapsed). Selecting several days lists their exercises
   // side by side — sets, target reps, current weight, and any queued prescription — for comparison.
   const [selectedDays, setSelectedDays] = useState([]);
