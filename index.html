@@ -2510,7 +2510,7 @@ function programStateHasRealData(state) {
 // The build currently running. Surfaced in Settings -> Account, because "is the deploy actually
 // live?" has been the real answer to several apparent bugs, and inferring it from behaviour is slow
 // and error-prone. Compared against version.json by the update check below.
-const APP_VERSION = "2026-07-26T00:45:00";
+const APP_VERSION = "2026-07-26T01:15:00";
 
 // Signing out has to be unconditional, because every failure mode here ends the same way: a person
 // tapping a button that does nothing.
@@ -3358,15 +3358,17 @@ function App() {
   // references changes — exactly what happened when a scanned rice was reclassified as dry-basis
   // after the swap and the card kept showing the dry grams. Base (non-overridden) meals keep their
   // hand-written prose untouched. Zero-gram items are skipped, matching how the strings were built.
-  function freshenOverrideMeal(m) {
+  function freshenOverrideMeal(m, base) {
     if (!m || !m.items || !m.items.length) return m;
     const txt = m.items.filter(function (it) { return it.grams > 0; })
       .map(function (it) { return formatMealItem(it, allFoods); }).join(" + ");
-    return Object.assign({}, m, { food: txt });
+    // Backfill `slot` from the base meal for overrides written before the swap preserved it —
+    // heals stored data in place, so old swaps regain their chevron without being redone.
+    return Object.assign({}, m, { food: txt, slot: m.slot || (base && base.slot) });
   }
   const baseMeals = def.mealsByWeek[nutritionDisplayWeek].map(function (m) {
-    if (dateOverride && dateOverride[m.id]) return freshenOverrideMeal(dateOverride[m.id]);
-    return (weekOverride && weekOverride[m.id]) ? freshenOverrideMeal(weekOverride[m.id]) : m;
+    if (dateOverride && dateOverride[m.id]) return freshenOverrideMeal(dateOverride[m.id], m);
+    return (weekOverride && weekOverride[m.id]) ? freshenOverrideMeal(weekOverride[m.id], m) : m;
   });
   // Training-time macro bias: only for the Custom program, only when a training time was entered in
   // the wizard, only on days that actually have a lifting session, and only when nothing on this
@@ -4453,7 +4455,10 @@ function App() {
       cal += (food.cal * it.grams) / 100; p += (food.p * it.grams) / 100; c += (food.c * it.grams) / 100; f += (food.f * it.grams) / 100;
     });
     const foodStr = newItems.map(function (it) { return formatMealItem(it, allFoods); }).join(" + ");
-    const newMealObj = { id: currentMeal.id, time: currentMeal.time, name: currentMeal.name, food: foodStr, cal: Math.round(cal), p: Math.round(p), c: Math.round(c), f: Math.round(f), items: newItems };
+    // `slot` MUST survive into the override: it's both the chevron gate's condition on built-in
+    // programs and the mapping to the correct macro targets for any FURTHER swap. Dropping it made
+    // the swap's own output ineligible for swapping — the customize section vanished after one use.
+    const newMealObj = { id: currentMeal.id, time: currentMeal.time, name: currentMeal.name, slot: currentMeal.slot, food: foodStr, cal: Math.round(cal), p: Math.round(p), c: Math.round(c), f: Math.round(f), items: newItems };
 
     const currentWeek = prog.currentWeek;
     const existingWeekOverride = prog.customMealOverrides[currentWeek] || {};
