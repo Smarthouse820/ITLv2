@@ -2515,7 +2515,7 @@ function programStateHasRealData(state) {
 // The build currently running. Surfaced in Settings -> Account, because "is the deploy actually
 // live?" has been the real answer to several apparent bugs, and inferring it from behaviour is slow
 // and error-prone. Compared against version.json by the update check below.
-const APP_VERSION = "2026-07-26T04:00:00";
+const APP_VERSION = "2026-07-26T04:30:00";
 
 // Signing out has to be unconditional, because every failure mode here ends the same way: a person
 // tapping a button that does nothing.
@@ -4720,6 +4720,7 @@ function App() {
               setExerciseDifficulty: setExerciseDifficulty, color: def.color,
               targetHR: (data.customProgramConfig && data.customProgramConfig.age) ? Math.round((220 - data.customProgramConfig.age) * 0.65) : null,
               supersetGroups: prog.supersetGroups, createSuperset: createSuperset, removeSuperset: removeSuperset,
+              coachManaged: !!myCoachRow,
               deloadRecommendation: prog.deloadRecommendation, acceptDeloadRecommendation: acceptDeloadRecommendation,
               dismissDeloadRecommendation: dismissDeloadRecommendation, readinessSignal: readinessSignal,
               volumeIncreaseRecommendations: prog.volumeIncreaseRecommendations,
@@ -5027,7 +5028,7 @@ function WorkoutsTab(props) {
               h("span", null, "\"" + blockedBy + "\" is still in progress. Finish rating it, or skip it, before starting this one."))
           : h(React.Fragment, null,
               isSwapOpen && !ex.isWeekSubstitute && h(SwapForm, {
-                exercise: ex, current: state,
+                exercise: ex, current: state, coachManaged: props.coachManaged,
                 onSave: function (name, weight, newRepRange) { props.setSwap(ex.id, name, weight, newRepRange); },
                 onSaveThisWeek: function (name, weight, newRepRange) {
                   props.setWeekSwap(ex.id, name, weight, newRepRange ? newRepRange.repLow : null, newRepRange ? newRepRange.repHigh : null, ex.bodyweight, state.weight != null ? state.weight : ex.weight, range.repLow != null ? range.repLow : ex.repLow, range.repHigh != null ? range.repHigh : ex.repHigh);
@@ -5147,7 +5148,11 @@ function WorkoutsTab(props) {
     day.cardio && props.targetHR && h("div", { className: "plan-error", style: { marginBottom: 12, border: "2px solid #4eba6f" } },
       h("strong", null, "Target heart rate for fat-burning: ~" + props.targetHR + " bpm")
     ),
-    day.exercises.length > 0 && h("div", { style: { display: "flex", gap: 8, marginBottom: 12 } },
+    // Structure edits lock while a coach link is active: the coach owns training STRUCTURE
+    // (supersets, permanent exercise substitutions), the client owns EXECUTION (logging, skips,
+    // this-week-only swaps). Same product boundary as the wizard lock — divergence stays
+    // detectable either way, since the assignment record is canonical.
+    day.exercises.length > 0 && !props.coachManaged && h("div", { style: { display: "flex", gap: 8, marginBottom: 12 } },
       !groupingMode
         ? h("button", { className: "ex-action-btn", onClick: function () { setGroupingMode(true); setPendingSelection([]); } }, "Create Superset")
         : h(React.Fragment, null,
@@ -5201,7 +5206,7 @@ function WorkoutsTab(props) {
             return h("div", { key: "superset-" + unit.groupIndex, className: "superset-group" },
               h("div", { className: "superset-label" },
                 h("span", null, "Superset"),
-                h("button", { className: "superset-ungroup-btn", onClick: function () { props.removeSuperset(props.selectedDay, unit.groupIndex); } }, "Ungroup")
+                !props.coachManaged && h("button", { className: "superset-ungroup-btn", onClick: function () { props.removeSuperset(props.selectedDay, unit.groupIndex); } }, "Ungroup")
               ),
               unit.members.map(function (m) { return renderCard(m.ex, m.idx); })
             );
@@ -5299,17 +5304,22 @@ function SwapForm(props) {
         baseRange.repLow + "–" + baseRange.repHigh + " to " + suggestion.repLow + "–" + suggestion.repHigh + " when you save.")
     ),
     h("p", { style: { fontSize: "11px", color: "#737373", margin: "8px 0 0" } },
-      "\"This week only\" reverts on its own next week — the substitute gets its own separate history, and your original exercise's history is untouched the whole time. \"Rest of program\" renames this slot going forward."),
+      props.coachManaged
+        ? "\"This week only\" reverts on its own next week — the substitute gets its own separate history, and your original exercise's history is untouched. Permanent changes to your program come from your coach."
+        : "\"This week only\" reverts on its own next week — the substitute gets its own separate history, and your original exercise's history is untouched the whole time. \"Rest of program\" renames this slot going forward."),
     h("div", { style: { display: "flex", gap: "8px", marginTop: 8, flexWrap: "wrap" } },
       h("button", {
         className: "swap-save-btn", style: { flex: "1 1 45%" },
         onClick: function () { props.onSaveThisWeek(name, weight, suggestion ? { repLow: suggestion.repLow, repHigh: suggestion.repHigh } : null); },
       }, "Save (this week only)"),
-      h("button", {
+      // The permanent rename and the revert both rewrite exerciseState — coach-owned structure —
+      // so they hide while a coach link is active. The temporary swap above is execution, not
+      // structure: it lives in exerciseWeekOverrides and self-reverts, so it stays.
+      !props.coachManaged && h("button", {
         className: "swap-save-btn", style: { flex: "1 1 45%" },
         onClick: function () { props.onSave(name, weight, suggestion ? { repLow: suggestion.repLow, repHigh: suggestion.repHigh } : null); },
       }, "Save (rest of program)"),
-      props.current.nameOverride && h("button", {
+      !props.coachManaged && props.current.nameOverride && h("button", {
         className: "swap-save-btn", style: { flex: "1 1 100%", background: "#898989" },
         onClick: function () { props.onClear(); setName(""); },
       }, "Revert to original")
