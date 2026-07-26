@@ -2161,6 +2161,10 @@ function makeDefaultData() {
     activeProgram: "custom",
     likedFoodsByMeal: { m1: [], m2: [], m3: [], m4: [] }, // which liked foods apply to which meal slot — a breakfast-only protein shouldn't get picked for dinner
     customFoods: [],
+    // Local-only bookkeeping for coach assignments this DEVICE has already applied or undone, so a
+    // failed status write to the server can never re-merge (or resurrect an undone) prescription on
+    // the next load. Keyed by assignment id -> "applied" | "undone". Deliberately not synced.
+    assignmentResolutions: {},
     customProgramConfig: null,
     supplementList: [],
     restTimerSettings: { enabled: false, seconds: 90 }, // client-side post-set rest reminder — no backend involved
@@ -2224,6 +2228,7 @@ function normalizeV2(parsed) {
     activeProgram: validPrograms.indexOf(parsed.activeProgram) !== -1 ? parsed.activeProgram : "custom",
     likedFoodsByMeal: likedFoodsByMeal,
     customFoods: parsed.customFoods || [],
+    assignmentResolutions: parsed.assignmentResolutions || {},
     customProgramConfig: parsed.customProgramConfig || null,
     supplementList: parsed.supplementList || [],
     restTimerSettings: Object.assign({ enabled: false, seconds: 90 }, parsed.restTimerSettings || {}),
@@ -2510,7 +2515,7 @@ function programStateHasRealData(state) {
 // The build currently running. Surfaced in Settings -> Account, because "is the deploy actually
 // live?" has been the real answer to several apparent bugs, and inferring it from behaviour is slow
 // and error-prone. Compared against version.json by the update check below.
-const APP_VERSION = "2026-07-26T02:15:00";
+const APP_VERSION = "2026-07-26T03:00:00";
 
 // Signing out has to be unconditional, because every failure mode here ends the same way: a person
 // tapping a button that does nothing.
@@ -3254,16 +3259,127 @@ function App() {
           return;
         }
         setAssignmentsError(false);
-        const rows = r.data || [];
-        setPendingAssignments(rows);
-        if (rows.length) {
-          // Temporary, for the read-only phase: makes the shape and the week filtering inspectable
-          // without any UI. Comes out once the apply path lands.
-          console.log("[coach assignments] " + rows.length + " pending for week >= " + week, rows);
-        }
+        setPendingAssignments(r.data || []);
       });
   }
   useEffect(function () { refreshAssignments(); }, [userId, prog && prog.currentWeek, data.activeProgram]);
+
+  // ---- Coach assignments: client-side APPLY ----
+  // The delicate half. Three constraints, all load-bearing:
+  //   1. Runs only after freshDeviceCheckDone — an apply that fires before the restore decision can
+  //      push a half-merged local state over good cloud data through the auto-backup.
+  //   2. Idempotent two ways: every merge below is a no-op when repeated with the same payload
+  //      (Object.assign into the same week key), AND assignmentResolutions records what this device
+  //      already handled, so neither a re-run effect, a second tab, nor a failed server write can
+  //      double-merge or resurrect an undo.
+  //   3. Keys on state derived from userId (pendingAssignments), never the session object — see
+  //      §5.11 of the handoff for the five-fetches-per-load lesson.
+  const [appliedBanners, setAppliedBanners] = useState([]); // undo is per-session; after reload the change simply stands
+
+  function withProgramPatch(cur, key, patch) {
+    const progs = Object.assign({}, cur.programs);
+    progs[key] = Object.assign({}, progs[key], patch);
+    return Object.assign({}, cur, { programs: progs });
+  }
+  // Snapshot exactly the region a merge will touch, for undo.
+  function captureAssignmentTarget(cur, a) {
+    if (a.kind === "program_config") return cur.customProgramConfig;
+    if (a.kind === "exercise_state") {
+      return a.program_key === "custom" ? (cur.programs.custom && cur.programs.custom.exerciseState) : cur.sharedExerciseState;
+    }
+    const p = cur.programs[a.program_key];
+    if (!p) return undefined;
+    const field = a.kind === "meal_overrides" ? "customMealOverrides" : "exerciseWeekOverrides";
+    return (p[field] || {})[a.effective_week];
+  }
+  // Merge one assignment into a data object. Payloads are shaped exactly like the data they target
+  // (migration 06), so this is assignment-into-slot, not translation.
+  function mergeAssignment(cur, a) {
+    const wk = a.effective_week;
+    if (a.kind === "program_config") return Object.assign({}, cur, { customProgramConfig: a.payload });
+    if (a.kind === "exercise_state") {
+      const base = a.program_key === "custom" ? ((cur.programs.custom && cur.programs.custom.exerciseState) || {}) : (cur.sharedExerciseState || {});
+      const merged = Object.assign({}, base);
+      Object.keys(a.payload || {}).forEach(function (exId) { merged[exId] = Object.assign({}, merged[exId], a.payload[exId]); });
+      return a.program_key === "custom"
+        ? withProgramPatch(cur, "custom", { exerciseState: merged })
+        : Object.assign({}, cur, { sharedExerciseState: merged });
+    }
+    const p = cur.programs[a.program_key];
+    if (!p) return cur;
+    const field = a.kind === "meal_overrides" ? "customMealOverrides" : "exerciseWeekOverrides";
+    const all = Object.assign({}, p[field]);
+    all[wk] = Object.assign({}, all[wk], a.payload);
+    const patch = {}; patch[field] = all;
+    return withProgramPatch(cur, a.program_key, patch);
+  }
+  function restoreAssignmentTarget(cur, b) {
+    if (b.kind === "program_config") return Object.assign({}, cur, { customProgramConfig: b.snapshot === undefined ? null : b.snapshot });
+    if (b.kind === "exercise_state") {
+      return b.program_key === "custom"
+        ? withProgramPatch(cur, "custom", { exerciseState: b.snapshot || {} })
+        : Object.assign({}, cur, { sharedExerciseState: b.snapshot || {} });
+    }
+    const p = cur.programs[b.program_key];
+    if (!p) return cur;
+    const field = b.kind === "meal_overrides" ? "customMealOverrides" : "exerciseWeekOverrides";
+    const all = Object.assign({}, p[field]);
+    if (b.snapshot === undefined) delete all[b.effective_week]; else all[b.effective_week] = b.snapshot;
+    const patch = {}; patch[field] = all;
+    return withProgramPatch(cur, b.program_key, patch);
+  }
+  function markAssignmentStatus(id, status) {
+    // Server write is best-effort: the local resolution map is what guarantees this device never
+    // re-processes the row, and my_pending_assignments simply keeps returning it until this lands
+    // — at which point the resolution filter drops it. A retry therefore happens for free on every
+    // refresh, with no queue to maintain.
+    return supabaseClient.from("coach_assignments").update({ status: status })
+      .eq("id", id).eq("status", "pending")
+      .then(function (r) { return !r.error; });
+  }
+  useEffect(function () {
+    if (!freshDeviceCheckDone) return;
+    if (!pendingAssignments.length) return;
+    const currentWeek = (prog && prog.currentWeek) || 1;
+    const resolutions = data.assignmentResolutions || {};
+    const toApply = pendingAssignments.filter(function (a) {
+      if (resolutions[a.id]) { markAssignmentStatus(a.id, resolutions[a.id]); return false; } // retry the server write only
+      if (a.effective_week < currentWeek) return false; // the week can advance between write and read — re-checked on apply per migration 06
+      if (a.kind !== "program_config" && a.kind !== "exercise_state" && !data.programs[a.program_key]) return false; // unknown target: leave pending
+      return true;
+    });
+    if (!toApply.length) { setPendingAssignments([]); return; }
+    let next = data;
+    const banners = [];
+    const newResolutions = Object.assign({}, resolutions);
+    toApply.forEach(function (a) {
+      banners.push({ id: a.id, kind: a.kind, program_key: a.program_key, effective_week: a.effective_week, note: a.note, coach_email: a.coach_email, snapshot: captureAssignmentTarget(next, a) });
+      next = mergeAssignment(next, a);
+      newResolutions[a.id] = "applied";
+    });
+    next = Object.assign({}, next, { assignmentResolutions: newResolutions });
+    save(next); // ONE write for the whole batch — the auto-backup sees a single consistent state
+    setAppliedBanners(function (prev) { return prev.concat(banners); });
+    setPendingAssignments([]);
+    toApply.forEach(function (a) { markAssignmentStatus(a.id, "applied"); });
+  }, [pendingAssignments, freshDeviceCheckDone]);
+
+  function undoAssignment(banner) {
+    let next = restoreAssignmentTarget(data, banner);
+    const resolutions = Object.assign({}, next.assignmentResolutions);
+    resolutions[banner.id] = "undone";
+    next = Object.assign({}, next, { assignmentResolutions: resolutions });
+    save(next);
+    setAppliedBanners(function (prev) { return prev.filter(function (b) { return b.id !== banner.id; }); });
+    // The row is 'applied' on the server by now, so the pending-only guard won't match; a direct
+    // applied->undone update is permitted by the client policy and trigger.
+    supabaseClient.from("coach_assignments").update({ status: "undone" }).eq("id", banner.id)
+      .then(function () {});
+    showToast("Coach change undone");
+  }
+  function dismissAssignmentBanner(id) {
+    setAppliedBanners(function (prev) { return prev.filter(function (b) { return b.id !== id; }); });
+  }
 
   const isSharedProgram = data.activeProgram !== "custom";
   const effectiveExerciseState = isSharedProgram ? (data.sharedExerciseState || {}) : prog.exerciseState;
@@ -4473,6 +4589,18 @@ function App() {
       style: { background: "#8b5cf6", color: "#fff", padding: "10px 16px", textAlign: "center", fontSize: "13px", cursor: "pointer" },
       onClick: function () { window.location.reload(); },
     }, "A new version is available — tap to refresh"),
+    appliedBanners.map(function (b) {
+      const what = b.kind === "meal_overrides" ? "meal plan" : b.kind === "exercise_week" ? "training week" : b.kind === "exercise_state" ? "weights & rep targets" : "program settings";
+      return h("div", { key: b.id, className: "plan-error", style: { margin: "8px 12px", borderColor: "#3d97d3", fontSize: 13 } },
+        h("strong", null, "Your coach updated your " + what + (b.kind === "meal_overrides" || b.kind === "exercise_week" ? " for Week " + b.effective_week : "")),
+        b.coach_email && h("span", { style: { color: "#737373" } }, " (" + b.coach_email + ")"),
+        b.note && h("p", { style: { margin: "4px 0 0" } }, "\u201c" + b.note + "\u201d"),
+        h("div", { style: { display: "flex", gap: 8, marginTop: 8 } },
+          h("button", { className: "ex-action-btn", onClick: function () { undoAssignment(b); } }, "Undo"),
+          h("button", { className: "ex-action-btn", onClick: function () { dismissAssignmentBanner(b.id); } }, "OK")
+        )
+      );
+    }),
     h("header", { className: "header" },
       h("div", { className: "header-top", style: { display: "flex", justifyContent: "space-between", alignItems: "center" } },
         h("img", { src: LOGO_HEADER_URI, className: "app-logo", alt: "In The Lab Fitness" }),
