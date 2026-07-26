@@ -2515,7 +2515,7 @@ function programStateHasRealData(state) {
 // The build currently running. Surfaced in Settings -> Account, because "is the deploy actually
 // live?" has been the real answer to several apparent bugs, and inferring it from behaviour is slow
 // and error-prone. Compared against version.json by the update check below.
-const APP_VERSION = "2026-07-26T05:00:00";
+const APP_VERSION = "2026-07-26T06:00:00";
 
 // Signing out has to be unconditional, because every failure mode here ends the same way: a person
 // tapping a button that does nothing.
@@ -3288,8 +3288,23 @@ function App() {
     progs[key] = Object.assign({}, progs[key], patch);
     return Object.assign({}, cur, { programs: progs });
   }
-  // Snapshot exactly the region a merge will touch, for undo.
-  function captureAssignmentTarget(cur, a) {
+  // Meal overrides are keyed by ROTATION week (1–4), which advances on calendar Mondays,
+  // independent of the training week. An assignment's effective_week is ABSOLUTE (that's what the
+  // server-side >= current_week filter compares), so it must be translated here, on the device,
+  // where both numbers are known: the rotation key that will be current when the client reaches
+  // effective_week. Consequence, shared with the client's own swaps: a rotation-keyed override
+  // recurs every 4 weeks until changed — a coach meal prescription persists, it doesn't expire.
+  // exercise_week overrides are absolute-keyed and need no translation.
+  function resolveAssignmentWeekKey(cur, a) {
+    if (a.kind !== "meal_overrides") return a.effective_week;
+    const p = cur.programs[a.program_key] || {};
+    const delta = Math.max(0, a.effective_week - (p.currentWeek || 1));
+    return ((((p.nutritionRotationWeek || 1) - 1 + delta) % 4) + 4) % 4 + 1;
+  }
+  // Snapshot exactly the region a merge will touch, for undo. weekKey is the RESOLVED key from
+  // resolveAssignmentWeekKey, computed once per assignment so capture, merge and a later restore
+  // all address the same slot even if the client's week advances in between.
+  function captureAssignmentTarget(cur, a, weekKey) {
     if (a.kind === "program_config") return cur.customProgramConfig;
     if (a.kind === "exercise_state") {
       return a.program_key === "custom" ? (cur.programs.custom && cur.programs.custom.exerciseState) : cur.sharedExerciseState;
@@ -3297,12 +3312,11 @@ function App() {
     const p = cur.programs[a.program_key];
     if (!p) return undefined;
     const field = a.kind === "meal_overrides" ? "customMealOverrides" : "exerciseWeekOverrides";
-    return (p[field] || {})[a.effective_week];
+    return (p[field] || {})[weekKey];
   }
   // Merge one assignment into a data object. Payloads are shaped exactly like the data they target
   // (migration 06), so this is assignment-into-slot, not translation.
-  function mergeAssignment(cur, a) {
-    const wk = a.effective_week;
+  function mergeAssignment(cur, a, weekKey) {
     if (a.kind === "program_config") return Object.assign({}, cur, { customProgramConfig: a.payload });
     if (a.kind === "exercise_state") {
       const base = a.program_key === "custom" ? ((cur.programs.custom && cur.programs.custom.exerciseState) || {}) : (cur.sharedExerciseState || {});
@@ -3316,7 +3330,7 @@ function App() {
     if (!p) return cur;
     const field = a.kind === "meal_overrides" ? "customMealOverrides" : "exerciseWeekOverrides";
     const all = Object.assign({}, p[field]);
-    all[wk] = Object.assign({}, all[wk], a.payload);
+    all[weekKey] = Object.assign({}, all[weekKey], a.payload);
     const patch = {}; patch[field] = all;
     return withProgramPatch(cur, a.program_key, patch);
   }
@@ -3331,7 +3345,7 @@ function App() {
     if (!p) return cur;
     const field = b.kind === "meal_overrides" ? "customMealOverrides" : "exerciseWeekOverrides";
     const all = Object.assign({}, p[field]);
-    if (b.snapshot === undefined) delete all[b.effective_week]; else all[b.effective_week] = b.snapshot;
+    if (b.snapshot === undefined) delete all[b.weekKey]; else all[b.weekKey] = b.snapshot;
     const patch = {}; patch[field] = all;
     return withProgramPatch(cur, b.program_key, patch);
   }
@@ -3360,8 +3374,9 @@ function App() {
     const banners = [];
     const newResolutions = Object.assign({}, resolutions);
     toApply.forEach(function (a) {
-      banners.push({ id: a.id, kind: a.kind, program_key: a.program_key, effective_week: a.effective_week, note: a.note, coach_email: a.coach_email, snapshot: captureAssignmentTarget(next, a) });
-      next = mergeAssignment(next, a);
+      const weekKey = resolveAssignmentWeekKey(next, a);
+      banners.push({ id: a.id, kind: a.kind, program_key: a.program_key, effective_week: a.effective_week, weekKey: weekKey, note: a.note, coach_email: a.coach_email, snapshot: captureAssignmentTarget(next, a, weekKey) });
+      next = mergeAssignment(next, a, weekKey);
       newResolutions[a.id] = "applied";
     });
     next = Object.assign({}, next, { assignmentResolutions: newResolutions });
@@ -4681,6 +4696,7 @@ function App() {
     // anything. Settings has to be the one screen that's always available.
     tab === "settings"
       ? h("main", null, h(SettingsTab, {
+          userId: userId,
           session: session, authChecked: authChecked, signUpWithEmail: signUpWithEmail, signInWithEmail: signInWithEmail, signOut: signOut,
           syncAllowed: syncAllowed, updateSyncAllowed: updateSyncAllowed,
           myCoach: myCoachRow, deleteCloudCopy: deleteCloudCopy,
@@ -6901,8 +6917,124 @@ function FreshDeviceRestorePrompt(props) {
 // weigh-in, last active. Enough to spot someone who has stalled or gone quiet, which is the actual
 // job. It is NOT anonymised: coaching requires knowing who you're writing a program for. Isolation
 // comes from the link instead, and an account with no link is invisible.
+// Coach's prescription editor for one client. V1 scope: MEAL prescriptions — pick the target week
+// (absolute, defaulting to the client's next week, with a deload flag), pick a meal, set the
+// description and targets, add a note, and write the coach_assignments row the verified apply path
+// consumes. The unique constraint allows one live pending row per (client, program, week, kind), so
+// a revision MERGES into the existing pending row's payload rather than inserting a collision —
+// which is also how prescribing two meals for the same week works: one row, payload keyed by meal.
+function CoachPrescriptionEditor(props) {
+  const c = props.client;
+  const programKey = c.active_program || "cutting";
+  const clientWeek = c.current_week != null ? c.current_week : 1;
+  const [week, setWeek] = useState(String(clientWeek + 1));
+  const [mealId, setMealId] = useState("m2");
+  const [food, setFood] = useState("");
+  const [cal, setCal] = useState(""); const [p, setP] = useState(""); const [cb, setCb] = useState(""); const [f, setF] = useState("");
+  const [note, setNote] = useState("");
+  const [status, setStatus] = useState(""); // inline feedback — this panel has no toast
+  const [queued, setQueued] = useState(null); // pending rows already written for this client
+  const [busy, setBusy] = useState(false);
+
+  function loadQueued() {
+    supabaseClient.from("coach_assignments")
+      .select("id, kind, effective_week, payload, note, created_at")
+      .eq("client_id", c.client_id).eq("status", "pending").order("created_at")
+      .then(function (r) { setQueued(r.error ? [] : (r.data || [])); });
+  }
+  useEffect(loadQueued, [c.client_id]);
+
+  const weekNum = Math.max(1, Number(week) || 0);
+  const weekIsPast = weekNum <= clientWeek;
+  const weekIsDeload = weekNum % 5 === 0;
+  // Prefill name/time from the program definition's rotation slot, so the prescribed meal renders
+  // with the same identity the client already sees. Rotation guess uses the same delta translation
+  // the apply path uses.
+  const def = PROGRAM_DEFS[programKey];
+  const rotationGuess = ((weekNum - 1) % 4) + 1;
+  const defMeal = def && def.mealsByWeek && def.mealsByWeek[rotationGuess]
+    ? def.mealsByWeek[rotationGuess].filter(function (m) { return m.id === mealId; })[0] : null;
+
+  function saveMeal() {
+    if (weekIsPast || !food) { setStatus(weekIsPast ? "Target week must be after the client's current week." : "Describe the meal first."); return; }
+    setBusy(true); setStatus("");
+    const mealObj = {
+      id: mealId,
+      name: (defMeal && defMeal.name) || ("Meal " + mealId.slice(1)),
+      time: (defMeal && defMeal.time) || "",
+      food: food,
+      cal: Math.max(0, Math.round(Number(cal) || 0)),
+      p: Math.max(0, Math.round(Number(p) || 0)),
+      c: Math.max(0, Math.round(Number(cb) || 0)),
+      f: Math.max(0, Math.round(Number(f) || 0)),
+    };
+    const existing = (queued || []).filter(function (q) { return q.kind === "meal_overrides" && q.effective_week === weekNum; })[0];
+    const op = existing
+      ? supabaseClient.from("coach_assignments")
+          .update({ payload: Object.assign({}, existing.payload, (function () { const o = {}; o[mealId] = mealObj; return o; })()), note: note || existing.note })
+          .eq("id", existing.id).eq("status", "pending")
+      : supabaseClient.from("coach_assignments")
+          .insert({ coach_id: props.coachId, client_id: c.client_id, kind: "meal_overrides", program_key: programKey, effective_week: weekNum,
+                    payload: (function () { const o = {}; o[mealId] = mealObj; return o; })(), note: note || null });
+    op.then(function (r) {
+      setBusy(false);
+      if (r.error) { setStatus("Couldn't save: " + (r.error.message || "unknown error")); return; }
+      setStatus("Prescribed — applies when " + c.email + " next opens the app.");
+      setFood(""); setCal(""); setP(""); setCb(""); setF(""); setNote("");
+      loadQueued();
+    });
+  }
+  function withdraw(q) {
+    setBusy(true);
+    // No DELETE policy exists for coaches (by design) — a withdrawn prescription is superseded,
+    // which the client's fetch ignores and the record keeps.
+    supabaseClient.from("coach_assignments").update({ status: "superseded" }).eq("id", q.id).eq("status", "pending")
+      .then(function () { setBusy(false); loadQueued(); });
+  }
+
+  const inputStyle = { width: "100%", background: "#0a0a0a", border: "1px solid #404040", borderRadius: 8, padding: "8px 10px", fontSize: 13, color: "#f5f5f5" };
+  return h("div", { style: { borderTop: "1px solid #262626", marginTop: 10, paddingTop: 10 } },
+    h("p", { style: { fontSize: 12, color: "#a3a3a3", margin: "0 0 8px" } }, "Prescribe a meal change"),
+    h("div", { style: { display: "flex", gap: 6, marginBottom: 8 } },
+      h("label", { style: { flex: 1, fontSize: 11, color: "#737373" } }, "effective week",
+        h("input", Object.assign({ type: "number", inputMode: "numeric", min: String(clientWeek + 1), value: week,
+          onChange: function (e) { setWeek(e.target.value); } }, { style: inputStyle }))),
+      h("label", { style: { flex: 1, fontSize: 11, color: "#737373" } }, "meal",
+        h("select", { value: mealId, onChange: function (e) { setMealId(e.target.value); }, style: inputStyle },
+          ["m1", "m2", "m3", "m4"].map(function (id) { return h("option", { key: id, value: id }, "Meal " + id.slice(1)); })))
+    ),
+    weekIsPast && h("p", { style: { fontSize: 11, color: "#f87171", margin: "0 0 8px" } },
+      "Client is on week " + clientWeek + " — prescriptions target a future week, never the current one."),
+    !weekIsPast && weekIsDeload && h("p", { style: { fontSize: 11, color: "#4eba6f", margin: "0 0 8px" } },
+      "Week " + weekNum + " is a deload — the suggested anchor for training changes; nutrition can move sooner."),
+    defMeal && h("p", { style: { fontSize: 11, color: "#525252", margin: "0 0 8px" } },
+      "Currently: " + defMeal.food + " (" + defMeal.cal + " cal · " + defMeal.p + "p/" + defMeal.c + "c/" + defMeal.f + "f)"),
+    h("input", Object.assign({ placeholder: "Meal description, e.g. 6oz chicken + 150g rice + veg", value: food,
+      onChange: function (e) { setFood(e.target.value); } }, { style: Object.assign({}, inputStyle, { marginBottom: 6 }) })),
+    h("div", { style: { display: "flex", gap: 6, marginBottom: 6 } },
+      [["cal", cal, setCal], ["protein", p, setP], ["carbs", cb, setCb], ["fat", f, setF]].map(function (t) {
+        return h("label", { key: t[0], style: { flex: 1, fontSize: 11, color: "#737373" } }, t[0],
+          h("input", Object.assign({ type: "number", inputMode: "numeric", min: "0", value: t[1],
+            onChange: function (e) { t[2](e.target.value); } }, { style: inputStyle })));
+      })),
+    h("input", Object.assign({ placeholder: "Note to client (optional)", value: note,
+      onChange: function (e) { setNote(e.target.value); } }, { style: Object.assign({}, inputStyle, { marginBottom: 8 }) })),
+    h("button", { className: "swap-save-btn", style: { width: "100%" }, disabled: busy || weekIsPast || !food, onClick: saveMeal },
+      busy ? "…" : "Prescribe for week " + weekNum),
+    status && h("p", { style: { fontSize: 11, color: status.indexOf("Couldn't") === 0 || status.indexOf("Target") === 0 || status.indexOf("Describe") === 0 ? "#f87171" : "#4eba6f", margin: "8px 0 0" } }, status),
+    queued && queued.length > 0 && h("div", { style: { marginTop: 10 } },
+      h("p", { style: { fontSize: 11, color: "#737373", margin: "0 0 4px" } }, "Waiting for the client to open the app:"),
+      queued.map(function (q) {
+        return h("div", { key: q.id, style: { display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: 11, color: "#a3a3a3", padding: "4px 0", borderBottom: "1px solid #1a1a1a" } },
+          h("span", null, "Week " + q.effective_week + " · " + (q.kind === "meal_overrides" ? Object.keys(q.payload || {}).map(function (k) { return "Meal " + k.slice(1); }).join(", ") : q.kind)),
+          h("button", { className: "logged-food-remove", disabled: busy, onClick: function () { withdraw(q); } }, "✕"));
+      }))
+  );
+}
+
 function CoachingPanel(props) {
   const [email, setEmail] = useState("");
+  const [openEditor, setOpenEditor] = useState(null); // client_id of the card with the editor open
   const clients = props.myClients || [];
   const invites = props.pendingInvites || [];
 
@@ -6955,15 +7087,22 @@ function CoachingPanel(props) {
                   " · week " + (c.current_week != null ? c.current_week : "—") +
                   " · " + (c.sessions_logged || 0) + " week" + ((c.sessions_logged || 0) === 1 ? "" : "s") + " logged" +
                   (c.latest_weight != null ? " · " + c.latest_weight + " lb" : "")),
-                h("button", {
-                  className: "ex-action-btn", style: { marginTop: 8, borderColor: "#f87171", color: "#f87171", fontSize: 11, padding: "4px 8px" },
-                  disabled: props.busy,
-                  onClick: function () {
-                    if (window.confirm("End coaching with " + c.email + "? You'll lose access to their data immediately. They keep everything — nothing of theirs is deleted.")) {
-                      props.endCoaching(c.client_id);
-                    }
-                  },
-                }, "End coaching")
+                h("div", { style: { display: "flex", gap: 8, marginTop: 8 } },
+                  h("button", {
+                    className: "ex-action-btn", style: { fontSize: 11, padding: "4px 8px" },
+                    onClick: function () { setOpenEditor(openEditor === c.client_id ? null : c.client_id); },
+                  }, openEditor === c.client_id ? "Close editor" : "Prescribe"),
+                  h("button", {
+                    className: "ex-action-btn", style: { borderColor: "#f87171", color: "#f87171", fontSize: 11, padding: "4px 8px" },
+                    disabled: props.busy,
+                    onClick: function () {
+                      if (window.confirm("End coaching with " + c.email + "? You'll lose access to their data immediately. They keep everything — nothing of theirs is deleted.")) {
+                        props.endCoaching(c.client_id);
+                      }
+                    },
+                  }, "End coaching")
+                ),
+                openEditor === c.client_id && h(CoachPrescriptionEditor, { client: c, coachId: props.coachId })
               );
             })
           ),
@@ -7041,6 +7180,7 @@ function SettingsTab(props) {
         uiPrefs: props.uiPrefs, updateUiPrefs: props.updateUiPrefs,
       },
         h(CoachingPanel, {
+          coachId: props.userId,
           myClients: props.myClients, pendingInvites: props.pendingInvites, canCoach: props.canCoach,
           inviteClient: props.inviteClient, respondToInvite: props.respondToInvite,
           endCoaching: props.endCoaching, busy: props.coachingBusy,
