@@ -2522,7 +2522,7 @@ function programStateHasRealData(state) {
 // The build currently running. Surfaced in Settings -> Account, because "is the deploy actually
 // live?" has been the real answer to several apparent bugs, and inferring it from behaviour is slow
 // and error-prone. Compared against version.json by the update check below.
-const APP_VERSION = "2026-07-26T23:00:00";
+const APP_VERSION = "2026-07-26T23:10:00";
 
 // Signing out has to be unconditional, because every failure mode here ends the same way: a person
 // tapping a button that does nothing.
@@ -7174,7 +7174,13 @@ function CoachPrescriptionEditor(props) {
   const exerciseSource = programKey === "custom"
     ? (clientPlan && clientPlan.config && clientPlan.config.exercises) || null
     : (PROGRAM_DEFS[programKey] && PROGRAM_DEFS[programKey].exercises) || null;
-  const exDays = exerciseSource ? Object.keys(exerciseSource) : [];
+  // Object.keys order follows whatever order the config was BUILT in — meaningless to a human.
+  // Pills always render Mon\u2013Sun; unknown day names (none exist today) sort to the end.
+  const DAY_PILL_ORDER = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
+  const exDays = exerciseSource ? Object.keys(exerciseSource).sort(function (a2, b2) {
+    const ia = DAY_PILL_ORDER.indexOf(a2), ib = DAY_PILL_ORDER.indexOf(b2);
+    return (ia === -1 ? 99 : ia) - (ib === -1 ? 99 : ib);
+  }) : [];
   function clientStateOf(id) {
     return ((programKey === "custom" ? (clientPlan && clientPlan.progState.exerciseState) : (clientPlan && clientPlan.sharedState)) || {})[id] || {};
   }
@@ -7418,9 +7424,9 @@ function CoachPrescriptionEditor(props) {
       // Day pills, same shape as the Workouts/Nutrition tabs, but multi-select and default
       // collapsed: nothing shows until a day is chosen, and several open at once for comparing
       // sets, target reps, and prescribed weight across days.
-      exDays.length > 0 && h("div", { style: { display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 8 } },
+      exDays.length > 0 && h("div", { style: { display: "flex", gap: 4, flexWrap: "nowrap", overflowX: "auto", marginBottom: 8 } },
         exDays.map(function (d) {
-          return h("button", { key: d, className: "week-btn" + (selectedDays.indexOf(d) >= 0 ? " active" : ""), onClick: function () { toggleDay(d); } }, d.slice(0, 3));
+          return h("button", { key: d, className: "week-btn" + (selectedDays.indexOf(d) >= 0 ? " active" : ""), style: { flex: "0 0 auto", padding: "6px 10px" }, onClick: function () { toggleDay(d); } }, d.slice(0, 3));
         })),
       selectedDays.filter(function (d) { return exDays.indexOf(d) >= 0; }).map(function (d) {
         const dayDef = exerciseSource[d] || {};
