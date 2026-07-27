@@ -2541,7 +2541,7 @@ function programStateHasRealData(state) {
 // The build currently running. Surfaced in Settings -> Account, because "is the deploy actually
 // live?" has been the real answer to several apparent bugs, and inferring it from behaviour is slow
 // and error-prone. Compared against version.json by the update check below.
-const APP_VERSION = "2026-07-27T01:30:00";
+const APP_VERSION = "2026-07-27T02:15:00";
 
 // Signing out has to be unconditional, because every failure mode here ends the same way: a person
 // tapping a button that does nothing.
@@ -6271,7 +6271,17 @@ function BarcodeLogger(props) {
           );
         })
       ),
-      h("div", { className: "swap-form-row", style: { marginTop: 8 } },
+      (function () {
+        const base = product.servingGrams || 100;
+        const baseLabel = product.servingGrams ? "1 serving" : "100g";
+        return h("div", { style: { display: "flex", gap: 6, marginTop: 8, marginBottom: 4 } },
+          [[1, baseLabel], [0.5, "½"], [0.25, "¼"]].map(function (pf) {
+            const g = Math.round(base * pf[0]);
+            return h("button", { key: pf[1], className: "week-btn" + (Number(grams) === g ? " active" : ""), onClick: function () { setGrams(String(g)); } },
+              pf[1] + " (" + g + "g)");
+          }));
+      })(),
+      h("div", { className: "swap-form-row" },
         h("input", { type: "number", inputMode: "numeric", value: grams, onChange: function (e) { setGrams(e.target.value); }, placeholder: "grams" }),
       ),
       (function () {
@@ -6300,7 +6310,7 @@ function BarcodeLogger(props) {
             // FOOD_DB wins name lookups in allFoods, so a shadowing custom row would never be read.
             const inBuiltInDb = FOOD_DB.some(function (f) { return f.name === product.name; });
             if (props.addCustomFood && !inBuiltInDb) {
-              props.addCustomFood(product.name, guessFoodCategory(per100), per100);
+              props.addCustomFood(product.name, guessFoodCategory(per100), per100, product.servingGrams ? { servingGrams: product.servingGrams } : {});
             }
             setMode("idle"); setProduct(null); setMacroEdits(null);
           },
@@ -6585,7 +6595,7 @@ function MealCard(props) {
         m.trainingAdjusted && h("span", { style: { color: "#3d97d3" } }, " · shifted for training time")),
       h("div", { className: "diff-row", style: { marginTop: 8 } },
         props.statusOpts.map(function (opt) {
-          const isPartial = opt.id === "three_quarter" || opt.id === "half";
+          const isPartial = opt.id === "three_quarter" || opt.id === "half" || opt.id === "quarter";
           const active = status === opt.id;
           return h("button", {
             key: opt.id, disabled: props.disabled,
@@ -6794,7 +6804,7 @@ function CustomFoodRow(props) {
 function NutritionTab(props) {
   const STATUS_OPTS = [
     { id: "full", label: "Full" }, { id: "three_quarter", label: "¾", pct: 75 },
-    { id: "half", label: "½", pct: 50 }, { id: "skip", label: "Skip" },
+    { id: "half", label: "½", pct: 50 }, { id: "quarter", label: "¼", pct: 25 }, { id: "skip", label: "Skip" },
   ];
   const DAY_LABELS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
   const todayOffset = 0, todayIdx = todayDayIdx();
@@ -6935,7 +6945,7 @@ function NutritionTab(props) {
         }
         const m = item.meal, idx = item.mealIdx;
         const entry = props.nToday[m.id];
-        const status = entry ? (entry.status === "partial" ? (entry.pct === 75 ? "three_quarter" : "half") : entry.status) : null;
+        const status = entry ? (entry.status === "partial" ? (entry.pct === 75 ? "three_quarter" : entry.pct === 25 ? "quarter" : "half") : entry.status) : null;
         const expandedMeals = (props.uiPrefs && props.uiPrefs.foodPlanExpandedMeals) || { m1: false, m2: false, m3: false, m4: false };
         // Swapping used to be Custom-only, because only Custom's meals existed as structured
         // ingredient lists — the built-in programs stored theirs as a prose sentence the solver
@@ -8045,6 +8055,22 @@ function computeQuickAddFoods(foodLogByDate, limit) {
 
 function FoodSearchLog(props) {
   const [query, setQuery] = useState("");
+  // Portion picker for a tapped search result. Whole serving is the default; ½ and ¼ do the
+  // fraction math so nobody reaches for a calculator. Base = the food's saved serving (scanned
+  // foods carry one) or the 100g convention. Grams stays hand-editable — string-typed while
+  // editing, the leading-zero rule.
+  const [picked, setPicked] = useState(null);
+  const [pickGrams, setPickGrams] = useState("100");
+  function openPick(f) {
+    const base = f.servingGrams || 100;
+    setPicked(f); setPickGrams(String(base));
+  }
+  function logPicked() {
+    const g = Math.max(0, Number(pickGrams) || 0);
+    if (!g || !picked) return;
+    props.logFood(picked.name, g, { cal: picked.cal, p: picked.p, c: picked.c, f: picked.f });
+    setPicked(null); setQuery("");
+  }
   const db = props.allFoods || FOOD_DB;
   // allFoods is now memoized in App(), so db's reference stays stable across renders that don't
   // touch customFoods — which makes this memo actually effective instead of recomputing every
@@ -8078,14 +8104,36 @@ function FoodSearchLog(props) {
     results.length > 0 && h("div", { className: "search-results" },
       results.map(function (f) {
         return h("button", {
-          key: f.name, className: "search-result-row",
-          onClick: function () { props.logFood(f.name, 100, { cal: f.cal, p: f.p, c: f.c, f: f.f }); setQuery(""); },
+          key: f.name, className: "search-result-row" + (picked && picked.name === f.name ? " active" : ""),
+          onClick: function () { openPick(f); },
         },
           h("span", null, f.name),
           h("span", { className: "search-result-macro" }, f.cal + " cal/100g")
         );
       })
     ),
+    picked && (function () {
+      const base = picked.servingGrams || 100;
+      const baseLabel = picked.servingGrams ? "1 serving" : "100g";
+      const g = Math.max(0, Number(pickGrams) || 0);
+      return h("div", { className: "rate-panel", style: { marginTop: 8 } },
+        h("p", { style: { margin: "0 0 6px" } }, picked.name),
+        h("div", { style: { display: "flex", gap: 6, marginBottom: 6 } },
+          [[1, baseLabel], [0.5, "½"], [0.25, "¼"]].map(function (pf) {
+            const pg = Math.round(base * pf[0]);
+            return h("button", { key: pf[1], className: "week-btn" + (g === pg ? " active" : ""), onClick: function () { setPickGrams(String(pg)); } },
+              pf[1] + " (" + pg + "g)");
+          })),
+        h("div", { className: "swap-form-row" },
+          h("input", { type: "number", inputMode: "numeric", value: pickGrams, onChange: function (e) { setPickGrams(e.target.value); }, placeholder: "grams" })),
+        h("p", { style: { fontSize: 11, color: "#737373", margin: "4px 0 8px" } },
+          g > 0 ? "Will log " + g + "g = " + Math.round(picked.cal * g / 100) + " cal · " +
+            (Math.round(picked.p * g / 10) / 10) + "p / " + (Math.round(picked.c * g / 10) / 10) + "c / " + (Math.round(picked.f * g / 10) / 10) + "f"
+            : "Enter the grams you actually ate."),
+        h("div", { style: { display: "flex", gap: 8 } },
+          h("button", { className: "swap-save-btn", style: { flex: 1 }, disabled: !g, onClick: logPicked }, "Log It"),
+          h("button", { className: "ex-action-btn", onClick: function () { setPicked(null); } }, "Cancel")));
+    })(),
     props.foodLog.length > 0 && h("div", { style: { marginTop: 10 } },
       props.foodLog.map(function (entry) {
         const per100 = entry.per100 || db.filter(function (f) { return f.name === entry.name; })[0];
