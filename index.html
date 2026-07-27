@@ -789,6 +789,120 @@ const ALL_WEEKDAYS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "S
 // since this app deliberately has no backend and no runtime dependency on external APIs.
 // weight: a conservative, adjustable starting point — same as every other exercise default in
 // this app, meant to be corrected through actual logging, not a prescription.
+
+// ============================================================================
+// SERVING SIZES — the units humans actually eat in. Storage stays per-100g (the database
+// convention every macro calculation runs on); THIS is the translation layer for portions:
+// "1 medium banana (118g)", not "100g of banana". USDA-typical values, label-style rounding.
+// Scanned foods carry their own servingGrams from the package and take precedence.
+// A food with no entry here and no scanned serving gets NO serving chip — grams entry only,
+// because presenting 100g as "a serving" is exactly the lie this map exists to remove.
+// ============================================================================
+const SERVING_INFO = {
+  // Proteins — meat/fish at the 4oz raw convention unless the package says otherwise.
+  "Chicken breast": { g: 113, label: "4oz" }, "Chicken thigh": { g: 113, label: "4oz" },
+  "Turkey breast": { g: 113, label: "4oz" }, "Ground turkey (93/7)": { g: 113, label: "4oz" },
+  "Lean beef (93/7)": { g: 113, label: "4oz" }, "Ground beef (85/15)": { g: 113, label: "4oz" },
+  "Steak (sirloin)": { g: 113, label: "4oz" }, "Pork tenderloin": { g: 113, label: "4oz" },
+  "Pork chop": { g: 113, label: "4oz" }, "Bacon": { g: 18, label: "2 slices" },
+  "Salmon": { g: 113, label: "4oz" }, "Tuna (canned in water)": { g: 85, label: "1 small can" },
+  "Tilapia": { g: 113, label: "4oz" }, "Shrimp": { g: 85, label: "3oz" },
+  "Egg (whole)": { g: 50, label: "1 large" }, "Egg whites": { g: 99, label: "3 large whites" },
+  "Tofu (firm)": { g: 85, label: "3oz" }, "Tempeh": { g: 84, label: "3oz" },
+  "Cottage cheese (2%)": { g: 113, label: "\u00bd cup" }, "Greek yogurt (0%)": { g: 170, label: "1 container" },
+  "Greek yogurt (full fat)": { g: 170, label: "1 container" }, "Whey isolate": { g: 30, label: "1 scoop" },
+  "Whey protein powder": { g: 30, label: "1 scoop" }, "Casein protein powder": { g: 32, label: "1 scoop" },
+  "Pea protein powder": { g: 33, label: "1 scoop" }, "Barebells protein bar": { g: 55, label: "1 bar" },
+  "Deli turkey slices": { g: 56, label: "2oz" }, "Deli ham slices": { g: 56, label: "2oz" },
+  "Cod": { g: 113, label: "4oz" }, "Halibut": { g: 113, label: "4oz" },
+  "Sardines (canned in oil)": { g: 92, label: "1 can" }, "Ground chicken": { g: 113, label: "4oz" },
+  "Turkey bacon": { g: 15, label: "1 slice" }, "Beef jerky": { g: 28, label: "1oz" },
+  "Seitan": { g: 85, label: "3oz" }, "Edamame": { g: 75, label: "\u00bd cup shelled" },
+  "Duck breast": { g: 113, label: "4oz" }, "Bison (ground)": { g: 113, label: "4oz" },
+  "Scallops": { g: 85, label: "3oz" }, "Crab": { g: 85, label: "3oz" },
+  "Mahi mahi": { g: 113, label: "4oz" }, "Trout": { g: 113, label: "4oz" },
+  "Canadian bacon": { g: 56, label: "2 slices" }, "Chorizo": { g: 56, label: "2oz" },
+  "Lamb (leg)": { g: 113, label: "4oz" }, "Anchovies (canned)": { g: 20, label: "5 fillets" },
+  // Carbs
+  "White rice": { g: 158, label: "1 cup cooked" }, "Brown rice": { g: 195, label: "1 cup cooked" },
+  "Quinoa": { g: 185, label: "1 cup cooked" }, "Pasta (cooked)": { g: 140, label: "1 cup" },
+  "Potato": { g: 173, label: "1 medium" }, "Sweet potato": { g: 130, label: "1 medium" },
+  "Oats (dry)": { g: 40, label: "\u00bd cup dry" }, "Creamy Rice (dry)": { g: 45, label: "\u00bc cup dry" },
+  "Ezekiel bread": { g: 34, label: "1 slice" }, "White bread": { g: 26, label: "1 slice" },
+  "Whole wheat bread": { g: 28, label: "1 slice" }, "Bagel": { g: 95, label: "1 bagel" },
+  "Tortilla (flour)": { g: 45, label: "1 tortilla" }, "Low-carb tortilla": { g: 42, label: "1 tortilla" },
+  "Corn": { g: 90, label: "1 ear" }, "Black beans": { g: 86, label: "\u00bd cup" },
+  "Chickpeas": { g: 82, label: "\u00bd cup" }, "Lentils": { g: 99, label: "\u00bd cup" },
+  "Granola": { g: 50, label: "\u00bd cup" }, "Banana": { g: 118, label: "1 medium" },
+  "Apple": { g: 182, label: "1 medium" }, "Orange": { g: 131, label: "1 medium" },
+  "Grapes": { g: 92, label: "1 cup" }, "Strawberries": { g: 152, label: "1 cup" },
+  "Watermelon": { g: 152, label: "1 cup" }, "Berries (mixed)": { g: 148, label: "1 cup" },
+  "Mango": { g: 165, label: "1 cup" }, "Pineapple": { g: 165, label: "1 cup" },
+  "Couscous": { g: 157, label: "1 cup cooked" }, "Barley": { g: 157, label: "1 cup cooked" },
+  "Farro": { g: 170, label: "1 cup cooked" }, "Sourdough bread": { g: 36, label: "1 slice" },
+  "English muffin": { g: 57, label: "1 muffin" }, "Rice cakes": { g: 9, label: "1 cake" },
+  "Plantain": { g: 179, label: "1 medium" }, "Dates": { g: 24, label: "1 date" },
+  "Raisins": { g: 40, label: "\u00bc cup" }, "Kiwi": { g: 69, label: "1 kiwi" },
+  "Pear": { g: 178, label: "1 medium" }, "Cantaloupe": { g: 160, label: "1 cup" },
+  "Papaya": { g: 145, label: "1 cup" }, "Rice noodles": { g: 176, label: "1 cup cooked" },
+  "Soba noodles": { g: 114, label: "1 cup cooked" }, "Naan": { g: 90, label: "1 naan" },
+  "Cream of wheat (cooked)": { g: 240, label: "1 cup" }, "Wild rice": { g: 164, label: "1 cup cooked" },
+  "Blueberries": { g: 148, label: "1 cup" }, "Cherries": { g: 138, label: "1 cup" },
+  "Peaches": { g: 150, label: "1 medium" }, "Grapefruit": { g: 123, label: "\u00bd fruit" },
+  "Figs": { g: 50, label: "1 large fig" }, "Maple syrup": { g: 20, label: "1 tbsp" },
+  // Fats
+  "Peanut butter": { g: 32, label: "2 tbsp" }, "Almond butter": { g: 32, label: "2 tbsp" },
+  "Avocado": { g: 75, label: "\u00bd avocado" }, "Olive oil": { g: 14, label: "1 tbsp" },
+  "Butter": { g: 14, label: "1 tbsp" }, "Coconut oil": { g: 14, label: "1 tbsp" },
+  "Mayonnaise": { g: 13, label: "1 tbsp" }, "Cheddar cheese": { g: 28, label: "1oz" },
+  "Mozzarella cheese": { g: 28, label: "1oz" }, "Almonds": { g: 28, label: "1oz (~23)" },
+  "Walnuts": { g: 28, label: "1oz" }, "Cashews": { g: 28, label: "1oz" },
+  "Sunflower seeds": { g: 28, label: "1oz" }, "Pistachios": { g: 28, label: "1oz" },
+  "Pecans": { g: 28, label: "1oz" }, "Macadamia nuts": { g: 28, label: "1oz" },
+  "Chia seeds": { g: 24, label: "2 tbsp" }, "Flaxseed (ground)": { g: 14, label: "2 tbsp" },
+  "Tahini": { g: 30, label: "2 tbsp" }, "Pumpkin seeds": { g: 28, label: "1oz" },
+  "Brie cheese": { g: 28, label: "1oz" }, "Feta cheese": { g: 28, label: "1oz" },
+  "Ghee": { g: 13, label: "1 tbsp" }, "Sunflower seed butter": { g: 32, label: "2 tbsp" },
+  "Coconut milk (canned)": { g: 60, label: "\u00bc cup" }, "Sesame oil": { g: 14, label: "1 tbsp" },
+  "Brazil nuts": { g: 28, label: "1oz (~6)" },
+  // Vegetables
+  "Broccoli": { g: 91, label: "1 cup" }, "Green beans": { g: 100, label: "1 cup" },
+  "Carrots": { g: 61, label: "1 medium" }, "Zucchini": { g: 124, label: "1 cup" },
+  "Bell pepper": { g: 119, label: "1 medium" }, "Spinach": { g: 30, label: "1 cup raw" },
+  "Kale": { g: 21, label: "1 cup raw" }, "Cauliflower": { g: 107, label: "1 cup" },
+  "Cucumber": { g: 104, label: "1 cup" }, "Tomato": { g: 123, label: "1 medium" },
+  "Mushrooms": { g: 70, label: "1 cup" }, "Onion": { g: 110, label: "1 medium" },
+  "Asparagus": { g: 134, label: "1 cup" }, "Cabbage": { g: 89, label: "1 cup" },
+  "Brussels sprouts": { g: 88, label: "1 cup" }, "Eggplant": { g: 82, label: "1 cup" },
+  "Celery": { g: 40, label: "1 stalk" }, "Radish": { g: 116, label: "1 cup" },
+  "Beets": { g: 136, label: "1 cup" }, "Snap peas": { g: 63, label: "1 cup" },
+  "Artichoke": { g: 120, label: "1 medium" }, "Butternut squash": { g: 140, label: "1 cup" },
+  "Bok choy": { g: 70, label: "1 cup" }, "Collard greens": { g: 36, label: "1 cup raw" },
+  "Leeks": { g: 89, label: "1 leek" }, "Snow peas": { g: 63, label: "1 cup" },
+  // Other
+  "Milk (2%)": { g: 244, label: "1 cup" }, "Milk (whole)": { g: 244, label: "1 cup" },
+  "Protein bar (generic)": { g: 60, label: "1 bar" }, "Pizza (cheese, slice)": { g: 107, label: "1 slice" },
+  "Potato chips": { g: 28, label: "1oz (~15)" }, "French fries": { g: 117, label: "medium serving" },
+  "Ice cream": { g: 66, label: "\u00bd cup" }, "Chocolate (dark)": { g: 28, label: "1oz" },
+  "Soda (regular)": { g: 355, label: "1 can" }, "Beer (regular)": { g: 355, label: "1 can" },
+  "Wine (red)": { g: 147, label: "1 glass (5oz)" }, "Coffee (black)": { g: 240, label: "1 cup" },
+  "Honey": { g: 21, label: "1 tbsp" }, "Ketchup": { g: 17, label: "1 tbsp" },
+  "Hummus": { g: 30, label: "2 tbsp" }, "Salsa": { g: 32, label: "2 tbsp" },
+  "Almond milk (unsweetened)": { g: 240, label: "1 cup" }, "Oat milk": { g: 240, label: "1 cup" },
+  "Soy milk (unsweetened)": { g: 240, label: "1 cup" }, "Soy sauce": { g: 16, label: "1 tbsp" },
+  "BBQ sauce": { g: 34, label: "2 tbsp" }, "Ranch dressing": { g: 30, label: "2 tbsp" },
+  "Balsamic vinaigrette": { g: 30, label: "2 tbsp" }, "Popcorn (air-popped)": { g: 24, label: "3 cups" },
+  "Trail mix": { g: 30, label: "\u00bc cup" }, "Pretzels": { g: 28, label: "1oz" },
+};
+// One resolver for every portion surface: the scan-time serving wins (it's THIS product's label),
+// then the curated map, then nothing — never 100g dressed up as a serving.
+function servingOf(food) {
+  if (!food) return null;
+  if (food.servingGrams > 0) return { g: Math.round(food.servingGrams), label: "1 serving" };
+  const s = SERVING_INFO[food.name];
+  return s ? s : null;
+}
+
 const EXERCISE_POOL = [
   // Quads (squat pattern) — compound
   { name: "Barbell Back Squat", muscle: "quads", mechanic: "compound", equipment: ["barbell"], weight: 95 },
@@ -2541,7 +2655,7 @@ function programStateHasRealData(state) {
 // The build currently running. Surfaced in Settings -> Account, because "is the deploy actually
 // live?" has been the real answer to several apparent bugs, and inferring it from behaviour is slow
 // and error-prone. Compared against version.json by the update check below.
-const APP_VERSION = "2026-07-27T02:15:00";
+const APP_VERSION = "2026-07-27T03:00:00";
 
 // Signing out has to be unconditional, because every failure mode here ends the same way: a person
 // tapping a button that does nothing.
@@ -6271,12 +6385,10 @@ function BarcodeLogger(props) {
           );
         })
       ),
-      (function () {
-        const base = product.servingGrams || 100;
-        const baseLabel = product.servingGrams ? "1 serving" : "100g";
+      product.servingGrams > 0 && (function () {
         return h("div", { style: { display: "flex", gap: 6, marginTop: 8, marginBottom: 4 } },
-          [[1, baseLabel], [0.5, "½"], [0.25, "¼"]].map(function (pf) {
-            const g = Math.round(base * pf[0]);
+          [[1, "1 serving"], [0.5, "½"], [0.25, "¼"]].map(function (pf) {
+            const g = Math.round(product.servingGrams * pf[0]);
             return h("button", { key: pf[1], className: "week-btn" + (Number(grams) === g ? " active" : ""), onClick: function () { setGrams(String(g)); } },
               pf[1] + " (" + g + "g)");
           }));
@@ -6719,6 +6831,7 @@ function CustomFoodRow(props) {
       f: String(Math.round(food.f * 10) / 10),
       basis: food.basis || "none", // "none" | "dry" | "cooked" — which state the per-100g numbers describe
       cookedYield: String(food.cookedYield || 3),
+      servingGrams: food.servingGrams ? String(food.servingGrams) : "",
     });
   }
   function setField(key, val) {
@@ -6727,6 +6840,8 @@ function CustomFoodRow(props) {
   function saveEdit() {
     const yieldNum = Math.max(1, Number(fields.cookedYield) || 3);
     const extra = fields.basis === "none" ? {} : { basis: fields.basis, cookedYield: yieldNum };
+    const sg = Math.round(Number(fields.servingGrams) || 0);
+    if (sg > 0) extra.servingGrams = sg;
     props.addCustomFood(food.name, fields.cat, {
       cal: Math.max(0, Number(fields.cal) || 0),
       p: Math.max(0, Number(fields.p) || 0),
@@ -6771,6 +6886,10 @@ function CustomFoodRow(props) {
         );
       })
     ),
+    h("label", { style: { display: "block", fontSize: 11, color: "#737373", margin: "6px 0" } },
+      "serving size (g) — what “one serving” weighs; powers the portion buttons when logging",
+      h("input", { type: "number", inputMode: "numeric", min: "0", value: fields.servingGrams,
+        onChange: function (e) { setField("servingGrams", e.target.value); }, style: { width: "100%" } })),
     h("div", { style: { display: "flex", gap: 8, marginTop: 8 } },
       h("button", { className: "swap-save-btn", style: { flex: 1 }, onClick: saveEdit }, "Save"),
       h("button", { className: "ex-action-btn", onClick: function () { setFields(null); } }, "Cancel")
@@ -8062,8 +8181,8 @@ function FoodSearchLog(props) {
   const [picked, setPicked] = useState(null);
   const [pickGrams, setPickGrams] = useState("100");
   function openPick(f) {
-    const base = f.servingGrams || 100;
-    setPicked(f); setPickGrams(String(base));
+    const s = servingOf(f);
+    setPicked(f); setPickGrams(String(s ? s.g : 100));
   }
   function logPicked() {
     const g = Math.max(0, Number(pickGrams) || 0);
@@ -8113,17 +8232,18 @@ function FoodSearchLog(props) {
       })
     ),
     picked && (function () {
-      const base = picked.servingGrams || 100;
-      const baseLabel = picked.servingGrams ? "1 serving" : "100g";
+      const s = servingOf(picked);
       const g = Math.max(0, Number(pickGrams) || 0);
       return h("div", { className: "rate-panel", style: { marginTop: 8 } },
         h("p", { style: { margin: "0 0 6px" } }, picked.name),
-        h("div", { style: { display: "flex", gap: 6, marginBottom: 6 } },
-          [[1, baseLabel], [0.5, "½"], [0.25, "¼"]].map(function (pf) {
-            const pg = Math.round(base * pf[0]);
+        s ? h("div", { style: { display: "flex", gap: 6, marginBottom: 6 } },
+          [[1, s.label], [0.5, "½"], [0.25, "¼"]].map(function (pf) {
+            const pg = Math.round(s.g * pf[0]);
             return h("button", { key: pf[1], className: "week-btn" + (g === pg ? " active" : ""), onClick: function () { setPickGrams(String(pg)); } },
               pf[1] + " (" + pg + "g)");
-          })),
+          }))
+        : h("p", { style: { fontSize: 11, color: "#737373", margin: "0 0 6px" } },
+            "No serving size on file for this food — enter grams, or set one by editing it under Your Foods."),
         h("div", { className: "swap-form-row" },
           h("input", { type: "number", inputMode: "numeric", value: pickGrams, onChange: function (e) { setPickGrams(e.target.value); }, placeholder: "grams" })),
         h("p", { style: { fontSize: 11, color: "#737373", margin: "4px 0 8px" } },
