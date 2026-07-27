@@ -2166,6 +2166,7 @@ function makeDefaultData() {
     activeProgram: "custom",
     likedFoodsByMeal: { m1: [], m2: [], m3: [], m4: [] }, // which liked foods apply to which meal slot — a breakfast-only protein shouldn't get picked for dinner
     customFoods: [],
+    displayName: "",
     // Local-only bookkeeping for coach assignments this DEVICE has already applied or undone, so a
     // failed status write to the server can never re-merge (or resurrect an undone) prescription on
     // the next load. Keyed by assignment id -> "applied" | "undone". Deliberately not synced.
@@ -2233,6 +2234,7 @@ function normalizeV2(parsed) {
     activeProgram: validPrograms.indexOf(parsed.activeProgram) !== -1 ? parsed.activeProgram : "custom",
     likedFoodsByMeal: likedFoodsByMeal,
     customFoods: parsed.customFoods || [],
+    displayName: parsed.displayName || "",
     assignmentResolutions: parsed.assignmentResolutions || {},
     customProgramConfig: parsed.customProgramConfig || null,
     supplementList: parsed.supplementList || [],
@@ -2520,7 +2522,7 @@ function programStateHasRealData(state) {
 // The build currently running. Surfaced in Settings -> Account, because "is the deploy actually
 // live?" has been the real answer to several apparent bugs, and inferring it from behaviour is slow
 // and error-prone. Compared against version.json by the update check below.
-const APP_VERSION = "2026-07-26T22:20:00";
+const APP_VERSION = "2026-07-26T23:00:00";
 
 // Signing out has to be unconditional, because every failure mode here ends the same way: a person
 // tapping a button that does nothing.
@@ -2598,6 +2600,10 @@ function buildWizardConfig(setup, foods) {
     rirModeEnabled: setup.trainingStyle === "rir",
   };
 }
+
+// Name for display, email for identity: free-text names must never be what someone VERIFIES an
+// invitation by, so the invite prompt keeps the email visible; everywhere else, name-with-fallback.
+function personLabel(name, email) { return name ? name : (email || ""); }
 
 function App() {
   const [updateAvailable, setUpdateAvailable] = useState(false);
@@ -2845,6 +2851,7 @@ function App() {
       reminder_times: data.reminderTimes,
       shared_exercise_state: data.sharedExerciseState,
       shared_rir_mode_enabled: data.sharedRirModeEnabled,
+      display_name: data.displayName || null,
       ui_prefs: data.uiPrefs,
     });
     // state holds the whole per-program blob as-is — including this file's own mealRegenerateUndo
@@ -2964,6 +2971,7 @@ function App() {
         reminderTimes: profile.reminder_times,
         sharedExerciseState: profile.shared_exercise_state,
         sharedRirModeEnabled: profile.shared_rir_mode_enabled,
+        displayName: profile.display_name || "",
         uiPrefs: profile.ui_prefs,
         programs: {
           cutting: programsByKey.cutting || {},
@@ -3537,7 +3545,7 @@ function App() {
     const newResolutions = Object.assign({}, resolutions);
     toApply.forEach(function (a) {
       const weekKey = resolveAssignmentWeekKey(next, a);
-      banners.push({ id: a.id, kind: a.kind, program_key: a.program_key, effective_week: a.effective_week, weekKey: weekKey, full: !!(a.payload && a.payload.setupComplete), rir: a.payload && (a.payload.sharedRirMode !== undefined ? a.payload.sharedRirMode : a.payload.customRirMode), note: a.note, coach_email: a.coach_email, snapshot: captureAssignmentTarget(next, a, weekKey) });
+      banners.push({ id: a.id, kind: a.kind, program_key: a.program_key, effective_week: a.effective_week, weekKey: weekKey, full: !!(a.payload && a.payload.setupComplete), rir: a.payload && (a.payload.sharedRirMode !== undefined ? a.payload.sharedRirMode : a.payload.customRirMode), note: a.note, coach_email: a.coach_email, coach_name: a.coach_name, snapshot: captureAssignmentTarget(next, a, weekKey) });
       next = mergeAssignment(next, a, weekKey);
       newResolutions[a.id] = "applied";
     });
@@ -4789,7 +4797,7 @@ function App() {
       const what = b.kind === "meal_overrides" ? "meal plan" : b.kind === "exercise_week" ? "training week" : b.kind === "exercise_state" ? "weights & rep targets" : b.full ? "custom program — full setup, built from your preferences" : b.rir !== undefined ? "RIR mode — " + (b.rir ? "on (immediately if you’re at a phase start, otherwise from your next deload)" : "turned off") : "program settings";
       return h("div", { key: b.id, className: "plan-error", style: { margin: "8px 12px", borderColor: "#3d97d3", fontSize: 13 } },
         h("strong", null, "Your coach updated your " + what + (b.kind === "meal_overrides" || b.kind === "exercise_week" ? " for Week " + b.effective_week : "")),
-        b.coach_email && h("span", { style: { color: "#737373" } }, " (" + b.coach_email + ")"),
+        (b.coach_name || b.coach_email) && h("span", { style: { color: "#737373" } }, " (" + personLabel(b.coach_name, b.coach_email) + ")"),
         b.note && h("p", { style: { margin: "4px 0 0" } }, "\u201c" + b.note + "\u201d"),
         h("div", { style: { display: "flex", gap: 8, marginTop: 8 } },
           h("button", { className: "ex-action-btn", onClick: function () { undoAssignment(b); } }, "Undo"),
@@ -4879,6 +4887,8 @@ function App() {
               .eq("client_id", session.user.id).eq("status", "active")
               .then(function () { setMyCoachRow(null); showToast("Coaching ended"); return refreshCoaching(); });
           },
+          displayName: data.displayName,
+          setDisplayName: function (v) { save(Object.assign({}, data, { displayName: v })); showToast(v ? "Name saved" : "Name cleared"); },
           myClients: myClients, pendingInvites: pendingInvites, coachingBusy: coachingBusy,
           clientRequests: clientRequests, myRequests: myRequests, approveRequest: approveRequest, rejectRequest: rejectRequest,
           inviteClient: inviteClient, respondToInvite: respondToInvite, endCoaching: endCoaching,
@@ -4915,7 +4925,7 @@ function App() {
           myCoachRow
             ? h("div", { style: { textAlign: "center", padding: "60px 24px", color: "#a3a3a3", fontSize: 14, lineHeight: 1.6 } },
                 h("p", { style: { fontSize: 16, color: "#f5f5f5", marginBottom: 12 } }, "Your program is managed by your coach"),
-                h("p", null, (myCoachRow.coach_email || "Your coach") + " sets up your training and meal plan — it will appear here once they've prescribed it. You'll see every change they make, with an undo."),
+                h("p", null, (personLabel(myCoachRow.coach_name, myCoachRow.coach_email) || "Your coach") + " sets up your training and meal plan — it will appear here once they've prescribed it. You'll see every change they make, with an undo."),
                 h("p", { style: { fontSize: 12, color: "#737373", marginTop: 16 } }, "Want to set it up yourself instead? Revoke coach access in Settings → Privacy & Health Data, and the setup wizard unlocks."))
             : h(CustomSetupWizard, { onComplete: completeCustomSetup, allFoods: allFoods }))
       : h(React.Fragment, null,
@@ -7184,7 +7194,7 @@ function CoachPrescriptionEditor(props) {
     op.then(function (r) {
       setBusy(false);
       if (r.error) { setStatus("Couldn\u2019t save: " + (r.error.message || "unknown error")); return; }
-      setStatus(doneMsg + " \u2014 applies when " + c.email + " next opens the app.");
+      setStatus(doneMsg + " \u2014 applies when " + personLabel(c.display_name, c.email) + " next opens the app.");
       setExWeight(""); setExRepLow(""); setExRepHigh(""); setNote(""); setEditingExId(null);
       loadQueued();
     });
@@ -7237,7 +7247,7 @@ function CoachPrescriptionEditor(props) {
       .then(function (r) {
         setBusy(false);
         if (r && r.error) { setStatus("Couldn't save: " + (r.error.message || "unknown error")); return; }
-        setStatus("RIR mode " + (wantOn ? "on (queues at their next deload)" : "off") + " \u2014 applies when " + c.email + " next opens the app.");
+        setStatus("RIR mode " + (wantOn ? "on (queues at their next deload)" : "off") + " \u2014 applies when " + personLabel(c.display_name, c.email) + " next opens the app.");
         loadQueued();
       });
   }
@@ -7286,7 +7296,7 @@ function CoachPrescriptionEditor(props) {
       .then(function (r) {
         setBusy(false);
         if (r && r.error) { setStatus("Couldn't save the program: " + (r.error.message || "unknown error")); return; }
-        setStatus("Program built — applies when " + c.email + " next opens the app. Their liked foods and plan are ready.");
+        setStatus("Program built — applies when " + personLabel(c.display_name, c.email) + " next opens the app. Their liked foods and plan are ready.");
         loadQueued();
       });
   }
@@ -7334,7 +7344,7 @@ function CoachPrescriptionEditor(props) {
     op.then(function (r) {
       setBusy(false);
       if (r.error) { setStatus("Couldn't save: " + (r.error.message || "unknown error")); return; }
-      setStatus("Prescribed — applies when " + c.email + " next opens the app.");
+      setStatus("Prescribed — applies when " + personLabel(c.display_name, c.email) + " next opens the app.");
       setFood(""); setCal(""); setP(""); setCb(""); setF(""); setNote("");
       loadQueued();
     });
@@ -7354,7 +7364,7 @@ function CoachPrescriptionEditor(props) {
       wizardOpen ? "Close setup wizard" : "Run setup wizard for this client"),
     wizardOpen && h("div", { style: { border: "1px solid #262626", borderRadius: 8, padding: 8, marginBottom: 10 } },
       h("p", { style: { fontSize: 11, color: "#f0b429", margin: "0 0 8px" } },
-        "Answer as " + c.email + " — their stats, their liked foods. The finished program is prescribed to them, not applied to you." +
+        "Answer as " + personLabel(c.display_name, c.email) + " — their stats, their liked foods. The finished program is prescribed to them, not applied to you." +
         (c.current_week != null && c.active_program === "custom" ? " They have an existing Custom program: settings and plan will be replaced, but their logged history is never touched." : "")),
       h(CustomSetupWizard, { onComplete: writeSetupAssignment, allFoods: FOOD_DB })),
     !wizardOpen && h("div", { style: { display: "flex", gap: 6, marginBottom: 8 } },
@@ -7483,6 +7493,23 @@ function CoachPrescriptionEditor(props) {
   );
 }
 
+// "Your name" — how coaches and clients see each other. Local state, committed on blur, so typing
+// doesn't fire a save (and its backup) per keystroke.
+function DisplayNameRow(props) {
+  const [val, setVal] = useState(props.value || "");
+  useEffect(function () { setVal(props.value || ""); }, [props.value]);
+  return h(SettingsRow, null,
+    h("div", null, h("div", { style: { fontSize: 13 } }, "Your name"),
+      h("div", { style: { fontSize: 11, color: "#737373", marginTop: 2, maxWidth: 220 } },
+        "Shown to your coach or clients instead of your email. Your email stays the sign-in and the way invitations are verified.")),
+    h("input", {
+      type: "text", value: val, placeholder: "e.g. Alex P.",
+      onChange: function (e) { setVal(e.target.value); },
+      onBlur: function () { if (val !== (props.value || "")) props.onCommit(val.trim()); },
+      style: { background: "#0a0a0a", border: "1px solid #404040", borderRadius: 8, padding: "8px 10px", fontSize: 13, color: "#f5f5f5", width: 150 },
+    }));
+}
+
 function CoachingPanel(props) {
   const [email, setEmail] = useState("");
   const [openEditor, setOpenEditor] = useState(null); // client_id of the card with the editor open
@@ -7490,7 +7517,7 @@ function CoachingPanel(props) {
   const mine = props.myRequests || [];
   function clientEmailOf(id) {
     const m = (props.myClients || []).filter(function (x) { return x.client_id === id; })[0];
-    return m ? m.email : "a client";
+    return m ? personLabel(m.display_name, m.email) : "a client";
   }
   // Coach side: requests waiting for a decision. Approve inserts the client's own computed draft
   // as an assignment (reviewed by the human reading this list); Reject just answers.
@@ -7531,7 +7558,7 @@ function CoachingPanel(props) {
         invites.length === 1 ? "You have a coaching invitation" : "You have " + invites.length + " coaching invitations"),
       invites.map(function (inv) {
         return h("div", { key: inv.link_id, style: { background: "#171717", border: "1px solid #404040", borderRadius: 8, padding: 12, marginBottom: 8 } },
-          h("div", { style: { fontSize: 13, marginBottom: 4 } }, inv.coach_email),
+          h("div", { style: { fontSize: 13, marginBottom: 4 } }, inv.coach_name ? inv.coach_name + " (" + inv.coach_email + ")" : inv.coach_email),
           h("p", { style: { fontSize: 11, color: "#737373", margin: "0 0 10px", lineHeight: 1.5 } },
             "Accepting lets them see your program, training history and weigh-ins. They cannot change your data, and you can end this at any time."),
           h("div", { style: { display: "flex", gap: 8 } },
@@ -7559,7 +7586,7 @@ function CoachingPanel(props) {
               const stale = c.last_active && (Date.now() - new Date(c.last_active).getTime()) > 5 * 86400000;
               return h("div", { key: c.client_id, style: { background: "#171717", border: "1px solid " + (stale ? "#7a5c1a" : "#262626"), borderRadius: 8, padding: 12, marginBottom: 8 } },
                 h("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 8 } },
-                  h("span", { style: { fontSize: 13, overflow: "hidden", textOverflow: "ellipsis" } }, c.email),
+                  h("span", { style: { fontSize: 13, overflow: "hidden", textOverflow: "ellipsis" } }, personLabel(c.display_name, c.email)),
                   h("span", { style: { fontSize: 11, color: stale ? "#f0b429" : "#737373", flexShrink: 0 } }, fmtWhen(c.last_active))
                 ),
                 h("div", { style: { fontSize: 11, color: "#a3a3a3", marginTop: 6 } },
@@ -7576,7 +7603,7 @@ function CoachingPanel(props) {
                     className: "ex-action-btn", style: { borderColor: "#f87171", color: "#f87171", fontSize: 11, padding: "4px 8px" },
                     disabled: props.busy,
                     onClick: function () {
-                      if (window.confirm("End coaching with " + c.email + "? You'll lose access to their data immediately. They keep everything — nothing of theirs is deleted.")) {
+                      if (window.confirm("End coaching with " + personLabel(c.display_name, c.email) + "? You'll lose access to their data immediately. They keep everything — nothing of theirs is deleted.")) {
                         props.endCoaching(c.client_id);
                       }
                     },
@@ -7618,6 +7645,7 @@ function SettingsTab(props) {
         session: props.session, authChecked: props.authChecked,
         signUpWithEmail: props.signUpWithEmail, signInWithEmail: props.signInWithEmail, signOut: props.signOut,
       }),
+      props.session && h(DisplayNameRow, { value: props.displayName, onCommit: props.setDisplayName }),
       // Backup runs automatically in the background (debounced ~4s after any change) — this status
       // line is the only ongoing visibility into that, since the automatic path is deliberately
       // silent to avoid a toast firing every few seconds of normal use.
@@ -7734,7 +7762,7 @@ function SettingsTab(props) {
       // link is active, the wizard, program-settings edit, and RIR toggle lock, and this note says
       // why and how to take control back.
       props.myCoach && h("p", { style: { fontSize: 11, color: "#737373", margin: "8px 0 4px" } },
-        "Your program is managed by your coach (" + (props.myCoach.coach_email || "") + "). Changes to targets and training arrive as prescriptions you can undo. To take back control, revoke coach access under Privacy & Health Data."),
+        "Your program is managed by your coach (" + personLabel(props.myCoach.coach_name, props.myCoach.coach_email) + "). Changes to targets and training arrive as prescriptions you can undo. To take back control, revoke coach access under Privacy & Health Data."),
       props.rirModePendingEnable && h("p", { style: { fontSize: 11, color: "#f0b429", margin: "0 0 4px" } },
         "Queued — turns on at your next deload, so it never starts mid-phase. Tap On again to cancel."),
       props.isCustomProgram && !props.myCoach && h("div", { style: { marginTop: 12, borderTop: "1px solid #262626", paddingTop: 12 } },
@@ -7810,7 +7838,7 @@ function SettingsTab(props) {
         props.myCoachRow
           ? h("div", null,
               h("p", { style: { fontSize: 12, color: "#a3a3a3", margin: "0 0 4px", lineHeight: 1.6 } },
-                h("strong", null, props.myCoachRow.coach_email), " is your coach and can see your program, current week, sessions logged and most recent weigh-in. They cannot change your logged history or see anyone else's data."),
+                h("strong", null, personLabel(props.myCoachRow.coach_name, props.myCoachRow.coach_email)), " is your coach and can see your program, current week, sessions logged and most recent weigh-in. They cannot change your logged history or see anyone else's data."),
               h("p", { style: { fontSize: 11, color: "#737373", margin: "0 0 10px" } },
                 "Connected since " + new Date(props.myCoachRow.linked_since).toLocaleDateString()),
               h("button", {
