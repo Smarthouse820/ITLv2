@@ -2087,6 +2087,19 @@ function computePerformanceStall(exercisesDef, logsByWeek, uptoWeek, windowSize)
 // with two different keys depending on whether the URL was typed with the filename or without.
 const DEPLOY_SCOPE = (typeof location !== "undefined" ? location.pathname : "/").replace(/\/[^/]*$/, "/");
 const STORAGE_KEY = "itl-app-data-v2::" + DEPLOY_SCOPE;
+// ACCOUNT-SWITCH ISOLATION. The blob above is per-BROWSER, and sign-out keeps it — so before this
+// existed, signing into account B over account A's local data let the auto-backup upload A's
+// history into B's cloud rows within seconds. Two mechanisms close that:
+//   1. OWNER_KEY records which userId the live blob belongs to. When a different user signs in,
+//      the live blob is PARKED under the old owner's key (so switching back restores it losslessly),
+//      this user's parked blob (if any) is promoted, and the page reloads to boot cleanly.
+//   2. The uploader itself refuses to push while the owner on disk isn't the signed-in user —
+//      a hard bolt that holds even if the swap logic above ever mis-orders.
+// First sign-in on a pre-existing install claims the unowned blob for that user: the only case
+// that can misattribute is two people sharing one browser BEFORE this build ever ran, which is
+// exactly the past hazard this ends.
+const OWNER_KEY = "itl-app-owner::" + DEPLOY_SCOPE;
+function parkedDataKey(uid) { return STORAGE_KEY + "::u:" + uid; }
 // The unscoped key every previous build wrote to. Read once on first load after this ships, then
 // left alone — see loadData().
 const LEGACY_SHARED_KEY = "cutting-tracker-data-v2";
@@ -2522,7 +2535,7 @@ function programStateHasRealData(state) {
 // The build currently running. Surfaced in Settings -> Account, because "is the deploy actually
 // live?" has been the real answer to several apparent bugs, and inferring it from behaviour is slow
 // and error-prone. Compared against version.json by the update check below.
-const APP_VERSION = "2026-07-26T23:10:00";
+const APP_VERSION = "2026-07-27T00:45:00";
 
 // Signing out has to be unconditional, because every failure mode here ends the same way: a person
 // tapping a button that does nothing.
@@ -2799,6 +2812,37 @@ function App() {
   // merging a coach's changes into someone's program. The user id is a stable string — it changes
   // when the account changes, and not otherwise.
   const userId = session ? session.user.id : null;
+  // ---- Account tier (migration 10). Server truth, fetched per account; while unknown, assume
+  // full so existing accounts never flash a lock during load. Gating is a product boundary,
+  // same reasoning as full_program_access.
+  const [accountTier, setAccountTier] = useState(3);
+  useEffect(function () {
+    if (!userId) { setAccountTier(3); return; }
+    supabaseClient.from("profiles").select("tier").eq("id", userId).limit(1).then(function (r) {
+      const row = (r.data || [])[0];
+      setAccountTier(row && row.tier ? row.tier : 3); // pre-migration servers report no column: stay open
+    });
+  }, [userId]);
+  // Runs before every other userId-keyed effect (definition order): reconcile who the local blob
+  // belongs to. A mismatch parks the current owner's data, promotes this user's parked data (or
+  // starts empty, which routes them into the fresh-device restore and a clean cloud pull), then
+  // reloads — one boot from correct state beats surgically resetting fifty pieces of live state.
+  useEffect(function () {
+    if (!userId) return;
+    let owner = null;
+    try { owner = localStorage.getItem(OWNER_KEY); } catch (e) { return; }
+    if (owner === userId) return;
+    try {
+      if (!owner) { localStorage.setItem(OWNER_KEY, userId); return; } // claim an unowned install
+      const current = localStorage.getItem(STORAGE_KEY);
+      if (current) localStorage.setItem(parkedDataKey(owner), current);
+      const mine = localStorage.getItem(parkedDataKey(userId));
+      if (mine) { localStorage.setItem(STORAGE_KEY, mine); localStorage.removeItem(parkedDataKey(userId)); }
+      else localStorage.removeItem(STORAGE_KEY);
+      localStorage.setItem(OWNER_KEY, userId);
+    } catch (e) { /* storage failure: the attemptSync owner bolt still refuses cross-owner uploads */ }
+    window.location.reload();
+  }, [userId]);
   useEffect(function () {
     supabaseClient.auth.getSession().then(function (result) {
       setSession(result.data.session);
@@ -2906,6 +2950,13 @@ function App() {
     // nothing else — the app kept uploading. A privacy control that silently does nothing is worse
     // than not offering one, because someone reads "Off" and believes it.
     if (!syncAllowed) { setSyncStatus("idle"); return; }
+    // The isolation bolt: never upload while the blob on disk belongs to a different account.
+    // The reconciliation effect above normally makes this unreachable — it exists for the case
+    // where it doesn't (storage failure, future effect reordering, a code path nobody predicted).
+    try {
+      const owner = localStorage.getItem(OWNER_KEY);
+      if (owner && userId && owner !== userId) { setSyncStatus("idle"); return; }
+    } catch (e) {}
     // Skip the network call entirely when the browser already knows it's offline — no point
     // waiting on a request doomed to fail, and "Offline" is a more honest status than "failed".
     if (typeof navigator !== "undefined" && navigator.onLine === false) { setSyncStatus("offline"); return; }
@@ -3254,6 +3305,11 @@ function App() {
       setMyCoachRow(!r.error && r.data && r.data.length ? r.data[0] : null);
     });
   }, [userId, myClients, pendingInvites]);
+  // An active coach link grants tier-3 FEATURES for its duration on top of the paid floor —
+  // revoke and the account reverts. Features leave; data stays (the consent-doc principle).
+  const effectiveTier = myCoachRow ? 3 : accountTier;
+  const tierHasTraining = effectiveTier >= 2;  // exercise DB, demos, autoregulation, RIR, milestones
+  const tierHasNutrition = effectiveTier >= 3; // meal planning, adaptive TDEE, the solver
 
   // Revoking from the CLIENT side. Deliberately separate from endCoaching(), which is the coach's
   // action — the consent document promises the participant can withdraw, so it can't be something
@@ -4887,6 +4943,7 @@ function App() {
               .eq("client_id", session.user.id).eq("status", "active")
               .then(function () { setMyCoachRow(null); showToast("Coaching ended"); return refreshCoaching(); });
           },
+          tierHasTraining: tierHasTraining,
           displayName: data.displayName,
           setDisplayName: function (v) { save(Object.assign({}, data, { displayName: v })); showToast(v ? "Name saved" : "Name cleared"); },
           myClients: myClients, pendingInvites: pendingInvites, coachingBusy: coachingBusy,
@@ -4940,7 +4997,7 @@ function App() {
               setExerciseDifficulty: setExerciseDifficulty, color: def.color,
               targetHR: (data.customProgramConfig && data.customProgramConfig.age) ? Math.round((220 - data.customProgramConfig.age) * 0.65) : null,
               supersetGroups: prog.supersetGroups, createSuperset: createSuperset, removeSuperset: removeSuperset,
-              coachManaged: !!myCoachRow,
+              coachManaged: !!myCoachRow, tierHasTraining: tierHasTraining,
               deloadRecommendation: prog.deloadRecommendation, acceptDeloadRecommendation: acceptDeloadRecommendation,
               dismissDeloadRecommendation: dismissDeloadRecommendation, readinessSignal: readinessSignal,
               volumeIncreaseRecommendations: prog.volumeIncreaseRecommendations,
@@ -4949,7 +5006,20 @@ function App() {
               restTimerSettings: data.restTimerSettings, updateRestTimerSettings: updateRestTimerSettings,
               startRestTimer: startRestTimer, skipRestTimer: skipRestTimer,
             }),
-            tab === "nutrition" && h(NutritionTab, {
+            tab === "nutrition" && !tierHasNutrition && h("div", null,
+              (function () {
+                const weighIns = Object.keys(prog.dailyWeightLogs || {}).length;
+                const foodDays = Object.keys(prog.foodLog || {}).length;
+                return h("div", { className: "plan-error", style: { borderColor: "#3d97d3", marginBottom: 16 } },
+                  h("strong", null, "Meal planning + adaptive TDEE"),
+                  h("p", { style: { margin: "6px 0 0", fontSize: 13 } },
+                    "Your workouts tell half the story — nutrition is the other half. The full plan builds your meals around your targets, swaps foods without breaking them, and adaptive TDEE learns your actual burn rate from your own numbers" +
+                    (weighIns + foodDays > 0 ? " — you've already logged " + weighIns + " weigh-in" + (weighIns === 1 ? "" : "s") + " and " + foodDays + " day" + (foodDays === 1 ? "" : "s") + " of food it would learn from." : ".")),
+                  h("p", { style: { margin: "6px 0 0", fontSize: 11, color: "#737373" } },
+                    "Keep logging below — everything you record now feeds the system the moment you upgrade."));
+              })(),
+              h(FoodSearchLog, { foodLog: todaysFoodLog, logFood: logFood, removeEntry: removeFoodLogEntry, updateGrams: updateFoodLogGrams, allFoods: allFoods, addCustomFood: addCustomFood, quickFoods: quickAddFoods })),
+            tab === "nutrition" && tierHasNutrition && h(NutritionTab, {
               nToday: nToday, setMealStatus: setMealStatus, clearMealStatus: clearMealStatus, macroProgress: macroProgress, meals: meals, mealTotals: activeMealTotals,
               hasOverride: nutritionHasOverride,
               foodLog: todaysFoodLog, logFood: logFood, removeFoodLogEntry: removeFoodLogEntry, updateFoodLogGrams: updateFoodLogGrams,
@@ -4982,7 +5052,9 @@ function App() {
               completeHydrationDay: completeHydrationDay, dayComplete: !!(prog.hydrationDayComplete || {})[hydrationSelectedDate],
               uiPrefs: data.uiPrefs, updateUiPrefs: updateUiPrefs,
             }),
-            tab === "milestones" && h(MilestonesTab, {
+            tab === "milestones" && !tierHasTraining && h("p", { className: "plan-error", style: { borderColor: "#3d97d3" } },
+              "Milestone targets and projections are part of the training tier. Your weigh-ins still record from the Workouts tab."),
+            tab === "milestones" && tierHasTraining && h(MilestonesTab, {
               currentWeek: prog.currentWeek, actuals: prog.milestoneActuals, setActual: setMilestoneActual,
               hasTargets: def.hasMilestoneTargets, goalLine: def.goalLine, customMilestones: def.customMilestones || null,
               dailyWeightLogs: prog.dailyWeightLogs, logDailyWeight: logDailyWeight,
@@ -5000,7 +5072,9 @@ function App() {
                 clientRequests: clientRequests, myRequests: myRequests,
                 approveRequest: approveRequest, rejectRequest: rejectRequest,
               })),
-            tab === "grocery" && h(GroceryTab, {
+            tab === "grocery" && !tierHasNutrition && h("p", { className: "plan-error", style: { borderColor: "#3d97d3" } },
+              "The grocery list is built from your meal plan — part of the full nutrition tier. See the Nutrition tab for what it unlocks."),
+            tab === "grocery" && tierHasNutrition && h(GroceryTab, {
               list: groceryList, checked: groceryChecked, toggle: toggleGrocery, reset: resetGroceryList,
               rotationWeek: rotationWeek, displayWeek: groceryDisplayWeek, viewWeek: groceryViewWeek, setViewWeek: setGroceryViewWeek,
               hasOverride: groceryHasOverride,
@@ -5240,7 +5314,7 @@ function WorkoutsTab(props) {
               setMuscleEditOpen(next);
             },
           }, "Muscle: " + titleCaseMuscle(effectiveMuscle(ex, state))),
-          h("button", {
+          props.tierHasTraining !== false && h("button", {
             className: "ex-action-btn",
             onClick: function () {
               window.open("https://www.youtube.com/results?search_query=" + encodeURIComponent(ex.name + " exercise form"), "_blank", "noopener,noreferrer");
@@ -5335,7 +5409,7 @@ function WorkoutsTab(props) {
     // Suppressed whenever a deload recommendation is showing for this week — that's already the
     // more authoritative, actionable version of "take it easier," so a second, weaker daily nudge
     // saying nearly the same thing on top of it is redundant rather than additionally useful.
-    props.readinessSignal && props.readinessSignal.level !== "normal" &&
+    props.tierHasTraining !== false && props.readinessSignal && props.readinessSignal.level !== "normal" &&
       !(props.deloadRecommendation && props.deloadRecommendation.forWeek === props.data.currentWeek) &&
       h("div", { className: "preview-banner", style: { marginBottom: 16 } },
       h("p", { style: { margin: "0 0 4px", fontWeight: 600 } },
@@ -5344,7 +5418,7 @@ function WorkoutsTab(props) {
       h("p", { style: { margin: "6px 0 0", fontSize: 11, color: "#737373" } },
         "A directional flag from your own logged sleep, difficulty ratings, and skipped sets — not a diagnosis. You know your body better than this number does.")
     ),
-    props.deloadRecommendation && props.deloadRecommendation.forWeek === props.data.currentWeek && h("div", { className: "preview-banner", style: { marginBottom: 16 } },
+    props.tierHasTraining !== false && props.deloadRecommendation && props.deloadRecommendation.forWeek === props.data.currentWeek && h("div", { className: "preview-banner", style: { marginBottom: 16 } },
       h("p", { style: { margin: "0 0 8px" } },
         props.deloadRecommendation.reason === "performance"
           ? ("Progress has stalled — " + props.deloadRecommendation.stalledCount + " of " + props.deloadRecommendation.consideredCount + " exercises you've trained consistently haven't set a new best in " + props.deloadRecommendation.weeks + " weeks. Worth taking this week as a deload?")
@@ -7758,7 +7832,9 @@ function SettingsTab(props) {
         h("div", null, h("div", { style: { fontSize: 13 } }, "RIR mode"),
           h("div", { style: { fontSize: 11, color: "#737373", marginTop: 2, maxWidth: 220 } },
             "Autoregulate reps from what you logged last week instead of a fixed range." + (props.isSharedProgram ? " Shared across Cutting, Cruise, and Hypertrophy." : ""))),
-        props.myCoach
+        props.tierHasTraining === false
+          ? h("span", { style: { fontSize: 11, color: "#737373" } }, "Part of the training tier")
+          : props.myCoach
           ? h("button", { className: "ex-action-btn", style: { fontSize: 11, padding: "4px 8px" }, onClick: function () { props.toggleRirMode(); } },
               (props.rirModeEnabled ? "On" : props.rirModePendingEnable ? "Queued" : "Off") + " \u00b7 request " + ((props.rirModeEnabled || props.rirModePendingEnable) ? "off" : "on"))
           : h(SettingsSeg, { on: props.rirModeEnabled, onChange: function () { props.toggleRirMode(); } })
