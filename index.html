@@ -2100,6 +2100,7 @@ const STORAGE_KEY = "itl-app-data-v2::" + DEPLOY_SCOPE;
 // exactly the past hazard this ends.
 const OWNER_KEY = "itl-app-owner::" + DEPLOY_SCOPE;
 function parkedDataKey(uid) { return STORAGE_KEY + "::u:" + uid; }
+function parkedMetaKey(uid) { return STORAGE_KEY + "::u:" + uid + "::parkedAt"; }
 // The unscoped key every previous build wrote to. Read once on first load after this ships, then
 // left alone — see loadData().
 const LEGACY_SHARED_KEY = "cutting-tracker-data-v2";
@@ -2535,7 +2536,7 @@ function programStateHasRealData(state) {
 // The build currently running. Surfaced in Settings -> Account, because "is the deploy actually
 // live?" has been the real answer to several apparent bugs, and inferring it from behaviour is slow
 // and error-prone. Compared against version.json by the update check below.
-const APP_VERSION = "2026-07-27T00:45:00";
+const APP_VERSION = "2026-07-27T01:15:00";
 
 // Signing out has to be unconditional, because every failure mode here ends the same way: a person
 // tapping a button that does nothing.
@@ -2835,13 +2836,38 @@ function App() {
     try {
       if (!owner) { localStorage.setItem(OWNER_KEY, userId); return; } // claim an unowned install
       const current = localStorage.getItem(STORAGE_KEY);
-      if (current) localStorage.setItem(parkedDataKey(owner), current);
-      const mine = localStorage.getItem(parkedDataKey(userId));
-      if (mine) { localStorage.setItem(STORAGE_KEY, mine); localStorage.removeItem(parkedDataKey(userId)); }
-      else localStorage.removeItem(STORAGE_KEY);
-      localStorage.setItem(OWNER_KEY, userId);
-    } catch (e) { /* storage failure: the attemptSync owner bolt still refuses cross-owner uploads */ }
-    window.location.reload();
+      if (current) {
+        localStorage.setItem(parkedDataKey(owner), current);
+        localStorage.setItem(parkedMetaKey(owner), String(Date.now()));
+      }
+    } catch (e) { window.location.reload(); return; }
+    // Promotion is conditional on FRESHNESS: a parked copy is a snapshot from the moment it was
+    // parked, and if this account's cloud has moved since (they used another device), promoting
+    // the snapshot would let the auto-backup push stale data over newer truth — the multi-device
+    // conflict, made easier to trip by switching. So ask the cloud first. The 2-minute buffer
+    // absorbs client-vs-server clock skew; the async window here is safe because the attemptSync
+    // owner bolt refuses uploads until OWNER_KEY matches, which only happens below.
+    const mine = (function () { try { return localStorage.getItem(parkedDataKey(userId)); } catch (e) { return null; } })();
+    const parkedAt = Number((function () { try { return localStorage.getItem(parkedMetaKey(userId)); } catch (e) { return 0; } })()) || 0;
+    function finish(promote) {
+      try {
+        if (promote && mine) localStorage.setItem(STORAGE_KEY, mine);
+        else localStorage.removeItem(STORAGE_KEY); // empty -> fresh-device restore pulls the cloud
+        localStorage.removeItem(parkedDataKey(userId));
+        localStorage.removeItem(parkedMetaKey(userId));
+        localStorage.setItem(OWNER_KEY, userId);
+      } catch (e) {}
+      window.location.reload();
+    }
+    if (!mine) { finish(false); return; }
+    supabaseClient.from("program_states").select("updated_at").eq("user_id", userId)
+      .order("updated_at", { ascending: false }).limit(1)
+      .then(function (r) {
+        const row = (r.data || [])[0];
+        const cloudTs = row ? Date.parse(row.updated_at) : 0;
+        finish(!(cloudTs > parkedAt + 120000)); // cloud clearly newer -> discard the stale snapshot
+      })
+      .catch(function () { finish(true); }); // offline: the parked copy is the best truth reachable
   }, [userId]);
   useEffect(function () {
     supabaseClient.auth.getSession().then(function (result) {
