@@ -2520,7 +2520,7 @@ function programStateHasRealData(state) {
 // The build currently running. Surfaced in Settings -> Account, because "is the deploy actually
 // live?" has been the real answer to several apparent bugs, and inferring it from behaviour is slow
 // and error-prone. Compared against version.json by the update check below.
-const APP_VERSION = "2026-07-26T19:20:00";
+const APP_VERSION = "2026-07-26T22:20:00";
 
 // Signing out has to be unconditional, because every failure mode here ends the same way: a person
 // tapping a button that does nothing.
@@ -3084,19 +3084,62 @@ function App() {
   // point, since a client-side boolean is a hint, never a boundary.
   const [amICoach, setAmICoach] = useState(false);
 
+  const [clientRequests, setClientRequests] = useState([]); // pending requests from MY clients (coach view)
+  const [myRequests, setMyRequests] = useState([]);         // my own recent requests (client view)
   function refreshCoaching() {
-    if (!session) { setMyClients(null); setPendingInvites([]); setAmICoach(false); return Promise.resolve(); }
+    if (!session) { setMyClients(null); setPendingInvites([]); setAmICoach(false); setClientRequests([]); setMyRequests([]); return Promise.resolve(); }
     return Promise.all([
       supabaseClient.rpc("my_clients"),
       supabaseClient.rpc("my_pending_invites"),
       supabaseClient.rpc("am_i_coach"),
+      // Change requests ride the same cadence as everything else coaching-shaped. RLS scopes both:
+      // the first returns only linked clients' rows (is_coach_of), the second only this account's.
+      supabaseClient.from("change_requests").select("*").eq("status", "pending").order("created_at"),
+      supabaseClient.from("change_requests").select("*").order("created_at", { ascending: false }).limit(10),
     ]).then(function (r) {
       // An error here means the migration hasn't been run yet, or the account simply has no
       // coaching relationships. Neither is worth an error state — an empty list reads the same.
       setMyClients(r[0].error ? [] : (r[0].data || []));
       setPendingInvites(r[1].error ? [] : (r[1].data || []));
       setAmICoach(!r[2].error && r[2].data === true);
+      setClientRequests((r[3] && !r[3].error ? (r[3].data || []) : []).filter(function (q) { return q.client_id !== userId; }));
+      setMyRequests((r[4] && !r[4].error ? (r[4].data || []) : []).filter(function (q) { return q.client_id === userId; }));
     });
+  }
+  // A coached client's change lands here instead of local state: the draft is exactly the
+  // assignment that would implement it, computed by this device's own solver, so the coach's
+  // approval is a reviewed insert and the verified apply path delivers it unchanged.
+  function submitChangeRequest(draft) {
+    supabaseClient.from("change_requests").insert({
+      client_id: userId, kind: draft.kind, program_key: draft.program_key,
+      effective_week: draft.effective_week, payload: draft.payload, summary: draft.summary,
+    }).then(function (r) {
+      if (r.error) { showToast("Couldn't send the request — try again"); return; }
+      showToast("Sent to your coach for approval");
+      refreshCoaching();
+    });
+  }
+  function approveRequest(req) {
+    // Merge-aware, same as the editors: at most one live pending assignment per
+    // (client, program, week, kind), so an existing row absorbs the approved payload.
+    supabaseClient.from("coach_assignments")
+      .select("id, payload").eq("client_id", req.client_id).eq("kind", req.kind)
+      .eq("program_key", req.program_key).eq("effective_week", req.effective_week).eq("status", "pending")
+      .then(function (r) {
+        const existing = (r.data || [])[0];
+        return existing
+          ? supabaseClient.from("coach_assignments").update({ payload: Object.assign({}, existing.payload, req.payload), note: "Approved: " + req.summary }).eq("id", existing.id).eq("status", "pending")
+          : supabaseClient.from("coach_assignments").insert({ coach_id: userId, client_id: req.client_id, kind: req.kind, program_key: req.program_key, effective_week: req.effective_week, payload: req.payload, note: "Approved: " + req.summary });
+      })
+      .then(function (r) {
+        if (r && r.error) { showToast("Couldn't approve — try again"); return; }
+        return supabaseClient.from("change_requests").update({ status: "approved" }).eq("id", req.id)
+          .then(function () { showToast("Approved"); refreshCoaching(); });
+      });
+  }
+  function rejectRequest(req) {
+    supabaseClient.from("change_requests").update({ status: "rejected" }).eq("id", req.id)
+      .then(function () { showToast("Rejected"); refreshCoaching(); });
   }
   useEffect(function () { refreshCoaching(); }, [userId]);
   // The Clients tab exists only while clients exist; ending the last relationship while standing
@@ -3366,6 +3409,8 @@ function App() {
         liked: cur.likedFoodsByMeal,
         activeProgram: cur.activeProgram,
         customProgram: cur.programs.custom,
+        sharedRirOn: cur.sharedRirModeEnabled,
+        sharedRirPending: cur.sharedRirModePendingEnable,
       };
     }
     if (a.kind === "exercise_state") {
@@ -3380,6 +3425,33 @@ function App() {
   // (migration 06), so this is assignment-into-slot, not translation.
   function mergeAssignment(cur, a, weekKey) {
     if (a.kind === "program_config") {
+      // RIR-marker payloads: not a config replacement, just the mode switch — with the SAME
+      // safety rule the client's own toggle enforces: turning ON queues for the next deload
+      // (never starts mid-phase), turning OFF is immediate.
+      if (a.payload && (a.payload.sharedRirMode !== undefined || a.payload.customRirMode !== undefined)) {
+        // Same boundary rule as the client's own toggle: at phase week 1 with the week unlogged,
+        // enable immediately (no mid-phase history to protect); otherwise queue for the next
+        // deload. Evaluated HERE, on the client's device, against their program at the moment of
+        // application — the coach doesn't need to know which case it will be.
+        const rp = cur.programs[a.program_key === "custom" ? "custom" : cur.activeProgram] || {};
+        const phaseWeekNow = computePhaseWeeks(rp.currentWeek || 1, rp.extraDeloadWeeks).length;
+        const weekUnlogged = !rp.logs || !rp.logs[rp.currentWeek] || Object.keys(rp.logs[rp.currentWeek] || {}).length === 0;
+        const atBoundary = phaseWeekNow === 1 && weekUnlogged;
+        if (a.payload.sharedRirMode !== undefined) {
+          return a.payload.sharedRirMode
+            ? Object.assign({}, cur, atBoundary
+                ? { sharedRirModeEnabled: true, sharedRirModePendingEnable: false }
+                : { sharedRirModePendingEnable: true })
+            : Object.assign({}, cur, { sharedRirModeEnabled: false, sharedRirModePendingEnable: false });
+        }
+        if (!cur.customProgramConfig) return cur;
+        const cfg = a.payload.customRirMode
+          ? Object.assign({}, cur.customProgramConfig, atBoundary
+              ? { rirModeEnabled: true, rirModePendingEnable: false }
+              : { rirModePendingEnable: true })
+          : Object.assign({}, cur.customProgramConfig, { rirModeEnabled: false, rirModePendingEnable: false });
+        return Object.assign({}, cur, { customProgramConfig: cfg });
+      }
       let next = Object.assign({}, cur, { customProgramConfig: a.payload });
       // A coach-run wizard prescribes the WHOLE setup, not just settings: the payload is the exact
       // config the client's own wizard would have built (same buildWizardConfig), plus their liked
@@ -3422,6 +3494,8 @@ function App() {
         likedFoodsByMeal: s.liked || cur.likedFoodsByMeal,
         activeProgram: s.activeProgram || cur.activeProgram,
         programs: progs,
+        sharedRirModeEnabled: !!s.sharedRirOn,
+        sharedRirModePendingEnable: !!s.sharedRirPending,
       });
     }
     if (b.kind === "exercise_state") {
@@ -3463,7 +3537,7 @@ function App() {
     const newResolutions = Object.assign({}, resolutions);
     toApply.forEach(function (a) {
       const weekKey = resolveAssignmentWeekKey(next, a);
-      banners.push({ id: a.id, kind: a.kind, program_key: a.program_key, effective_week: a.effective_week, weekKey: weekKey, full: !!(a.payload && a.payload.setupComplete), note: a.note, coach_email: a.coach_email, snapshot: captureAssignmentTarget(next, a, weekKey) });
+      banners.push({ id: a.id, kind: a.kind, program_key: a.program_key, effective_week: a.effective_week, weekKey: weekKey, full: !!(a.payload && a.payload.setupComplete), rir: a.payload && (a.payload.sharedRirMode !== undefined ? a.payload.sharedRirMode : a.payload.customRirMode), note: a.note, coach_email: a.coach_email, snapshot: captureAssignmentTarget(next, a, weekKey) });
       next = mergeAssignment(next, a, weekKey);
       newResolutions[a.id] = "applied";
     });
@@ -4238,6 +4312,18 @@ function App() {
   // completeWeek, at the exact moment a new phase begins — the same clean-slate boundary a phase
   // transition already represents.
   function toggleRirMode() {
+    // While coached, the toggle is a REQUEST — same governance as every other plan change. The
+    // target state accounts for a queued enable: tapping while queued asks to cancel, i.e. off.
+    if (myCoachRow) {
+      const wantOn = !(rirModeEnabled || rirModePendingEnable);
+      const payload = isSharedProgram ? { sharedRirMode: wantOn } : { customRirMode: wantOn };
+      submitChangeRequest({
+        kind: "program_config", program_key: isSharedProgram ? data.activeProgram : "custom",
+        effective_week: prog.currentWeek, payload: payload,
+        summary: "Turn RIR mode " + (wantOn ? "on" : "off") + (isSharedProgram ? " (shared programs)" : " (custom)"),
+      });
+      return;
+    }
     if (rirModeEnabled) {
       if (isSharedProgram) {
         save(Object.assign({}, data, { sharedRirModeEnabled: false, sharedRirModePendingEnable: false }));
@@ -4260,13 +4346,24 @@ function App() {
       showToast("RIR mode enable canceled");
       return;
     }
+    // At a PHASE BOUNDARY — phase week 1 with nothing logged this week yet — enabling immediately
+    // is exactly as safe as the wizard's direct set: there is no mid-phase RIR history to mix
+    // with. The deferral only exists for mid-phase enables, so it only applies to them.
+    const phaseWeekNow = computePhaseWeeks(prog.currentWeek, prog.extraDeloadWeeks).length;
+    const weekUnlogged = !prog.logs || !prog.logs[prog.currentWeek] || Object.keys(prog.logs[prog.currentWeek]).length === 0;
+    const atBoundary = phaseWeekNow === 1 && weekUnlogged;
     if (isSharedProgram) {
-      save(Object.assign({}, data, { sharedRirModePendingEnable: true }));
+      save(Object.assign({}, data, atBoundary
+        ? { sharedRirModeEnabled: true, sharedRirModePendingEnable: false }
+        : { sharedRirModePendingEnable: true }));
     } else {
       const config = data.customProgramConfig;
       if (!config) return;
-      save(Object.assign({}, data, { customProgramConfig: Object.assign({}, config, { rirModePendingEnable: true }) }));
+      save(Object.assign({}, data, { customProgramConfig: Object.assign({}, config, atBoundary
+        ? { rirModeEnabled: true, rirModePendingEnable: false }
+        : { rirModePendingEnable: true }) }));
     }
+    if (atBoundary) { showToast("RIR mode on — starting with this phase"); return; }
     showToast("RIR mode will turn on at your next deload");
   }
 
@@ -4332,6 +4429,16 @@ function App() {
       altId: exerciseId + "_alt", name: name || null, weight: finalWeight,
       repLow: repLow != null ? repLow : fallbackRepLow, repHigh: repHigh != null ? repHigh : fallbackRepHigh, bodyweight: !!bodyweight,
     };
+    if (myCoachRow) {
+      const reqPayload = {}; reqPayload[exerciseId] = thisWeek[exerciseId];
+      submitChangeRequest({
+        kind: "exercise_week", program_key: data.activeProgram, effective_week: week,
+        payload: reqPayload,
+        summary: "This week: " + (name || "same exercise") + " @ " + finalWeight + "lb" +
+          (repLow != null ? ", " + repLow + "\u2013" + repHigh + " reps" : ""),
+      });
+      return;
+    }
     weekOverrides[week] = thisWeek;
     saveProgram({ exerciseWeekOverrides: weekOverrides });
   }
@@ -4654,6 +4761,18 @@ function App() {
     const newMealObj = { id: currentMeal.id, time: currentMeal.time, name: currentMeal.name, slot: currentMeal.slot, food: foodStr, cal: Math.round(cal), p: Math.round(p), c: Math.round(c), f: Math.round(f), items: newItems };
 
     const currentWeek = prog.currentWeek;
+    // While coached, this becomes a REQUEST: the solved meal is the payload, the coach approves,
+    // and the verified assignment path applies it. The solver already ran, so what the coach
+    // reviews is exactly what the client would have gotten — targets preserved by construction.
+    if (myCoachRow) {
+      const reqPayload = {}; reqPayload[currentMeal.id] = newMealObj;
+      submitChangeRequest({
+        kind: "meal_overrides", program_key: data.activeProgram, effective_week: prog.currentWeek,
+        payload: reqPayload,
+        summary: currentMeal.name + ": swap in " + newFoodName + " \u2192 " + foodStr,
+      });
+      return;
+    }
     const existingWeekOverride = prog.customMealOverrides[currentWeek] || {};
     const newWeekOverride = Object.assign({}, existingWeekOverride, { [currentMeal.id]: newMealObj });
     const newOverrides = Object.assign({}, prog.customMealOverrides, { [currentWeek]: newWeekOverride });
@@ -4667,7 +4786,7 @@ function App() {
       onClick: function () { window.location.reload(); },
     }, "A new version is available — tap to refresh"),
     appliedBanners.map(function (b) {
-      const what = b.kind === "meal_overrides" ? "meal plan" : b.kind === "exercise_week" ? "training week" : b.kind === "exercise_state" ? "weights & rep targets" : b.full ? "custom program — full setup, built from your preferences" : "program settings";
+      const what = b.kind === "meal_overrides" ? "meal plan" : b.kind === "exercise_week" ? "training week" : b.kind === "exercise_state" ? "weights & rep targets" : b.full ? "custom program — full setup, built from your preferences" : b.rir !== undefined ? "RIR mode — " + (b.rir ? "on (immediately if you’re at a phase start, otherwise from your next deload)" : "turned off") : "program settings";
       return h("div", { key: b.id, className: "plan-error", style: { margin: "8px 12px", borderColor: "#3d97d3", fontSize: 13 } },
         h("strong", null, "Your coach updated your " + what + (b.kind === "meal_overrides" || b.kind === "exercise_week" ? " for Week " + b.effective_week : "")),
         b.coach_email && h("span", { style: { color: "#737373" } }, " (" + b.coach_email + ")"),
@@ -4761,6 +4880,7 @@ function App() {
               .then(function () { setMyCoachRow(null); showToast("Coaching ended"); return refreshCoaching(); });
           },
           myClients: myClients, pendingInvites: pendingInvites, coachingBusy: coachingBusy,
+          clientRequests: clientRequests, myRequests: myRequests, approveRequest: approveRequest, rejectRequest: rejectRequest,
           inviteClient: inviteClient, respondToInvite: respondToInvite, endCoaching: endCoaching,
           canCoach: amICoach,
           myCoachRow: myCoachRow, revokeMyCoach: revokeMyCoach, deleteCloudData: deleteCloudData,
@@ -4867,6 +4987,8 @@ function App() {
                 myClients: myClients, pendingInvites: pendingInvites, canCoach: amICoach,
                 inviteClient: inviteClient, respondToInvite: respondToInvite,
                 endCoaching: endCoaching, busy: coachingBusy,
+                clientRequests: clientRequests, myRequests: myRequests,
+                approveRequest: approveRequest, rejectRequest: rejectRequest,
               })),
             tab === "grocery" && h(GroceryTab, {
               list: groceryList, checked: groceryChecked, toggle: toggleGrocery, reset: resetGroceryList,
@@ -4883,7 +5005,7 @@ function App() {
             // Only rendered when the coach actually has active clients — for everyone else (all
             // clients, and coaches between clients) the tab simply doesn't exist. Invite flow
             // stays reachable from Settings → Coaching, which is where the first client comes from.
-            !!(myClients && myClients.length) && h(TabButton, { Icon: Users, label: "Clients", active: tab === "clients", onClick: function () { setTab("clients"); } })
+            !!(myClients && myClients.length) && h(TabButton, { Icon: Users, label: "Clients", badge: clientRequests.length, active: tab === "clients", onClick: function () { setTab("clients"); } })
           )
         )
   );
@@ -4891,7 +5013,14 @@ function App() {
 
 function TabButton(props) {
   return h("button", { className: "nav-btn" + (props.active ? " active" : ""), onClick: props.onClick },
-    h(props.Icon, { size: 20 }), props.label);
+    h("span", { style: { position: "relative", display: "inline-flex" } },
+      h(props.Icon, { size: 20 }),
+      props.badge > 0 && h("span", {
+        style: { position: "absolute", top: -4, right: -8, background: "#ef4444", color: "#fff",
+                 fontSize: 9, fontWeight: 700, lineHeight: "14px", minWidth: 14, height: 14,
+                 borderRadius: 999, textAlign: "center", padding: "0 3px", pointerEvents: "none" },
+      }, props.badge)),
+    props.label);
 }
 
 function allSetsHaveReps(logsForEx, setsToday) {
@@ -5407,7 +5536,7 @@ function SwapForm(props) {
     ),
     h("p", { style: { fontSize: "11px", color: "#737373", margin: "8px 0 0" } },
       props.coachManaged
-        ? "\"This week only\" reverts on its own next week — the substitute gets its own separate history, and your original exercise's history is untouched. Permanent changes to your program come from your coach."
+        ? "While you're coached, this sends a REQUEST — your coach approves it before it applies. Permanent changes to your program come from your coach."
         : "\"This week only\" reverts on its own next week — the substitute gets its own separate history, and your original exercise's history is untouched the whole time. \"Rest of program\" renames this slot going forward."),
     h("div", { style: { display: "flex", gap: "8px", marginTop: 8, flexWrap: "wrap" } },
       h("button", {
@@ -7011,12 +7140,12 @@ function CoachPrescriptionEditor(props) {
   const [clientPlan, setClientPlan] = useState(null);
   function loadClientPlan() {
     Promise.all([
-      supabaseClient.from("profiles").select("custom_program_config, shared_exercise_state").eq("id", c.client_id).limit(1),
+      supabaseClient.from("profiles").select("custom_program_config, shared_exercise_state, shared_rir_mode_enabled").eq("id", c.client_id).limit(1),
       supabaseClient.from("program_states").select("state").eq("user_id", c.client_id).eq("program_key", programKey).limit(1),
     ]).then(function (r) {
       const prof = (r[0].data || [])[0] || {};
       const ps = (r[1].data || [])[0] || {};
-      setClientPlan({ config: prof.custom_program_config || null, sharedState: prof.shared_exercise_state || {}, progState: ps.state || {} });
+      setClientPlan({ config: prof.custom_program_config || null, sharedState: prof.shared_exercise_state || {}, sharedRirOn: !!prof.shared_rir_mode_enabled, progState: ps.state || {} });
     });
   }
   useEffect(loadClientPlan, [c.client_id]);
@@ -7025,6 +7154,7 @@ function CoachPrescriptionEditor(props) {
   const [selectedDays, setSelectedDays] = useState([]);
   const [editingExId, setEditingExId] = useState(null);
   const [exWeight, setExWeight] = useState(""); const [exRepLow, setExRepLow] = useState(""); const [exRepHigh, setExRepHigh] = useState("");
+  const [exName, setExName] = useState(""); // substitute exercise name — free text, with pool suggestions
   const [copyTargets, setCopyTargets] = useState({}); // { [sourceDay]: targetDay } for the copy selects
 
   function toggleDay(d) {
@@ -7068,7 +7198,13 @@ function CoachPrescriptionEditor(props) {
       change.repLowOverride = Math.max(1, Math.round(Number(exRepLow) || 0));
       change.repHighOverride = Math.max(change.repLowOverride, Math.round(Number(exRepHigh) || 0));
     }
-    if (!Object.keys(change).length) { setStatus("Set a weight or a rep range to prescribe."); return; }
+    // Replacing the movement itself: nameOverride is the same field the client's own permanent
+    // swap writes, so it flows through the existing exercise_state merge untouched. "__original"
+    // is the revert sentinel from the UI below — it prescribes nameOverride: null.
+    const trimmedName = exName.trim();
+    if (trimmedName === "__original") change.nameOverride = null;
+    else if (trimmedName) change.nameOverride = trimmedName;
+    if (!Object.keys(change).length) { setStatus("Set a substitute, a weight, or a rep range to prescribe."); return; }
     // The requested duplicate guard: adding an exercise that already has a queued prescription for
     // this week asks before overwriting, instead of silently replacing it.
     const already = pendingPayload[ex.id];
@@ -7083,6 +7219,28 @@ function CoachPrescriptionEditor(props) {
   // Copies QUEUED prescriptions from one day onto another day\u2019s exercises, matched by NAME \u2014
   // exercise ids are per-day, so name matching is what makes "two leg days share targets" work.
   // Unmatched source exercises are reported, not guessed at.
+  // RIR mode prescription — the shared flag has no editor of its own anywhere else on the coach
+  // side; the full wizard only sets Custom's. ON inherits the client-side rule: queues for their
+  // next deload, never starts mid-phase.
+  function prescribeRir(wantOn) {
+    setBusy(true); setStatus("");
+    const payload = programKey === "custom" ? { customRirMode: wantOn } : { sharedRirMode: wantOn };
+    supabaseClient.from("coach_assignments")
+      .select("id").eq("client_id", c.client_id).eq("kind", "program_config")
+      .eq("program_key", programKey).eq("effective_week", Math.max(1, clientWeek)).eq("status", "pending")
+      .then(function (r) {
+        const existing = (r.data || [])[0];
+        return existing
+          ? supabaseClient.from("coach_assignments").update({ payload: payload, note: note || null }).eq("id", existing.id).eq("status", "pending")
+          : supabaseClient.from("coach_assignments").insert({ coach_id: props.coachId, client_id: c.client_id, kind: "program_config", program_key: programKey, effective_week: Math.max(1, clientWeek), payload: payload, note: note || null });
+      })
+      .then(function (r) {
+        setBusy(false);
+        if (r && r.error) { setStatus("Couldn't save: " + (r.error.message || "unknown error")); return; }
+        setStatus("RIR mode " + (wantOn ? "on (queues at their next deload)" : "off") + " \u2014 applies when " + c.email + " next opens the app.");
+        loadQueued();
+      });
+  }
   function copyDayTargets(fromDay, toDay) {
     if (!toDay || toDay === fromDay || !exerciseSource) return;
     const srcExercises = (exerciseSource[fromDay] && exerciseSource[fromDay].exercises) || [];
@@ -7242,6 +7400,11 @@ function CoachPrescriptionEditor(props) {
         "Week " + weekNum + " is a deload \u2014 the suggested anchor for training changes."),
       !exerciseSource && h("p", { style: { fontSize: 11, color: "#737373", margin: "0 0 8px" } },
         programKey === "custom" ? "Loading their program\u2026 (or their Custom setup hasn\u2019t been built yet \u2014 run the wizard above first.)" : "Loading\u2026"),
+      clientPlan && programKey !== "custom" && h("div", { style: { display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, marginBottom: 8, fontSize: 11, color: "#737373" } },
+        h("span", null, "RIR mode: " + (clientPlan.sharedRirOn ? "on" : "off") + " (shared programs)"),
+        h("span", { style: { display: "flex", gap: 6 } },
+          h("button", { className: "week-btn", disabled: busy, onClick: function () { prescribeRir(true); } }, "prescribe on"),
+          h("button", { className: "week-btn", disabled: busy, onClick: function () { prescribeRir(false); } }, "prescribe off"))),
       // Day pills, same shape as the Workouts/Nutrition tabs, but multi-select and default
       // collapsed: nothing shows until a day is chosen, and several open at once for comparing
       // sets, target reps, and prescribed weight across days.
@@ -7268,11 +7431,30 @@ function CoachPrescriptionEditor(props) {
             const isEditing = editingExId === ex.id;
             return h("div", { key: ex.id, style: { borderTop: "1px solid #1a1a1a", padding: "6px 0" } },
               h("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "center", cursor: "pointer" },
-                onClick: function () { setEditingExId(isEditing ? null : ex.id); setExWeight(""); setExRepLow(""); setExRepHigh(""); } },
+                onClick: function () { setEditingExId(isEditing ? null : ex.id); setExWeight(""); setExRepLow(""); setExRepHigh(""); setExName(""); } },
                 h("span", { style: { fontSize: 12 } }, ex.name + (st.nameOverride ? " \u00b7 subbed: " + st.nameOverride : "")),
                 h("span", { style: { fontSize: 11, color: pres ? "#4eba6f" : "#737373", textAlign: "right" } },
-                  curWeight + "lb \u00b7 " + ex.sets + "\u00d7" + curRange + (pres ? " \u2192 " + (pres.weight != null ? pres.weight + "lb" : "") + (pres.repLowOverride != null ? (pres.weight != null ? " / " : "") + pres.repLowOverride + "\u2013" + pres.repHighOverride : "") + " queued" : ""))),
+                  curWeight + "lb \u00b7 " + ex.sets + "\u00d7" + curRange + (pres ? " \u2192 " + [pres.nameOverride !== undefined ? (pres.nameOverride === null ? "original name" : pres.nameOverride) : null, pres.weight != null ? pres.weight + "lb" : null, pres.repLowOverride != null ? pres.repLowOverride + "\u2013" + pres.repHighOverride : null].filter(Boolean).join(" / ") + " queued" : ""))),
               isEditing && h("div", { style: { marginTop: 6 } },
+                h("label", { style: { display: "block", fontSize: 11, color: "#737373", marginBottom: 6 } },
+                  "substitute exercise (optional \u2014 pick from the database or type your own)",
+                  h("input", Object.assign({ type: "text", value: exName === "__original" ? "" : exName, placeholder: ex.name,
+                    onChange: function (e) { setExName(e.target.value); } }, { style: inputStyle }))),
+                (function () {
+                  const q = exName.trim().toLowerCase();
+                  if (!q || exName === "__original") return null;
+                  const matches = EXERCISE_POOL.filter(function (pe) { return pe.name.toLowerCase().indexOf(q) !== -1 && pe.name !== exName; }).slice(0, 6);
+                  if (!matches.length) return null;
+                  return h("div", { style: { display: "flex", gap: 4, flexWrap: "wrap", marginBottom: 6 } },
+                    matches.map(function (pe) {
+                      return h("button", { key: pe.name, className: "food-chip", style: { fontSize: 11 },
+                        onClick: function () { setExName(pe.name); if (exWeight === "" && pe.weight) setExWeight(String(pe.weight)); } },
+                        pe.name + " (" + pe.muscle + ")");
+                    }));
+                })(),
+                (st.nameOverride || (pres && pres.nameOverride)) && h("button", { className: "food-chip", style: { fontSize: 11, marginBottom: 6 },
+                  onClick: function () { setExName(exName === "__original" ? "" : "__original"); } },
+                  exName === "__original" ? "\u2713 will revert to " + ex.name + " \u2014 tap to cancel" : "revert to original (" + ex.name + ")"),
                 h("div", { style: { display: "flex", gap: 6, marginBottom: 6 } },
                   h("label", { style: { flex: 1, fontSize: 11, color: "#737373" } }, "weight (lb)",
                     h("input", Object.assign({ type: "number", inputMode: "decimal", min: "0", value: exWeight, placeholder: String(curWeight),
@@ -7295,7 +7477,7 @@ function CoachPrescriptionEditor(props) {
       h("p", { style: { fontSize: 11, color: "#737373", margin: "0 0 4px" } }, "Waiting for the client to open the app:"),
       queued.map(function (q) {
         return h("div", { key: q.id, style: { display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: 11, color: "#a3a3a3", padding: "4px 0", borderBottom: "1px solid #1a1a1a" } },
-          h("span", null, "Week " + q.effective_week + " · " + (q.kind === "meal_overrides" ? Object.keys(q.payload || {}).map(function (k) { return "Meal " + k.slice(1); }).join(", ") : q.kind === "program_config" ? "Full program setup" : q.kind === "exercise_state" ? "Training targets: " + Object.keys(q.payload || {}).length + " exercise(s)" : q.kind)),
+          h("span", null, "Week " + q.effective_week + " · " + (q.kind === "meal_overrides" ? Object.keys(q.payload || {}).map(function (k) { return "Meal " + k.slice(1); }).join(", ") : q.kind === "program_config" ? (q.payload && (q.payload.sharedRirMode !== undefined || q.payload.customRirMode !== undefined) ? "RIR mode \u2192 " + ((q.payload.sharedRirMode !== undefined ? q.payload.sharedRirMode : q.payload.customRirMode) ? "on" : "off") : "Full program setup") : q.kind === "exercise_state" ? "Training targets: " + Object.keys(q.payload || {}).length + " exercise(s)" : q.kind)),
           h("button", { className: "logged-food-remove", disabled: busy, onClick: function () { withdraw(q); } }, "✕"));
       }))
   );
@@ -7304,6 +7486,33 @@ function CoachPrescriptionEditor(props) {
 function CoachingPanel(props) {
   const [email, setEmail] = useState("");
   const [openEditor, setOpenEditor] = useState(null); // client_id of the card with the editor open
+  const reqs = props.clientRequests || [];
+  const mine = props.myRequests || [];
+  function clientEmailOf(id) {
+    const m = (props.myClients || []).filter(function (x) { return x.client_id === id; })[0];
+    return m ? m.email : "a client";
+  }
+  // Coach side: requests waiting for a decision. Approve inserts the client's own computed draft
+  // as an assignment (reviewed by the human reading this list); Reject just answers.
+  const requestReview = reqs.length > 0 ? h("div", { style: { border: "1px solid #f0b429", borderRadius: 8, padding: 8, marginBottom: 12 } },
+    h("p", { style: { fontSize: 12, color: "#f0b429", margin: "0 0 6px" } }, "Client requests waiting on you (" + reqs.length + ")"),
+    reqs.map(function (q) {
+      return h("div", { key: q.id, style: { borderTop: "1px solid #262626", padding: "6px 0" } },
+        h("p", { style: { fontSize: 12, margin: 0 } }, clientEmailOf(q.client_id) + " \u2014 week " + q.effective_week),
+        h("p", { style: { fontSize: 11, color: "#a3a3a3", margin: "2px 0 6px" } }, q.summary),
+        h("div", { style: { display: "flex", gap: 8 } },
+          h("button", { className: "swap-save-btn", style: { flex: 1, fontSize: 11, padding: "4px 8px" }, onClick: function () { props.approveRequest(q); } }, "Approve"),
+          h("button", { className: "ex-action-btn", style: { borderColor: "#f87171", color: "#f87171", fontSize: 11, padding: "4px 8px" }, onClick: function () { props.rejectRequest(q); } }, "Reject")));
+    })) : null;
+  // Client side: where their requests stand. Approved ones arrive as normal coach-change banners.
+  const myRequestList = mine.length > 0 ? h("div", { style: { marginBottom: 12 } },
+    h("p", { style: { fontSize: 12, color: "#a3a3a3", margin: "0 0 4px" } }, "Your change requests"),
+    mine.map(function (q) {
+      const color = q.status === "approved" ? "#4eba6f" : q.status === "rejected" ? "#f87171" : q.status === "pending" ? "#f0b429" : "#737373";
+      return h("div", { key: q.id, style: { display: "flex", justifyContent: "space-between", gap: 8, fontSize: 11, color: "#a3a3a3", padding: "3px 0", borderBottom: "1px solid #1a1a1a" } },
+        h("span", { style: { flex: 1 } }, q.summary),
+        h("span", { style: { color: color, whiteSpace: "nowrap" } }, q.status));
+    })) : null;
   const clients = props.myClients || [];
   const invites = props.pendingInvites || [];
 
@@ -7314,6 +7523,8 @@ function CoachingPanel(props) {
   }
 
   return h("div", null,
+    requestReview,
+    myRequestList,
     // ---- Client side: someone has asked to coach you ----
     invites.length > 0 && h("div", { style: { marginBottom: 14 } },
       h("div", { style: { fontSize: 12, color: "#f0b429", marginBottom: 8 } },
@@ -7451,6 +7662,8 @@ function SettingsTab(props) {
         h(CoachingPanel, {
           coachId: props.userId,
           myClients: props.myClients, pendingInvites: props.pendingInvites, canCoach: props.canCoach,
+          clientRequests: props.clientRequests, myRequests: props.myRequests,
+          approveRequest: props.approveRequest, rejectRequest: props.rejectRequest,
           inviteClient: props.inviteClient, respondToInvite: props.respondToInvite,
           endCoaching: props.endCoaching, busy: props.coachingBusy,
         })
@@ -7512,7 +7725,8 @@ function SettingsTab(props) {
           h("div", { style: { fontSize: 11, color: "#737373", marginTop: 2, maxWidth: 220 } },
             "Autoregulate reps from what you logged last week instead of a fixed range." + (props.isSharedProgram ? " Shared across Cutting, Cruise, and Hypertrophy." : ""))),
         props.myCoach
-          ? h("span", { style: { fontSize: 11, color: "#737373" } }, props.rirModeEnabled ? "On · set by coach" : "Off · set by coach")
+          ? h("button", { className: "ex-action-btn", style: { fontSize: 11, padding: "4px 8px" }, onClick: function () { props.toggleRirMode(); } },
+              (props.rirModeEnabled ? "On" : props.rirModePendingEnable ? "Queued" : "Off") + " \u00b7 request " + ((props.rirModeEnabled || props.rirModePendingEnable) ? "off" : "on"))
           : h(SettingsSeg, { on: props.rirModeEnabled, onChange: function () { props.toggleRirMode(); } })
       ),
       // The coach owns macro targets and training structure; the client owns which foods hit those
