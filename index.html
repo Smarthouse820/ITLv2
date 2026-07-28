@@ -896,12 +896,20 @@ const SERVING_INFO = {
 };
 // One resolver for every portion surface: the scan-time serving wins (it's THIS product's label),
 // then the curated map, then nothing — never 100g dressed up as a serving.
+const UNIT_TO_GRAMS = { g: 1, oz: 28.35, ml: 1 }; // ml logs 1:1 as grams — standard beverage convention
 function servingOf(food) {
   if (!food) return null;
-  if (food.servingGrams > 0) return { g: Math.round(food.servingGrams), label: "1 serving" };
+  if (food.servingGrams > 0) return { g: Math.round(food.servingGrams), label: "1 serving", unit: food.servingUnit === "ml" ? "ml" : "g" };
   const s = SERVING_INFO[food.name];
-  return s ? s : null;
+  return s ? { g: s.g, label: s.label, unit: "g" } : null;
 }
+// Amount-unit conversion for the logging panels. Internally EVERYTHING is grams — the per-100g
+// macro math never changes. ml counts 1:1 (the labels' own convention for liquids); oz is the
+// 28.35g weight ounce, close enough to a fluid ounce (29.6ml) that the 4% difference is inside
+// normal logging noise rather than worth a second oz.
+const AMOUNT_UNITS = [["g", 1], ["oz", 28.35], ["ml", 1]];
+function unitFactor(u) { const m = AMOUNT_UNITS.filter(function (x) { return x[0] === u; })[0]; return m ? m[1] : 1; }
+function toUnitStr(gramsVal, u) { const v = gramsVal / unitFactor(u); return String(Math.round(v * 10) / 10); }
 
 const EXERCISE_POOL = [
   // Quads (squat pattern) — compound
@@ -2655,7 +2663,7 @@ function programStateHasRealData(state) {
 // The build currently running. Surfaced in Settings -> Account, because "is the deploy actually
 // live?" has been the real answer to several apparent bugs, and inferring it from behaviour is slow
 // and error-prone. Compared against version.json by the update check below.
-const APP_VERSION = "2026-07-27T03:00:00";
+const APP_VERSION = "2026-07-27T04:00:00";
 
 // Signing out has to be unconditional, because every failure mode here ends the same way: a person
 // tapping a button that does nothing.
@@ -4901,9 +4909,15 @@ function App() {
       : def.slots[mealIndex];
     if (!slot || !currentMeal.items) return; // e.g. the intra-workout entry, which isn't one of the 4 solver slots
     const items = currentMeal.items;
-    const roleIdx = { protein: 0, carb: 1, fat: 2 }[role];
-    const vegItem = items[3] || null;
-    const vegFood = vegItem ? allFoods.filter(function (f) { return f.name === vegItem.name; })[0] : null;
+    const roleIdx = { protein: 0, carb: 1, fat: 2 }[role]; // undefined for role "fixed" — handled below
+    // role === "fixed" replaces items[3] ITSELF — the slot the solver never touches (a vegetable,
+    // or Meal 4's second protein). The replacement keeps the outgoing item's grams; what changes
+    // is the residual target the other three are re-solved against, so the meal still lands on
+    // its slot's macros to the same tolerance as any other swap.
+    const isFixedSwap = role === "fixed";
+    if (isFixedSwap && !items[3]) return;
+    const vegItem = isFixedSwap ? { name: newFood.name, grams: items[3].grams } : (items[3] || null);
+    const vegFood = isFixedSwap ? newFood : (vegItem ? allFoods.filter(function (f) { return f.name === vegItem.name; })[0] : null);
     // items[3] is a FIXED item whose macros come off the target before the other three are solved.
     // It's usually a vegetable, but nothing requires that — Meal 4 uses it for a second protein
     // source (a whey scoop alongside the beef), which is the only way a four-ingredient meal with
@@ -4921,7 +4935,7 @@ function App() {
       : [slot.p, slot.c, slot.f];
 
     const currentFoods = [0, 1, 2].map(function (i) { return allFoods.filter(function (f) { return f.name === items[i].name; })[0]; });
-    currentFoods[roleIdx] = newFood;
+    if (roleIdx != null) currentFoods[roleIdx] = newFood;
 
     let solved = solve3x3(currentFoods, target);
     let usedFoods = currentFoods;
@@ -6107,17 +6121,33 @@ function lookupBarcode(barcode) {
       // falling back to parsing "40 g" out of the serving_size string. Anything missing, non-gram
       // (e.g. "2 cookies" with no weight), or implausible (<1g or >1500g) is treated as absent and
       // the panel falls back to the 100g convention the nutrition data itself uses.
+      // Liquids declare servings in ml; ml is treated 1:1 with grams, which is the convention the
+      // nutrition data itself uses (per-100g for beverages is per-100ml on the label). The unit is
+      // kept so the UI can SPEAK ml for liquids instead of forcing grams on a drink.
       let servingGrams = null;
+      let servingUnit = "g";
+      const sm = /([\d.]+)\s*(ml|g)/i.exec(data.product.serving_size || "");
       const sq = Number(data.product.serving_quantity);
-      if (sq >= 1 && sq <= 1500) servingGrams = Math.round(sq);
-      else {
-        const sm = /([\d.]+)\s*g/i.exec(data.product.serving_size || "");
-        const sg = sm ? Number(sm[1]) : NaN;
-        if (sg >= 1 && sg <= 1500) servingGrams = Math.round(sg);
+      if (sq >= 1 && sq <= 1500) {
+        servingGrams = Math.round(sq);
+        if (sm && sm[2].toLowerCase() === "ml") servingUnit = "ml";
+      } else if (sm) {
+        const sg = Number(sm[1]);
+        if (sg >= 1 && sg <= 1500) { servingGrams = Math.round(sg); servingUnit = sm[2].toLowerCase(); }
+      } else {
+        // Labels that state servings in litres or (fluid) ounces — common on drinks imported or
+        // American. Converted to grams here so everything downstream stays one currency.
+        const ss = data.product.serving_size || "";
+        let m2, sg2 = NaN, unit2 = "g";
+        if ((m2 = /([\d.]+)\s*l\b/i.exec(ss))) { sg2 = Number(m2[1]) * 1000; unit2 = "ml"; }
+        else if ((m2 = /([\d.]+)\s*fl\.?\s*oz/i.exec(ss))) { sg2 = Number(m2[1]) * 29.57; unit2 = "ml"; }
+        else if ((m2 = /([\d.]+)\s*oz\b/i.exec(ss))) { sg2 = Number(m2[1]) * 28.35; unit2 = "g"; }
+        if (sg2 >= 1 && sg2 <= 1500) { servingGrams = Math.round(sg2); servingUnit = unit2; }
       }
       return {
         name: name,
         servingGrams: servingGrams, // null when the product doesn't declare a usable one
+        servingUnit: servingUnit,   // "g" | "ml" — how the label states it; ml counts 1:1 as grams
         servingLabel: (data.product.serving_size || "").trim() || null,
         per100: {
           cal: n["energy-kcal_100g"] || 0,
@@ -6155,7 +6185,15 @@ function BarcodeLogger(props) {
   // "Log It" commits. Storing them as numbers looks tidier but breaks typing: clearing the field
   // coerces "" to 0, the box renders "0", and the next digit lands after it — "05" for 5. A string
   // can be empty mid-edit, which is the whole fix.
-  const [grams, setGrams] = useState("100");
+  const [grams, setGrams] = useState("100"); // the AMOUNT, in amtUnit — grams are derived
+  const [amtUnit, setAmtUnit] = useState("g");
+  function switchUnit(next) {
+    if (next === amtUnit) return;
+    const cur = Number(grams) || 0;
+    if (cur) setGrams(String(Math.round((cur * UNIT_TO_GRAMS[amtUnit] / UNIT_TO_GRAMS[next]) * 10) / 10));
+    setAmtUnit(next);
+  }
+  function amountInGrams() { return Math.max(0, (Number(grams) || 0) * UNIT_TO_GRAMS[amtUnit]); }
   const [macroEdits, setMacroEdits] = useState(null); // { cal, p, c, f } as strings, in macroBasis units
   // Which basis the editable macro fields are showing. Storage is ALWAYS per-100g — this only
   // changes what the fields display and how typed values are interpreted. US labels print per
@@ -6235,6 +6273,7 @@ function BarcodeLogger(props) {
         // Prefill with the product's declared serving when it has one — a bar or a scoop is far
         // more often eaten as "one serving" than as 100g. Falls back to the 100g convention.
         setGrams(String(result.servingGrams || 100));
+        setAmtUnit(result.servingUnit === "ml" ? "ml" : "g"); // a drink opens speaking mL
         // Seed the fields in the basis the person will compare against: per-serving when the
         // product declares one (matching the label), per-100g otherwise. Rounded the way a label
         // prints — "23.0" invites retyping; "23" doesn't.
@@ -6389,15 +6428,19 @@ function BarcodeLogger(props) {
         return h("div", { style: { display: "flex", gap: 6, marginTop: 8, marginBottom: 4 } },
           [[1, "1 serving"], [0.5, "½"], [0.25, "¼"]].map(function (pf) {
             const g = Math.round(product.servingGrams * pf[0]);
-            return h("button", { key: pf[1], className: "week-btn" + (Number(grams) === g ? " active" : ""), onClick: function () { setGrams(String(g)); } },
-              pf[1] + " (" + g + "g)");
+            const inUnit = Math.round((g / UNIT_TO_GRAMS[amtUnit]) * 10) / 10;
+            return h("button", { key: pf[1], className: "week-btn" + (Math.abs(amountInGrams() - g) < 1 ? " active" : ""), onClick: function () { setGrams(String(inUnit)); } },
+              pf[1] + " (" + inUnit + (amtUnit === "ml" ? "mL" : amtUnit) + ")");
           }));
       })(),
-      h("div", { className: "swap-form-row" },
-        h("input", { type: "number", inputMode: "numeric", value: grams, onChange: function (e) { setGrams(e.target.value); }, placeholder: "grams" }),
+      h("div", { className: "swap-form-row", style: { alignItems: "center", gap: 6 } },
+        h("input", { type: "number", inputMode: "decimal", value: grams, onChange: function (e) { setGrams(e.target.value); }, placeholder: "amount" }),
+        ["g", "oz", "ml"].map(function (u) {
+          return h("button", { key: u, className: "week-btn" + (amtUnit === u ? " active" : ""), style: { padding: "6px 10px" }, onClick: function () { switchUnit(u); } }, u === "ml" ? "mL" : u);
+        })
       ),
       (function () {
-        const g = Math.max(0, Number(grams) || 0);
+        const g = Math.round(amountInGrams());
         const per100 = editedPer100();
         const line = g > 0
           ? "Will log " + g + "g = " + Math.round(per100.cal * g / 100) + " cal · " +
@@ -6410,7 +6453,7 @@ function BarcodeLogger(props) {
         h("button", {
           className: "swap-save-btn", style: { flex: 1 },
           onClick: function () {
-            const gramsNum = Math.max(0, Number(grams) || 0);
+            const gramsNum = Math.round(amountInGrams());
             if (!gramsNum) return; // empty or zero grams: nothing meaningful to log
             const per100 = editedPer100();
             props.logFood(product.name, gramsNum, per100);
@@ -6453,20 +6496,35 @@ function WeekSelector(props) {
 // foods list, since that's the pool the underlying solver draws from to recompute exact grams.
 function MealSwapControl(props) {
   const [openRole, setOpenRole] = useState(null);
+  const items = props.items || [];
+  function roleLabel(role, idx) {
+    return items[idx] ? "Swap " + role + " (" + items[idx].name + ")" : "Swap " + role;
+  }
+  const fixedItem = items[3] || null;
+  const fixedFood = fixedItem ? props.allFoods.filter(function (f) { return f.name === fixedItem.name; })[0] : null;
   // Liked foods stay quick to reach at the top, but the rest of the database is right there too —
   // picking anything, liked or not, swaps immediately. No more needing to go "like" a food first in
   // a separate step before it's even selectable here.
-  const allInCat = openRole ? props.allFoods.filter(function (f) { return f.cat === openRole; }).sort(function (a, b) { return a.name.localeCompare(b.name); }) : [];
+  // The fixed slot offers same-category foods as the outgoing item (replacing a whey scoop
+  // suggests proteins, a broccoli suggests vegetables), falling back to everything.
+  const pickCat = openRole === "fixed" ? (fixedFood ? fixedFood.cat : null) : openRole;
+  const allInCat = openRole ? props.allFoods.filter(function (f) { return !pickCat || f.cat === pickCat; }).sort(function (a, b) { return a.name.localeCompare(b.name); }) : [];
   const likedInCat = allInCat.filter(function (f) { return props.likedFoods.indexOf(f.name) !== -1; });
   const otherInCat = allInCat.filter(function (f) { return props.likedFoods.indexOf(f.name) === -1; });
   return h("div", { style: { marginTop: 10 } },
     h("div", { style: { display: "flex", gap: 6, flexWrap: "wrap" } },
-      ["protein", "carb", "fat"].map(function (role) {
+      ["protein", "carb", "fat"].map(function (role, idx) {
         return h("button", {
           key: role, className: "ex-action-btn",
           onClick: function () { setOpenRole(openRole === role ? null : role); },
-        }, "Swap " + role);
-      })
+        }, roleLabel(role, idx));
+      }),
+      // The fixed item (items[3]) — a vegetable, or a meal's second protein — is a real
+      // ingredient someone may want gone; it gets its own button instead of being unreachable.
+      fixedItem && h("button", {
+        className: "ex-action-btn",
+        onClick: function () { setOpenRole(openRole === "fixed" ? null : "fixed"); },
+      }, "Swap " + fixedItem.name)
     ),
     openRole && h("select", {
       className: "search-input", style: { marginTop: 6 }, value: "",
@@ -6477,11 +6535,11 @@ function MealSwapControl(props) {
         setOpenRole(null);
       },
     },
-      h("option", { value: "" }, "Choose a " + openRole + "..."),
+      h("option", { value: "" }, openRole === "fixed" ? "Replace " + (fixedItem ? fixedItem.name : "") + " with..." : "Choose a " + openRole + "..."),
       likedInCat.length > 0 && h("optgroup", { label: "Liked" },
         likedInCat.map(function (f) { return h("option", { key: f.name, value: f.name }, f.name); })
       ),
-      otherInCat.length > 0 && h("optgroup", { label: "All " + openRole + "s" },
+      otherInCat.length > 0 && h("optgroup", { label: openRole === "fixed" ? "All options" : "All " + openRole + "s" },
         otherInCat.map(function (f) { return h("option", { key: f.name, value: f.name }, f.name); })
       )
     )
@@ -7075,7 +7133,7 @@ function NutritionTab(props) {
         const mealIsSolvable = !!(m.items && m.items.length >= 3 && (m.slot || props.isCustomProgram));
         const mealSwapControl = mealIsSolvable && !isFutureWeek && !isFutureDay
           ? h(MealSwapControl, {
-              allFoods: props.allFoods, likedFoods: (props.likedFoods && props.likedFoods[m.id]) || [],
+              allFoods: props.allFoods, likedFoods: (props.likedFoods && props.likedFoods[m.id]) || [], items: m.items,
               onSwap: function (role, foodName) { props.swapIngredient(idx, role, foodName); },
               onAutoLike: function (foodName) { props.toggleLiked(m.id, foodName); },
             })
@@ -8179,13 +8237,21 @@ function FoodSearchLog(props) {
   // foods carry one) or the 100g convention. Grams stays hand-editable — string-typed while
   // editing, the leading-zero rule.
   const [picked, setPicked] = useState(null);
-  const [pickGrams, setPickGrams] = useState("100");
+  const [pickGrams, setPickGrams] = useState("100"); // amount in pickUnit; grams derived
+  const [pickUnit, setPickUnit] = useState("g");
+  function switchPickUnit(next) {
+    if (next === pickUnit) return;
+    const cur = Number(pickGrams) || 0;
+    if (cur) setPickGrams(String(Math.round((cur * UNIT_TO_GRAMS[pickUnit] / UNIT_TO_GRAMS[next]) * 10) / 10));
+    setPickUnit(next);
+  }
+  function pickAmountInGrams() { return Math.max(0, (Number(pickGrams) || 0) * UNIT_TO_GRAMS[pickUnit]); }
   function openPick(f) {
     const s = servingOf(f);
-    setPicked(f); setPickGrams(String(s ? s.g : 100));
+    setPicked(f); setPickGrams(String(s ? s.g : 100)); setPickUnit("g");
   }
   function logPicked() {
-    const g = Math.max(0, Number(pickGrams) || 0);
+    const g = Math.round(pickAmountInGrams());
     if (!g || !picked) return;
     props.logFood(picked.name, g, { cal: picked.cal, p: picked.p, c: picked.c, f: picked.f });
     setPicked(null); setQuery("");
@@ -8233,19 +8299,23 @@ function FoodSearchLog(props) {
     ),
     picked && (function () {
       const s = servingOf(picked);
-      const g = Math.max(0, Number(pickGrams) || 0);
+      const g = Math.round(pickAmountInGrams());
       return h("div", { className: "rate-panel", style: { marginTop: 8 } },
         h("p", { style: { margin: "0 0 6px" } }, picked.name),
         s ? h("div", { style: { display: "flex", gap: 6, marginBottom: 6 } },
           [[1, s.label], [0.5, "½"], [0.25, "¼"]].map(function (pf) {
             const pg = Math.round(s.g * pf[0]);
-            return h("button", { key: pf[1], className: "week-btn" + (g === pg ? " active" : ""), onClick: function () { setPickGrams(String(pg)); } },
-              pf[1] + " (" + pg + "g)");
+            const inUnit = Math.round((pg / UNIT_TO_GRAMS[pickUnit]) * 10) / 10;
+            return h("button", { key: pf[1], className: "week-btn" + (Math.abs(g - pg) < 1 ? " active" : ""), onClick: function () { setPickGrams(String(inUnit)); } },
+              pf[1] + " (" + inUnit + (pickUnit === "ml" ? "mL" : pickUnit) + ")");
           }))
         : h("p", { style: { fontSize: 11, color: "#737373", margin: "0 0 6px" } },
             "No serving size on file for this food — enter grams, or set one by editing it under Your Foods."),
-        h("div", { className: "swap-form-row" },
-          h("input", { type: "number", inputMode: "numeric", value: pickGrams, onChange: function (e) { setPickGrams(e.target.value); }, placeholder: "grams" })),
+        h("div", { className: "swap-form-row", style: { alignItems: "center", gap: 6 } },
+          h("input", { type: "number", inputMode: "decimal", value: pickGrams, onChange: function (e) { setPickGrams(e.target.value); }, placeholder: "amount" }),
+          ["g", "oz", "ml"].map(function (u) {
+            return h("button", { key: u, className: "week-btn" + (pickUnit === u ? " active" : ""), style: { padding: "6px 10px" }, onClick: function () { switchPickUnit(u); } }, u === "ml" ? "mL" : u);
+          })),
         h("p", { style: { fontSize: 11, color: "#737373", margin: "4px 0 8px" } },
           g > 0 ? "Will log " + g + "g = " + Math.round(picked.cal * g / 100) + " cal · " +
             (Math.round(picked.p * g / 10) / 10) + "p / " + (Math.round(picked.c * g / 10) / 10) + "c / " + (Math.round(picked.f * g / 10) / 10) + "f"
