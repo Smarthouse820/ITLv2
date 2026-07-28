@@ -2720,7 +2720,7 @@ function programStateHasRealData(state) {
 // The build currently running. Surfaced in Settings -> Account, because "is the deploy actually
 // live?" has been the real answer to several apparent bugs, and inferring it from behaviour is slow
 // and error-prone. Compared against version.json by the update check below.
-const APP_VERSION = "2026-07-27T05:15:00";
+const APP_VERSION = "2026-07-27T05:25:00";
 
 // Signing out has to be unconditional, because every failure mode here ends the same way: a person
 // tapping a button that does nothing.
@@ -5544,11 +5544,14 @@ function WorkoutsTab(props) {
           // Manual set add/subtract. Rides the SAME setsOverride the autoregulation volume-accept
           // writes, so RIR targets, deload halving, and completion all just follow. While coached,
           // adjustSets routes to a request.
-          !isSkipped && h("span", { style: { display: "inline-flex", alignItems: "center", gap: 4, fontSize: 12, color: "#a3a3a3" } },
-            "Sets: " + setsToday,
-            h("button", { className: "ex-action-btn", style: { padding: "2px 9px" }, "aria-label": "one set fewer",
+          // Sits inside .ex-actions, whose buttons default to flex-grow with a 110px floor —
+          // exactly wrong for a compact stepper. This row takes the full width and pins its
+          // buttons to fixed 44px squares so the label never wraps and the +/- never balloon.
+          !isSkipped && h("span", { style: { flex: "1 1 100%", display: "flex", alignItems: "center", gap: 8, fontSize: 12, color: "#a3a3a3", margin: "2px 0", whiteSpace: "nowrap" } },
+            h("span", null, "Sets: " + setsToday),
+            h("button", { className: "ex-action-btn", style: { flex: "0 0 auto", minWidth: 0, width: 44, padding: "6px 0" }, "aria-label": "one set fewer",
               onClick: function () { props.adjustSets(ex.id, -1); } }, "\u2212"),
-            h("button", { className: "ex-action-btn", style: { padding: "2px 9px" }, "aria-label": "one set more",
+            h("button", { className: "ex-action-btn", style: { flex: "0 0 auto", minWidth: 0, width: 44, padding: "6px 0" }, "aria-label": "one set more",
               onClick: function () { props.adjustSets(ex.id, 1); } }, "+")),
           h("button", {
             className: "ex-action-btn", onClick: function () {
