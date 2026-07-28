@@ -2720,7 +2720,7 @@ function programStateHasRealData(state) {
 // The build currently running. Surfaced in Settings -> Account, because "is the deploy actually
 // live?" has been the real answer to several apparent bugs, and inferring it from behaviour is slow
 // and error-prone. Compared against version.json by the update check below.
-const APP_VERSION = "2026-07-27T04:45:00";
+const APP_VERSION = "2026-07-27T05:15:00";
 
 // Signing out has to be unconditional, because every failure mode here ends the same way: a person
 // tapping a button that does nothing.
@@ -4238,6 +4238,32 @@ function App() {
     saveProgram({ extraDeloadWeeks: next, deloadRecommendation: null });
     showToast("Week " + prog.deloadRecommendation.forWeek + " scheduled as a deload");
   }
+  function adjustSets(exerciseId, delta) {
+    const exState = effectiveExerciseState[exerciseId] || {};
+    const exDef = allExercises(def.exercises).filter(function (e) { return e.id === exerciseId; })[0];
+    if (!exDef) return;
+    const cur = effectiveSets(exDef, exState);
+    const loggedThisWeek = ((prog.logs[prog.currentWeek] || {})[exerciseId] || []).filter(function (s) { return s && s.reps != null; }).length;
+    const next = Math.max(1, Math.min(8, cur + delta));
+    if (next === cur) return;
+    if (next < loggedThisWeek) { showToast("You've already logged " + loggedThisWeek + " sets this week — can't go below that until next week."); return; }
+    if (myCoachRow) {
+      const reqPayload = {}; reqPayload[exerciseId] = { setsOverride: next };
+      submitChangeRequest({
+        kind: "exercise_state", program_key: data.activeProgram, effective_week: prog.currentWeek,
+        payload: reqPayload,
+        summary: exDef.name + ": " + cur + " \u2192 " + next + " sets",
+      });
+      return;
+    }
+    const newExerciseState = Object.assign({}, effectiveExerciseState);
+    newExerciseState[exerciseId] = Object.assign({}, exState, { setsOverride: next });
+    const newData = Object.assign({}, data,
+      isSharedProgram ? { sharedExerciseState: newExerciseState }
+        : { programs: Object.assign({}, data.programs, { [data.activeProgram]: Object.assign({}, prog, { exerciseState: newExerciseState }) }) });
+    save(newData);
+    showToast(exDef.name + ": " + next + " sets" + (next > cur ? " \u2014 the new set has no history yet; RIR targets fall back to the rep range until it does" : ""));
+  }
   function dismissDeloadRecommendation() {
     saveProgram({ deloadRecommendation: null });
   }
@@ -4247,6 +4273,18 @@ function App() {
   function acceptVolumeIncreaseRecommendation(exerciseId) {
     const rec = (prog.volumeIncreaseRecommendations || []).filter(function (r) { return r.exerciseId === exerciseId; })[0];
     if (!rec) return;
+    // While coached, accepting the app's own suggestion is still a plan change the coach governs —
+    // it becomes a request carrying the recommendation, and the suggestion stays pending until
+    // answered (an approved request applies it through the normal pipeline).
+    if (myCoachRow) {
+      const reqPayload = {}; reqPayload[exerciseId] = { setsOverride: rec.currentSets + 1 };
+      submitChangeRequest({
+        kind: "exercise_state", program_key: data.activeProgram, effective_week: prog.currentWeek,
+        payload: reqPayload,
+        summary: "Accept app suggestion: " + (rec.name || exerciseId) + " " + rec.currentSets + " \u2192 " + (rec.currentSets + 1) + " sets",
+      });
+      return;
+    }
     const newExerciseState = Object.assign({}, effectiveExerciseState);
     const curExState = newExerciseState[exerciseId] || {};
     newExerciseState[exerciseId] = Object.assign({}, curExState, { setsOverride: rec.currentSets + 1 });
@@ -5213,7 +5251,7 @@ function App() {
               setExerciseDifficulty: setExerciseDifficulty, color: def.color,
               targetHR: (data.customProgramConfig && data.customProgramConfig.age) ? Math.round((220 - data.customProgramConfig.age) * 0.65) : null,
               supersetGroups: prog.supersetGroups, createSuperset: createSuperset, removeSuperset: removeSuperset,
-              coachManaged: !!myCoachRow, tierHasTraining: tierHasTraining,
+              coachManaged: !!myCoachRow, tierHasTraining: tierHasTraining, adjustSets: adjustSets,
               deloadRecommendation: prog.deloadRecommendation, acceptDeloadRecommendation: acceptDeloadRecommendation,
               dismissDeloadRecommendation: dismissDeloadRecommendation, readinessSignal: readinessSignal,
               volumeIncreaseRecommendations: prog.volumeIncreaseRecommendations,
@@ -5503,6 +5541,15 @@ function WorkoutsTab(props) {
             className: "ex-action-btn",
             onClick: function () { props.clearWeekSwap(ex.originalExercise.id); },
           }, "Revert to original now"),
+          // Manual set add/subtract. Rides the SAME setsOverride the autoregulation volume-accept
+          // writes, so RIR targets, deload halving, and completion all just follow. While coached,
+          // adjustSets routes to a request.
+          !isSkipped && h("span", { style: { display: "inline-flex", alignItems: "center", gap: 4, fontSize: 12, color: "#a3a3a3" } },
+            "Sets: " + setsToday,
+            h("button", { className: "ex-action-btn", style: { padding: "2px 9px" }, "aria-label": "one set fewer",
+              onClick: function () { props.adjustSets(ex.id, -1); } }, "\u2212"),
+            h("button", { className: "ex-action-btn", style: { padding: "2px 9px" }, "aria-label": "one set more",
+              onClick: function () { props.adjustSets(ex.id, 1); } }, "+")),
           h("button", {
             className: "ex-action-btn", onClick: function () {
               const next = Object.assign({}, historyOpen);
@@ -7514,6 +7561,7 @@ function CoachPrescriptionEditor(props) {
   const [editingExId, setEditingExId] = useState(null);
   const [exWeight, setExWeight] = useState(""); const [exRepLow, setExRepLow] = useState(""); const [exRepHigh, setExRepHigh] = useState("");
   const [exName, setExName] = useState(""); // substitute exercise name — free text, with pool suggestions
+  const [exSets, setExSets] = useState("");
   const [copyTargets, setCopyTargets] = useState({}); // { [sourceDay]: targetDay } for the copy selects
 
   function toggleDay(d) {
@@ -7563,6 +7611,7 @@ function CoachPrescriptionEditor(props) {
       change.repLowOverride = Math.max(1, Math.round(Number(exRepLow) || 0));
       change.repHighOverride = Math.max(change.repLowOverride, Math.round(Number(exRepHigh) || 0));
     }
+    if (exSets !== "") change.setsOverride = Math.max(1, Math.min(8, Math.round(Number(exSets) || 0)));
     // Replacing the movement itself: nameOverride is the same field the client's own permanent
     // swap writes, so it flows through the existing exercise_state merge untouched. "__original"
     // is the revert sentinel from the UI below — it prescribes nameOverride: null.
@@ -7796,7 +7845,7 @@ function CoachPrescriptionEditor(props) {
             const isEditing = editingExId === ex.id;
             return h("div", { key: ex.id, style: { borderTop: "1px solid #1a1a1a", padding: "6px 0" } },
               h("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "center", cursor: "pointer" },
-                onClick: function () { setEditingExId(isEditing ? null : ex.id); setExWeight(""); setExRepLow(""); setExRepHigh(""); setExName(""); } },
+                onClick: function () { setEditingExId(isEditing ? null : ex.id); setExWeight(""); setExRepLow(""); setExRepHigh(""); setExName(""); setExSets(""); } },
                 h("span", { style: { fontSize: 12 } }, ex.name + (st.nameOverride ? " \u00b7 subbed: " + st.nameOverride : "")),
                 h("span", { style: { fontSize: 11, color: pres ? "#4eba6f" : "#737373", textAlign: "right" } },
                   curWeight + "lb \u00b7 " + ex.sets + "\u00d7" + curRange + (pres ? " \u2192 " + [pres.nameOverride !== undefined ? (pres.nameOverride === null ? "original name" : pres.nameOverride) : null, pres.weight != null ? pres.weight + "lb" : null, pres.repLowOverride != null ? pres.repLowOverride + "\u2013" + pres.repHighOverride : null].filter(Boolean).join(" / ") + " queued" : ""))),
@@ -7829,7 +7878,10 @@ function CoachPrescriptionEditor(props) {
                       onChange: function (e) { setExRepLow(e.target.value); } }, { style: inputStyle }))),
                   h("label", { style: { flex: 1, fontSize: 11, color: "#737373" } }, "rep high",
                     h("input", Object.assign({ type: "number", inputMode: "numeric", min: "1", value: exRepHigh, placeholder: String(ex.repHigh),
-                      onChange: function (e) { setExRepHigh(e.target.value); } }, { style: inputStyle })))),
+                      onChange: function (e) { setExRepHigh(e.target.value); } }, { style: inputStyle }))),
+                  h("label", { style: { flex: 1, fontSize: 11, color: "#737373" } }, "sets",
+                    h("input", Object.assign({ type: "number", inputMode: "numeric", min: "1", max: "8", value: exSets, placeholder: String(clientExState.setsOverride != null ? clientExState.setsOverride : ex.sets),
+                      onChange: function (e) { setExSets(e.target.value); } }, { style: inputStyle })))),
                 h("input", Object.assign({ placeholder: "Note to client (optional)", value: note,
                   onChange: function (e) { setNote(e.target.value); } }, { style: Object.assign({}, inputStyle, { marginBottom: 6 }) })),
                 h("button", { className: "swap-save-btn", style: { width: "100%" }, disabled: busy || weekIsPast, onClick: function () { prescribeExercise(ex); } },
