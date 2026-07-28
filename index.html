@@ -2261,6 +2261,492 @@ function computePerformanceStall(exercisesDef, logsByWeek, uptoWeek, windowSize)
   return { stalledCount: stalled, consideredCount: considered, ratio: considered > 0 ? stalled / considered : 0 };
 }
 
+// ---------------------------------------------------------------------------
+// §8b INSIGHT ENGINE — analyzeProgram(data, def, opts) -> findings[]
+// ---------------------------------------------------------------------------
+// Deterministic, pure, on-device. No LLM, no network, and no clock of its own:
+// `opts.today` is injected, so the same saved data always produces the same
+// findings. That injection is what makes the whole thing testable.
+//
+// THREE GROUND RULES, settled at design time:
+//   1. Findings INFORM, never act. The deload / volume-increase / RIR machinery
+//      stays the only thing that changes a prescription. Nothing here writes.
+//   2. Where a finding overlaps a system that already exists, it REFERENCES that
+//      system instead of restating it (`references` on the finding, and the
+//      deload-pending clause in the under-fuel sentence).
+//   3. Thresholds are FIXED, DOCUMENTED CONSTANTS in v1 — INSIGHT_THRESHOLDS
+//      below. Nothing adapts per user until there's real data to tune against.
+//
+// A NOTE ON TIME, because it bounds what this can honestly claim:
+// training logs are keyed by PROGRAM WEEK (`prog.logs[week]`), and a week
+// advances only when the user completes one — so a week is not a fixed number of
+// days. Nutrition and weight are keyed by CALENDAR DATE. Nothing in the saved
+// data maps one onto the other for weeks already gone by, and logged sets carry
+// no timestamp to rebuild it from. So a cross-domain finding joins its two sides
+// only at "recently": a training window ending at the last completed week, and a
+// nutrition window ending today. Both describe the present, and the evidence
+// carries each side in its own units, so the claim stays checkable rather than
+// implying a precision the data doesn't support.
+//
+// Finding shape: { id, domain, domains, tier, severity, title, sentence,
+//                  evidence, references, sortKey }
+//   severity  1..3, 3 strongest. Numeric so coach triage sorts by max directly.
+//   tier      DERIVED from the domains crossed, never set per finding: anything
+//             touching nutrition is tier 3, training-only is tier 2.
+//   evidence  { weeks, numbers } — every claim carries what it was computed from.
+
+const INSIGHT_THRESHOLDS = {
+  // --- training stall (shared by under-fuel and per-lift plateau) ---
+  STALL_WINDOW_WEEKS: 3,        // same window the deload system's stall check uses
+  BROAD_STALL_RATIO: 0.5,       // >half the judgeable lifts stalled = program-wide, not per-lift
+  BROAD_STALL_SEVERE_RATIO: 0.67,
+  MIN_CONSIDERED_LIFTS: 2,      // below this there's no "pattern", just one lift
+
+  // --- fuelling ---
+  FUEL_WINDOW_DAYS: 14,
+  MIN_FOOD_DAYS: 5,             // logged days needed in the window before averaging means anything
+  UNDERFUEL_PCT: 0.10,          // 10% under target is past normal logging slop
+  UNDERFUEL_SEVERE_PCT: 0.15,
+
+  // --- weight trend ---
+  WEIGHT_WINDOW_DAYS: 14,
+  MIN_WEIGHT_DAYS: 8,           // matches computeAdaptiveTDEE's own floor, deliberately
+  CUT_MIN_WEEKLY_LOSS_LB: 0.25, // slower than this on a cut isn't distinguishable from noise
+  BULK_MIN_WEEKLY_GAIN_LB: 0.15,
+  MAINTAIN_DRIFT_LB: 0.75,      // either direction
+
+  // --- adherence ---
+  ADHERENCE_WEEKS: 3,
+  MIN_ADHERENCE_WEEKS: 2,
+  ADHERENCE_RATIO: 0.80,
+  ADHERENCE_SEVERE_RATIO: 0.60,
+
+  // --- weekend variance ---
+  WEEKEND_WINDOW_DAYS: 28,
+  MIN_WEEKEND_DAYS: 2,
+  MIN_WEEKDAY_DAYS: 4,
+  WEEKEND_EXCESS_PCT: 0.20,
+  WEEKEND_SEVERE_PCT: 0.35,
+};
+
+// The three built-in programs encode their goal in the program itself; Custom
+// carries it explicitly from the wizard. Mapped rather than inferred so a
+// weight-trend finding can speak about a goal on every program, not just Custom.
+const INSIGHT_PROGRAM_GOAL = { cutting: "cut", cruise: "maintain", hypertrophy: "bulk" };
+
+// Tier follows the DOMAINS CROSSED, not the individual finding: touching
+// nutrition at all puts a finding behind tier 3, training-only sits at tier 2.
+// Weight-trend counts as nutrition — the trend is nutrition's outcome measure,
+// and the action it points at (recalculating the target) is a nutrition action.
+function insightTierFor(domains) {
+  return domains.indexOf("nutrition") !== -1 ? 3 : 2;
+}
+
+// Calendar date keys walking backward from `todayK`, most recent first. Built off
+// localDateKey (not toISOString) for the same timezone reason documented there.
+function insightDateKeysBack(todayK, days) {
+  const out = [];
+  const d = new Date(todayK + "T00:00:00");
+  for (let i = 0; i < days; i++) {
+    out.push(localDateKey(d));
+    d.setDate(d.getDate() - 1);
+  }
+  return out;
+}
+
+// Calories actually logged on one date. Deliberately the same rule as the app's
+// own loggedCaloriesForDate: read the free-form food log only (each entry carries
+// its own per-100g data at the time it was logged), never the meal-checklist
+// percentages — meal content changes when the rotation advances, so a checked-off
+// meal from weeks ago can't be reconstructed reliably. Entries whose food can't
+// be resolved contribute nothing rather than guessing.
+function insightCaloriesForDate(prog, dateKey, foods) {
+  const entries = (prog.foodLog || {})[dateKey] || [];
+  return entries.reduce(function (a, entry) {
+    const per100 = entry.per100 || foods.filter(function (f) { return f.name === entry.name; })[0];
+    if (!per100) return a;
+    return a + (per100.cal * entry.grams) / 100;
+  }, 0);
+}
+
+// Days inside the window that have at least one food entry, with each day's
+// calories. Days with no entries are EXCLUDED rather than counted as zero: an
+// unlogged day is missing data, not a fast, and averaging zeros in would
+// manufacture an under-fuelling finding out of someone simply not logging.
+function insightFoodDays(prog, todayK, windowDays, foods) {
+  const days = [];
+  insightDateKeysBack(todayK, windowDays).forEach(function (k) {
+    const entries = (prog.foodLog || {})[k] || [];
+    if (entries.length === 0) return;
+    days.push({ date: k, cal: insightCaloriesForDate(prog, k, foods) });
+  });
+  const total = days.reduce(function (a, d) { return a + d.cal; }, 0);
+  return { days: days, count: days.length, avgCal: days.length > 0 ? total / days.length : 0 };
+}
+
+// Smoothed weight trend over the window, in lb/week. Same two-half comparison
+// computeAdaptiveTDEE already uses, on purpose — this must agree with the number
+// the user is shown there rather than offering a second, differently-computed
+// truth. It inherits the same simplification: logged entries are treated as
+// consecutive days when converting to a weekly rate, so a sparsely-logged window
+// reports a slightly compressed span.
+function insightWeightTrend(prog, todayK, windowDays) {
+  const logs = prog.dailyWeightLogs || {};
+  const keys = insightDateKeysBack(todayK, windowDays)
+    .filter(function (k) { return logs[k] != null; })
+    .sort();
+  if (keys.length < INSIGHT_THRESHOLDS.MIN_WEIGHT_DAYS) return null;
+  const mid = Math.floor(keys.length / 2);
+  function avg(ks) { return ks.reduce(function (a, k) { return a + logs[k]; }, 0) / ks.length; }
+  const firstAvg = avg(keys.slice(0, mid));
+  const secondAvg = avg(keys.slice(mid));
+  const halfSpanDays = keys.length / 2;
+  return {
+    weeklyRateLb: Math.round((((secondAvg - firstAvg) / halfSpanDays) * 7) * 100) / 100,
+    firstAvg: Math.round(firstAvg * 10) / 10,
+    secondAvg: Math.round(secondAvg * 10) / 10,
+    daysUsed: keys.length,
+  };
+}
+
+// ---- Finding 1: under-fuelling stall [training x nutrition] ----------------
+// The one finding that genuinely crosses domains, and the reason the time note
+// at the top of this section exists. Fires only when BOTH sides are true at once:
+// training has broadly stopped moving, and intake over the recent window sits
+// meaningfully under the planned target. Neither half alone says this.
+function insightUnderFuelStall(ctx) {
+  const T = INSIGHT_THRESHOLDS;
+  if (ctx.lastCompletedWeek < T.STALL_WINDOW_WEEKS) return null;
+  if (ctx.plannedCalories == null || ctx.plannedCalories <= 0) return null;
+  const stall = computePerformanceStall(ctx.def.exercises, ctx.prog.logs || {}, ctx.lastCompletedWeek, T.STALL_WINDOW_WEEKS);
+  if (stall.consideredCount < T.MIN_CONSIDERED_LIFTS) return null;
+  if (stall.ratio < T.BROAD_STALL_RATIO) return null;
+  if (ctx.fuel.count < T.MIN_FOOD_DAYS) return null;
+  const pctBelow = (ctx.plannedCalories - ctx.fuel.avgCal) / ctx.plannedCalories;
+  if (pctBelow < T.UNDERFUEL_PCT) return null;
+
+  const severe = stall.ratio >= T.BROAD_STALL_SEVERE_RATIO && pctBelow >= T.UNDERFUEL_SEVERE_PCT;
+  const avgCal = Math.round(ctx.fuel.avgCal);
+  const pct = Math.round(pctBelow * 100);
+  // Referencing, not duplicating: if the deload system has already put a
+  // recommendation on the table, this points at it instead of implying the user
+  // is being told about the stall for the first time.
+  const deloadPending = !!ctx.prog.deloadRecommendation;
+  const sentence =
+    stall.stalledCount + " of " + stall.consideredCount + " lifts with enough history haven't set a new best in " +
+    T.STALL_WINDOW_WEEKS + " weeks, and over the last " + ctx.fuel.count + " logged days intake averaged " +
+    avgCal + " cal against a " + ctx.plannedCalories + " cal target — " + pct + "% under. " +
+    (deloadPending
+      ? "A deload recommendation is already waiting on the training side; the fuelling gap is the part that isn't covered there."
+      : "Under-fuelling and a stall this broad tend to travel together.");
+
+  return {
+    id: "under_fuel_stall",
+    domains: ["training", "nutrition"],
+    severity: severe ? 3 : 2,
+    title: "Training has stalled while intake is running under target",
+    sentence: sentence,
+    evidence: {
+      weeks: {
+        window: T.STALL_WINDOW_WEEKS,
+        uptoWeek: ctx.lastCompletedWeek,
+        stalledLifts: stall.stalledCount,
+        consideredLifts: stall.consideredCount,
+      },
+      numbers: {
+        avgLoggedCalories: avgCal,
+        plannedCalories: ctx.plannedCalories,
+        pctBelowTarget: pct,
+        foodDaysLogged: ctx.fuel.count,
+        foodWindowDays: T.FUEL_WINDOW_DAYS,
+      },
+    },
+    references: deloadPending ? ["deloadRecommendation"] : [],
+    sortKey: "under_fuel_stall",
+  };
+}
+
+// ---- Finding 2: weight-trend divergence [weight x goal] -------------------
+// The trend is going somewhere other than where the stated goal points. Says so
+// and stops — recalculating the target is adaptive TDEE's job, and it already
+// asks for explicit acceptance before changing anything.
+function insightWeightTrendDivergence(ctx) {
+  const T = INSIGHT_THRESHOLDS;
+  if (!ctx.goal || !ctx.trend) return null;
+  const rate = ctx.trend.weeklyRateLb;
+  let diverging = false, severe = false, expectation = "";
+
+  if (ctx.goal === "cut") {
+    diverging = rate > -T.CUT_MIN_WEEKLY_LOSS_LB;
+    severe = rate > 0;
+    expectation = "a cut expects the trend to fall";
+  } else if (ctx.goal === "bulk") {
+    diverging = rate < T.BULK_MIN_WEEKLY_GAIN_LB;
+    severe = rate < 0;
+    expectation = "a bulk expects the trend to rise";
+  } else if (ctx.goal === "maintain") {
+    diverging = Math.abs(rate) > T.MAINTAIN_DRIFT_LB;
+    severe = Math.abs(rate) > T.MAINTAIN_DRIFT_LB * 1.5;
+    expectation = "maintenance expects the trend to hold flat";
+  }
+  if (!diverging) return null;
+
+  const dir = rate > 0 ? "up" : (rate < 0 ? "down" : "flat");
+  return {
+    id: "weight_trend_divergence",
+    domains: ["nutrition"],
+    severity: severe ? 3 : 2,
+    title: "Weight trend isn't tracking the goal",
+    sentence:
+      "Over " + ctx.trend.daysUsed + " logged weigh-ins the trend is " + dir + " about " +
+      Math.abs(rate) + " lb/week (" + ctx.trend.firstAvg + " to " + ctx.trend.secondAvg + " lb), and " +
+      expectation + ". The adaptive TDEE estimate is built from these same weigh-ins and can " +
+      "recalculate the target when you're ready.",
+    evidence: {
+      weeks: { uptoWeek: ctx.lastCompletedWeek },
+      numbers: {
+        weeklyRateLb: rate,
+        firstHalfAvgLb: ctx.trend.firstAvg,
+        secondHalfAvgLb: ctx.trend.secondAvg,
+        weighInsUsed: ctx.trend.daysUsed,
+        goal: ctx.goal,
+      },
+    },
+    references: ["adaptiveTDEE"],
+    sortKey: "weight_trend_divergence",
+  };
+}
+
+// ---- Finding 3: adherence gap [prescribed x logged] ----------------------
+// Sets prescribed versus sets actually logged, across recent COMPLETED weeks —
+// the in-progress week is excluded so a week that's simply mid-flight never
+// reads as a shortfall. Logged sets are counted across every id present in that
+// week's logs, including this-week substitutes logging under their own altId,
+// so swapping an exercise is never mistaken for skipping it.
+function insightAdherenceGap(ctx) {
+  const T = INSIGHT_THRESHOLDS;
+  const weeks = [];
+  for (let w = ctx.lastCompletedWeek; w >= 1 && weeks.length < T.ADHERENCE_WEEKS; w--) weeks.unshift(w);
+  if (weeks.length < T.MIN_ADHERENCE_WEEKS) return null;
+
+  const flat = allExercises(ctx.def.exercises);
+  let prescribed = 0, logged = 0;
+  const perWeek = [];
+  weeks.forEach(function (w) {
+    const weekLogs = (ctx.prog.logs || {})[w] || {};
+    const weekSkipped = (ctx.prog.skipped || {})[w] || {};
+    let wPrescribed = 0;
+    flat.forEach(function (ex) {
+      if (weekSkipped[ex.id]) return; // a deliberately skipped exercise was never owed
+      wPrescribed += effectiveSets(ex, ctx.exerciseStateSource[ex.id] || {});
+    });
+    let wLogged = 0;
+    Object.keys(weekLogs).forEach(function (exId) {
+      wLogged += (weekLogs[exId] || []).filter(function (s) { return s && s.reps != null; }).length;
+    });
+    prescribed += wPrescribed;
+    logged += wLogged;
+    perWeek.push({ week: w, prescribed: wPrescribed, logged: wLogged });
+  });
+  if (prescribed <= 0) return null;
+
+  const ratio = logged / prescribed;
+  if (ratio >= T.ADHERENCE_RATIO) return null;
+  return {
+    id: "adherence_gap",
+    domains: ["training"],
+    severity: ratio < T.ADHERENCE_SEVERE_RATIO ? 3 : 2,
+    title: "Logged volume is running below what's prescribed",
+    sentence:
+      "Across weeks " + weeks[0] + "–" + weeks[weeks.length - 1] + ", " + logged + " of " + prescribed +
+      " prescribed sets were logged (" + Math.round(ratio * 100) + "%). Progression is computed from " +
+      "logged sets, so the gap changes what the program asks for next.",
+    evidence: {
+      weeks: { window: weeks, perWeek: perWeek, uptoWeek: ctx.lastCompletedWeek },
+      numbers: { setsLogged: logged, setsPrescribed: prescribed, adherencePct: Math.round(ratio * 100) },
+    },
+    references: [],
+    sortKey: "adherence_gap",
+  };
+}
+
+// ---- Finding 4: per-lift plateau, with peer context [training] -----------
+// One lift stuck while its peers keep moving. Deliberately suppressed whenever
+// the stall is BROAD: at that point it's a program-wide pattern that the deload
+// system and finding 1 already speak to, and repeating it per-lift would be the
+// duplication ground rule 2 forbids. The stall DECISION comes from
+// exerciseIsStalled — the same primitive the deload check uses — and the top-set
+// values are re-read here only to carry as evidence.
+function insightLiftPlateaus(ctx) {
+  const T = INSIGHT_THRESHOLDS;
+  if (ctx.lastCompletedWeek < T.STALL_WINDOW_WEEKS) return [];
+  const logs = ctx.prog.logs || {};
+  const stall = computePerformanceStall(ctx.def.exercises, logs, ctx.lastCompletedWeek, T.STALL_WINDOW_WEEKS);
+  if (stall.consideredCount < T.MIN_CONSIDERED_LIFTS) return [];
+  if (stall.ratio >= T.BROAD_STALL_RATIO) return []; // broad, not per-lift — see above
+
+  const out = [];
+  allExercises(ctx.def.exercises).forEach(function (ex) {
+    const vals = [];
+    for (let w = ctx.lastCompletedWeek - T.STALL_WINDOW_WEEKS + 1; w <= ctx.lastCompletedWeek; w++) {
+      if (w < 1) return;
+      const v = topSetValueForWeek(logs[w], ex.id, ex.bodyweight);
+      if (v == null) return; // incomplete window — not judgeable, same rule as computePerformanceStall
+      vals.push(v);
+    }
+    if (!exerciseIsStalled(logs, ex.id, ex.bodyweight, ctx.lastCompletedWeek, T.STALL_WINDOW_WEEKS)) return;
+    const latest = vals[vals.length - 1];
+    const bestEarlier = Math.max.apply(null, vals.slice(0, vals.length - 1));
+    const declining = latest < bestEarlier;
+    const state = ctx.exerciseStateSource[ex.id] || {};
+    const name = state.nameOverride || ex.name;
+    const unit = ex.bodyweight ? "reps" : "lb";
+    const movingPeers = stall.consideredCount - stall.stalledCount;
+    out.push({
+      id: "lift_plateau:" + ex.id,
+      domains: ["training"],
+      severity: declining ? 3 : 2,
+      title: name + " has plateaued",
+      sentence:
+        name + "'s top set has gone " + (declining ? "backward" : "flat") + " across " + T.STALL_WINDOW_WEEKS +
+        " weeks (" + vals.join(" → ") + " " + unit + "), while " + movingPeers + " of " + stall.consideredCount +
+        " tracked lifts are still moving. That pattern is specific to this lift, not the program.",
+      evidence: {
+        weeks: {
+          window: T.STALL_WINDOW_WEEKS,
+          uptoWeek: ctx.lastCompletedWeek,
+          topSets: vals,
+          movingPeers: movingPeers,
+          consideredLifts: stall.consideredCount,
+        },
+        numbers: { latest: latest, bestEarlier: bestEarlier, declining: declining, unit: unit, exerciseId: ex.id },
+      },
+      references: [],
+      sortKey: "lift_plateau:" + ex.id,
+    });
+  });
+  return out;
+}
+
+// ---- Finding 5: weekend variance [nutrition x time] ----------------------
+// Weekend intake running consistently above weekday intake. Pure calendar-space,
+// so no week/date join is involved. Unlogged days are excluded, not zeroed —
+// the same reasoning as insightFoodDays.
+function insightWeekendVariance(ctx) {
+  const T = INSIGHT_THRESHOLDS;
+  const window = insightFoodDays(ctx.prog, ctx.today, T.WEEKEND_WINDOW_DAYS, ctx.foods);
+  const weekend = [], weekday = [];
+  window.days.forEach(function (d) {
+    const dow = new Date(d.date + "T00:00:00").getDay(); // 0 = Sunday, 6 = Saturday
+    (dow === 0 || dow === 6 ? weekend : weekday).push(d.cal);
+  });
+  if (weekend.length < T.MIN_WEEKEND_DAYS || weekday.length < T.MIN_WEEKDAY_DAYS) return null;
+  function avg(a) { return a.reduce(function (x, y) { return x + y; }, 0) / a.length; }
+  const wkndAvg = avg(weekend), wkdyAvg = avg(weekday);
+  if (wkdyAvg <= 0) return null;
+  const excess = (wkndAvg - wkdyAvg) / wkdyAvg;
+  if (excess < T.WEEKEND_EXCESS_PCT) return null;
+
+  return {
+    id: "weekend_variance",
+    domains: ["nutrition"],
+    severity: excess >= T.WEEKEND_SEVERE_PCT ? 3 : 2,
+    title: "Weekend intake runs well above weekdays",
+    sentence:
+      "Over the last " + T.WEEKEND_WINDOW_DAYS + " days, weekend intake averaged " + Math.round(wkndAvg) +
+      " cal against " + Math.round(wkdyAvg) + " cal on weekdays — " + Math.round(excess * 100) +
+      "% higher, across " + weekend.length + " weekend and " + weekday.length + " weekday logged days. " +
+      "Two days at that gap move the weekly average more than they look like they should.",
+    evidence: {
+      weeks: { windowDays: T.WEEKEND_WINDOW_DAYS },
+      numbers: {
+        weekendAvgCalories: Math.round(wkndAvg),
+        weekdayAvgCalories: Math.round(wkdyAvg),
+        excessPct: Math.round(excess * 100),
+        weekendDaysLogged: weekend.length,
+        weekdayDaysLogged: weekday.length,
+      },
+    },
+    references: [],
+    sortKey: "weekend_variance",
+  };
+}
+
+// The engine's single entry point. `def` is the resolved program definition (the
+// same object the app builds for the active program), `opts.today` is a
+// YYYY-MM-DD key, and `opts.foods` is the food list used to resolve log entries
+// that predate self-contained per100 data. Returns findings sorted strongest
+// first, with a total ordering (severity, then sortKey) so repeated calls on
+// unchanged data are byte-identical — the digest's seen-set depends on that.
+function analyzeProgram(data, def, opts) {
+  opts = opts || {};
+  if (!data || !def || !def.exercises) return [];
+  const prog = (data.programs || {})[data.activeProgram];
+  if (!prog) return [];
+
+  const config = data.customProgramConfig || null;
+  const isShared = data.activeProgram !== "custom";
+  const today = opts.today || todayKey();
+  const foods = opts.foods || FOOD_DB.concat(data.customFoods || []);
+  const ctx = {
+    data: data,
+    def: def,
+    prog: prog,
+    today: today,
+    foods: foods,
+    // Same shared-vs-per-program split the app itself uses: the three built-in
+    // programs share one progression state, Custom keeps its own.
+    exerciseStateSource: isShared ? (data.sharedExerciseState || {}) : (prog.exerciseState || {}),
+    // The in-progress week is never judged — only weeks the user actually finished.
+    lastCompletedWeek: (prog.currentWeek || 1) - 1,
+    goal: isShared ? INSIGHT_PROGRAM_GOAL[data.activeProgram] : (config && config.goal) || null,
+    plannedCalories: (config && config.macros && config.macros.cal) || null,
+  };
+  ctx.fuel = insightFoodDays(prog, today, INSIGHT_THRESHOLDS.FUEL_WINDOW_DAYS, foods);
+  ctx.trend = insightWeightTrend(prog, today, INSIGHT_THRESHOLDS.WEIGHT_WINDOW_DAYS);
+
+  const findings = []
+    .concat(insightUnderFuelStall(ctx) || [])
+    .concat(insightWeightTrendDivergence(ctx) || [])
+    .concat(insightAdherenceGap(ctx) || [])
+    .concat(insightLiftPlateaus(ctx))
+    .concat(insightWeekendVariance(ctx) || []);
+
+  findings.forEach(function (f) {
+    f.tier = insightTierFor(f.domains);
+    f.domain = f.domains.join("x");
+  });
+  findings.sort(function (a, b) {
+    if (b.severity !== a.severity) return b.severity - a.severity;
+    return a.sortKey < b.sortKey ? -1 : (a.sortKey > b.sortKey ? 1 : 0);
+  });
+  return findings;
+}
+
+// COACH TRIAGE anchor: the last day this program state shows any dated activity —
+// the max date key across weigh-ins and food logs (ISO keys, so string max IS date
+// max). This is what gets injected as opts.today when a COACH runs the engine on a
+// client: a lapsed client's windows anchor to when they last logged, so the coach
+// still sees what was happening when they stopped — labelled as of that date, never
+// dressed as current. The user's own digest deliberately does NOT use this: it
+// anchors to the real today, and lapses are the lapse nudge's job, not the engine's.
+// Returns null when nothing dated has ever been logged — callers must skip the
+// engine entirely then rather than invent an anchor.
+function insightLastActivityKey(prog) {
+  if (!prog) return null;
+  var best = null;
+  [prog.dailyWeightLogs, prog.foodLog].forEach(function (store) {
+    Object.keys(store || {}).forEach(function (k) {
+      // Guard against non-date keys ever creeping into these stores: a valid
+      // anchor must look like an ISO day. Anything else is ignored, not sorted.
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(k)) return;
+      if (store === prog.foodLog && (!store[k] || store[k].length === 0)) return; // empty day = no activity
+      if (best === null || k > best) best = k;
+    });
+  });
+  return best;
+}
+
 // ---- Storage key scoping ----
 // localStorage is per-ORIGIN, not per-path. Production (inthelabfitness.com) and staging
 // (smarthouse820.github.io/ITLv…) are different origins today, so they're already separate — but
@@ -2359,6 +2845,11 @@ function freshProgramState(exercises) {
     // the same phase-boundary checkpoint, requiring explicit accept/dismiss like every other
     // consequential suggestion in this app (adaptive-TDEE, deload itself) — never applied silently.
     volumeIncreaseRecommendations: [],
+    // { [completedWeek]: true } — the weekly insight digest's seen-set. A digest renders for the
+    // most recently completed week until dismissed, then never again for that week. Local to the
+    // program (synced with the blob like everything else here); findings themselves are never
+    // stored — analyzeProgram is deterministic, so they recompute identically on demand.
+    insightDigestSeen: {},
   };
 }
 function mergeProgramState(saved, exercises) {
@@ -2728,7 +3219,7 @@ function programStateHasRealData(state) {
 // The build currently running. Surfaced in Settings -> Account, because "is the deploy actually
 // live?" has been the real answer to several apparent bugs, and inferring it from behaviour is slow
 // and error-prone. Compared against version.json by the update check below.
-const APP_VERSION = "2026-07-27T06:30:00";
+const APP_VERSION = "2026-07-28T21:30:00";
 
 // Signing out has to be unconditional, because every failure mode here ends the same way: a person
 // tapping a button that does nothing.
@@ -3928,6 +4419,21 @@ function App() {
   // that have nothing to do with food (logging a set, ticking a checkbox, typing anywhere) — it
   // only actually needs to change when the user's custom foods list changes.
   const allFoods = useMemo(function () { return FOOD_DB.concat(data.customFoods || []); }, [data.customFoods]);
+  // §8b delivery: the digest is computed for the most recently COMPLETED week and stays pending
+  // until dismissed — prog.insightDigestSeen is the seen-set, so each week's digest shows once and
+  // never reshows. Findings recompute pure on any render where it's pending; analyzeProgram is
+  // deterministic by design, so recomputing beats storing (stored findings could go stale against
+  // the data that produced them, recomputed ones can't).
+  const insightLastCompletedWeek = prog.currentWeek - 1;
+  const insightDigestPending = insightLastCompletedWeek >= 1 && !((prog.insightDigestSeen || {})[insightLastCompletedWeek]);
+  const insightFindings = useMemo(function () {
+    return insightDigestPending ? analyzeProgram(data, def, { foods: allFoods }) : [];
+  }, [data, def, allFoods, insightDigestPending]);
+  function dismissInsightDigest() {
+    const seenMap = Object.assign({}, prog.insightDigestSeen || {});
+    seenMap[insightLastCompletedWeek] = true;
+    saveProgram({ insightDigestSeen: seenMap });
+  }
   const weekOverride = prog.customMealOverrides[nutritionDisplayWeek];
   const hasWeekOverride = !!(weekOverride && Object.keys(weekOverride).length);
   // "Rebalance my day" writes here — a MORE SPECIFIC layer than the week-level override, checked
@@ -5258,6 +5764,11 @@ function App() {
             : h(CustomSetupWizard, { onComplete: completeCustomSetup, allFoods: allFoods }))
       : h(React.Fragment, null,
           h("main", null,
+            tab === "workouts" && insightDigestPending && h(InsightDigest, {
+              findings: insightFindings, week: insightLastCompletedWeek, prog: prog,
+              tierHasTraining: tierHasTraining, tierHasNutrition: tierHasNutrition,
+              onDismiss: dismissInsightDigest,
+            }),
             tab === "workouts" && h(WorkoutsTab, {
               selectedDay: selectedDay, setSelectedDay: setSelectedDay, data: Object.assign({}, prog, { exerciseState: effectiveExerciseState }), exercises: def.exercises, isDeloadWeek: isDeloadWeek,
               expanded: expanded, setExpanded: setExpanded, logSet: logSet, completeDay: completeDay,
@@ -5350,7 +5861,7 @@ function App() {
             tab === "clients" && h("div", null,
               h("h2", { className: "section-title" }, "Clients"),
               h(CoachingPanel, {
-                coachId: userId,
+                coachId: userId, triage: true,
                 myClients: myClients, pendingInvites: pendingInvites, canCoach: amICoach,
                 inviteClient: inviteClient, respondToInvite: respondToInvite,
                 endCoaching: endCoaching, busy: coachingBusy,
@@ -5411,6 +5922,81 @@ function isDayFullyComplete(dayExercises, isDeloadWeek, weekLogs, weekSkipped, w
     const logsForEx = weekLogs[ex.id] || [];
     return allSetsHaveReps(logsForEx, setsToday) && !!weekDifficulty[ex.id];
   });
+}
+
+// §8b delivery: the weekly digest. Renders once per completed week (seen-set in
+// prog.insightDigestSeen) on the training surface where completeWeek happens,
+// above the deload/volume banners — those act, this only informs, and finding 1
+// deliberately points DOWN at a pending deload banner rather than restating it.
+// Tier view follows the domain-crossed rule. HONESTY RULE (backlog + marketing
+// #3): a locked teaser renders only when the engine actually found something,
+// and it carries evidence COUNTS, never the numbers — calories, rates, and
+// percentages are the product, same rule as the locked built-plan teaser.
+function InsightDigest(props) {
+  const findings = props.findings || [];
+  const nutritionFindings = findings.filter(function (f) { return f.domains.indexOf("nutrition") !== -1; });
+  const trainingFindings = findings.filter(function (f) { return f.domains.indexOf("nutrition") === -1; });
+  function accent(f) { return f.severity >= 3 ? "#d9822b" : "#3d97d3"; }
+  function findingCard(f, i) {
+    return h("div", { key: f.id, style: { marginTop: i > 0 ? 12 : 0, paddingLeft: 10, borderLeft: "3px solid " + accent(f) } },
+      h("p", { style: { margin: 0, fontWeight: 600, fontSize: 13 } }, f.title),
+      h("p", { style: { margin: "4px 0 0", fontSize: 13, lineHeight: 1.5 } }, f.sentence));
+  }
+  // No-numbers teaser lines: name where the pattern lives and how much of the
+  // person's own data it stands on — never what it says.
+  function teaserLine(f) {
+    const n = (f.evidence && f.evidence.numbers) || {};
+    const w = (f.evidence && f.evidence.weeks) || {};
+    if (f.id === "under_fuel_stall") return "A pattern links your food log and your training — built from " + n.foodDaysLogged + " logged days and " + w.window + " weeks of lifts.";
+    if (f.id === "weight_trend_divergence") return "Your weigh-in trend has something to say about your goal — " + n.weighInsUsed + " weigh-ins of evidence.";
+    if (f.id === "weekend_variance") return "A weekly rhythm shows up in your food log — " + (n.weekendDaysLogged + n.weekdayDaysLogged) + " logged days of evidence.";
+    return "A pattern was found in your logged data.";
+  }
+  const isFree = props.tierHasTraining === false;
+  const showNutrition = props.tierHasNutrition === true;
+  let body;
+  if (isFree) {
+    // Free tier: the digest SHELL — the person's own logging counts plus an
+    // honest lock. Findings exist only if the engine truly found them; an empty
+    // week shows encouragement, not a lock on nothing.
+    const weekLogs = (props.prog.logs || {})[props.week] || {};
+    let setsLogged = 0;
+    Object.keys(weekLogs).forEach(function (id) { setsLogged += (weekLogs[id] || []).filter(function (s) { return s && s.reps != null; }).length; });
+    const weighIns = Object.keys(props.prog.dailyWeightLogs || {}).length;
+    const foodDays = Object.keys(props.prog.foodLog || {}).length;
+    body = h(React.Fragment, null,
+      h("p", { style: { margin: 0, fontSize: 13 } },
+        "You logged " + setsLogged + " set" + (setsLogged === 1 ? "" : "s") + " this week" +
+        (weighIns + foodDays > 0
+          ? ", and " + weighIns + " weigh-in" + (weighIns === 1 ? "" : "s") + " and " + foodDays + " day" + (foodDays === 1 ? "" : "s") + " of food overall"
+          : "") + "."),
+      findings.length > 0
+        ? h("p", { style: { margin: "8px 0 0", fontSize: 12, color: "#4eba6f" } },
+            "\ud83d\udd12 " + findings.length + " pattern" + (findings.length === 1 ? "" : "s") + " found in your own logs — the analysis unlocks with a plan.")
+        : h("p", { style: { margin: "8px 0 0", fontSize: 12, color: "#737373" } },
+            "Keep logging — everything you record sharpens what the app can find."));
+  } else {
+    const visible = showNutrition ? findings : trainingFindings;
+    const locked = showNutrition ? [] : nutritionFindings;
+    body = h(React.Fragment, null,
+      visible.length === 0 && locked.length === 0 && h("p", { style: { margin: 0, fontSize: 13, color: "#a3a3a3" } },
+        "No flags in your data this week. Progression and targets keep updating on their own as you log."),
+      visible.map(findingCard),
+      locked.length > 0 && h("div", { style: { marginTop: visible.length > 0 ? 12 : 0, paddingLeft: 10, borderLeft: "3px solid #4eba6f" } },
+        h("p", { style: { margin: 0, fontWeight: 600, fontSize: 13 } },
+          "\ud83d\udd12 " + locked.length + " nutrition finding" + (locked.length === 1 ? "" : "s") + " this week"),
+        locked.map(function (f) {
+          return h("p", { key: f.id, style: { margin: "4px 0 0", fontSize: 12, color: "#a3a3a3" } }, teaserLine(f));
+        }),
+        h("p", { style: { margin: "6px 0 0", fontSize: 11, color: "#4eba6f" } }, "Unlocks with the full plan.")),
+      (visible.length > 0) && h("p", { style: { margin: "10px 0 0", fontSize: 11, color: "#737373" } },
+        "Observations from your own logs — nothing here changes your plan automatically."));
+  }
+  return h("div", { className: "preview-banner", style: { marginBottom: 16 } },
+    h("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 } },
+      h("p", { style: { margin: 0, fontWeight: 600 } }, "Week " + props.week + " in review"),
+      h("button", { className: "ex-action-btn", onClick: props.onDismiss }, "Got it")),
+    body);
 }
 
 function WorkoutsTab(props) {
@@ -7997,6 +8583,83 @@ function CoachingPanel(props) {
   const clients = props.myClients || [];
   const invites = props.pendingInvites || [];
 
+  // ---- COACH TRIAGE (Clients tab only — props.triage; the Settings instance stays light) ----
+  // Same engine the client's own digest runs, fed the same shape of data — but fetched over the
+  // coach's link-scoped read access (the exact profiles + program_states pair the prescription
+  // editor already proves out), and anchored to the CLIENT'S last logged day via opts.today.
+  // That anchoring choice is deliberate and different from the digest: a lapsed client's windows
+  // hold the period they actually logged, so the coach sees what was happening when they stopped.
+  // The honesty rule that comes with it: any anchor that isn't today is labelled on every line.
+  //
+  // triageByClient: { [client_id]: { findings, anchor, none } } — `none` marks a client with no
+  // dated activity at all (no engine run, no anchor to invent). A client absent from the map is
+  // simply not loaded yet, and renders NOTHING triage-shaped — absence of computation must never
+  // read as an all-clear.
+  const [triageByClient, setTriageByClient] = useState({});
+  const [expandedTriage, setExpandedTriage] = useState(null); // client_id with findings expanded
+  // Refetch only when the roster actually changes state — ids or a client's updated_at — not on
+  // every 5-minute refreshCoaching, which replaces the array identity without new content.
+  const triageKey = props.triage ? clients.map(function (c) { return c.client_id + ":" + (c.last_active || ""); }).join("|") : "";
+  useEffect(function () {
+    if (!props.triage || clients.length === 0) { setTriageByClient({}); return; }
+    let cancelled = false;
+    const ids = clients.map(function (c) { return c.client_id; });
+    Promise.all([
+      supabaseClient.from("profiles").select("id, custom_program_config, shared_exercise_state, custom_foods").in("id", ids),
+    ].concat(clients.map(function (c) {
+      return c.active_program
+        ? supabaseClient.from("program_states").select("state").eq("user_id", c.client_id).eq("program_key", c.active_program).limit(1)
+        : Promise.resolve({ data: [] });
+    }))).then(function (r) {
+      if (cancelled) return;
+      const profById = {};
+      ((r[0] && r[0].data) || []).forEach(function (p) { profById[p.id] = p; });
+      const next = {};
+      clients.forEach(function (c, i) {
+        const prof = profById[c.client_id];
+        const ps = ((r[i + 1] && r[i + 1].data) || [])[0];
+        const state = (ps && ps.state) || null;
+        // No program chosen, no synced state, or custom with no config: nothing to analyze.
+        // Distinct from "analyzed and clean" — these render no triage line at all.
+        if (!c.active_program || !prof || !state) { next[c.client_id] = { none: true }; return; }
+        const def = c.active_program === "custom"
+          ? (prof.custom_program_config ? buildCustomProgramDef(prof.custom_program_config) : null)
+          : PROGRAM_DEFS[c.active_program];
+        if (!def) { next[c.client_id] = { none: true }; return; }
+        const anchor = insightLastActivityKey(state);
+        if (!anchor) { next[c.client_id] = { none: true }; return; }
+        const clientData = {
+          activeProgram: c.active_program,
+          customProgramConfig: prof.custom_program_config || null,
+          sharedExerciseState: prof.shared_exercise_state || {},
+          customFoods: prof.custom_foods || [],
+          programs: {},
+        };
+        clientData.programs[c.active_program] = state;
+        next[c.client_id] = { findings: analyzeProgram(clientData, def, { today: anchor }), anchor: anchor };
+      });
+      setTriageByClient(next);
+    }).catch(function () { if (!cancelled) setTriageByClient({}); }); // fetch failure: roster still works, no triage claims
+    return function () { cancelled = true; };
+  }, [triageKey]);
+  function triageMaxSev(id) {
+    const t = triageByClient[id];
+    return t && t.findings && t.findings.length > 0 ? t.findings[0].severity : 0; // engine pre-sorts, [0] is max
+  }
+  // Severity-sorted roster. Array.prototype.sort is stable, so within equal severity the
+  // my_clients order (updated_at desc — most recently active first) survives as the tiebreak.
+  const triagedClients = props.triage ? clients.slice().sort(function (a, b) { return triageMaxSev(b.client_id) - triageMaxSev(a.client_id); }) : clients;
+  function fmtAnchor(key) {
+    // "as of" label for a non-today anchor. Parsed as LOCAL midnight (new Date("Y-M-D") would be
+    // UTC and shift the day for western timezones) — same day-boundary rule as the rest of the app.
+    const parts = key.split("-");
+    const d = new Date(+parts[0], +parts[1] - 1, +parts[2]);
+    const days = Math.round((new Date(new Date().getFullYear(), new Date().getMonth(), new Date().getDate()) - d) / 86400000);
+    if (days <= 0) return null; // anchor is today: current-window findings need no label
+    if (days === 1) return "as of yesterday";
+    return "as of " + d.toLocaleDateString(undefined, { month: "short", day: "numeric" });
+  }
+
   function fmtWhen(ts) {
     if (!ts) return "never";
     const days = Math.floor((Date.now() - new Date(ts).getTime()) / 86400000);
@@ -8036,9 +8699,15 @@ function CoachingPanel(props) {
         ? h("p", { style: { fontSize: 12, color: "#737373", margin: "0 0 10px", lineHeight: 1.5 } },
             "No clients yet. Invite someone by the email address they signed up with — they'll need to accept before you can see anything.")
         : h("div", { style: { marginBottom: 10 } },
-            clients.map(function (c) {
+            triagedClients.map(function (c) {
               const stale = c.last_active && (Date.now() - new Date(c.last_active).getTime()) > 5 * 86400000;
-              return h("div", { key: c.client_id, style: { background: "#171717", border: "1px solid " + (stale ? "#7a5c1a" : "#262626"), borderRadius: 8, padding: 12, marginBottom: 8 } },
+              const triage = triageByClient[c.client_id];
+              const maxSev = triageMaxSev(c.client_id);
+              // Border precedence: a severity accent outranks the stale amber — the finding is the
+              // more specific signal, and the "N days ago" text keeps carrying the staleness.
+              const borderColor = maxSev >= 3 ? "#d9822b" : maxSev >= 2 ? "#3d97d3" : (stale ? "#7a5c1a" : "#262626");
+              const anchorLabel = triage && triage.anchor ? fmtAnchor(triage.anchor) : null;
+              return h("div", { key: c.client_id, style: { background: "#171717", border: "1px solid " + borderColor, borderRadius: 8, padding: 12, marginBottom: 8 } },
                 h("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 8 } },
                   h("span", { style: { fontSize: 13, overflow: "hidden", textOverflow: "ellipsis" } }, personLabel(c.display_name, c.email)),
                   h("span", { style: { fontSize: 11, color: stale ? "#f0b429" : "#737373", flexShrink: 0 } }, fmtWhen(c.last_active))
@@ -8048,6 +8717,33 @@ function CoachingPanel(props) {
                   " · week " + (c.current_week != null ? c.current_week : "—") +
                   " · " + (c.sessions_logged || 0) + " week" + ((c.sessions_logged || 0) === 1 ? "" : "s") + " logged" +
                   (c.latest_weight != null ? " · " + c.latest_weight + " lb" : "")),
+                // ---- Triage line. Three honest states, and only three:
+                //   findings   -> top finding as the reason line, tap to expand the rest
+                //   clean run  -> "No flags", only claimable because the engine actually ran
+                //   not loaded / nothing to analyze -> NO line at all (never an implied all-clear)
+                props.triage && triage && triage.findings && triage.findings.length > 0 && h("div", { style: { marginTop: 6 } },
+                  h("div", {
+                    style: { display: "flex", alignItems: "baseline", gap: 6, fontSize: 12, cursor: "pointer" },
+                    onClick: function () { setExpandedTriage(expandedTriage === c.client_id ? null : c.client_id); },
+                  },
+                    h("span", { style: { color: maxSev >= 3 ? "#d9822b" : "#3d97d3", flexShrink: 0 } }, "\u25CF"),
+                    h("span", { style: { flex: 1, color: "#e5e5e5" } },
+                      triage.findings[0].title +
+                      (triage.findings.length > 1 ? " · +" + (triage.findings.length - 1) + " more" : "") +
+                      (anchorLabel ? " · " + anchorLabel : "")),
+                    h("span", { style: { color: "#737373", fontSize: 10, flexShrink: 0 } }, expandedTriage === c.client_id ? "\u25B4" : "\u25BE")),
+                  expandedTriage === c.client_id && h("div", { style: { marginTop: 6, borderTop: "1px solid #262626", paddingTop: 6 } },
+                    anchorLabel && h("p", { style: { fontSize: 10, color: "#f0b429", margin: "0 0 6px" } },
+                      "Windows anchored to their last logged day (" + triage.anchor + ") \u2014 this describes when they were last active, not this week."),
+                    triage.findings.map(function (f, i) {
+                      return h("div", { key: i, style: { display: "flex", gap: 6, marginBottom: 6 } },
+                        h("span", { style: { color: f.severity >= 3 ? "#d9822b" : "#3d97d3", flexShrink: 0, fontSize: 12 } }, "\u25CF"),
+                        h("div", null,
+                          h("p", { style: { fontSize: 12, margin: 0, color: "#e5e5e5" } }, f.title),
+                          h("p", { style: { fontSize: 11, margin: "1px 0 0", color: "#a3a3a3", lineHeight: 1.45 } }, f.sentence)));
+                    }))),
+                props.triage && triage && triage.findings && triage.findings.length === 0 && h("div", { style: { marginTop: 6, fontSize: 11, color: "#737373" } },
+                  "No flags" + (anchorLabel ? " \u00B7 " + anchorLabel : "")),
                 h("div", { style: { display: "flex", gap: 8, marginTop: 8 } },
                   h("button", {
                     className: "ex-action-btn", style: { fontSize: 11, padding: "4px 8px" },
