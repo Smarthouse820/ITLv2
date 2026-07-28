@@ -2728,7 +2728,7 @@ function programStateHasRealData(state) {
 // The build currently running. Surfaced in Settings -> Account, because "is the deploy actually
 // live?" has been the real answer to several apparent bugs, and inferring it from behaviour is slow
 // and error-prone. Compared against version.json by the update check below.
-const APP_VERSION = "2026-07-27T06:15:00";
+const APP_VERSION = "2026-07-27T06:30:00";
 
 // Signing out has to be unconditional, because every failure mode here ends the same way: a person
 // tapping a button that does nothing.
@@ -5287,7 +5287,21 @@ function App() {
                     "Your workouts tell half the story — nutrition is the other half. The full plan builds your meals around your targets, swaps foods without breaking them, and adaptive TDEE learns your actual burn rate from your own numbers" +
                     (weighIns + foodDays > 0 ? " — you've already logged " + weighIns + " weigh-in" + (weighIns === 1 ? "" : "s") + " and " + foodDays + " day" + (foodDays === 1 ? "" : "s") + " of food it would learn from." : ".")),
                   h("p", { style: { margin: "6px 0 0", fontSize: 11, color: "#737373" } },
-                    "Keep logging below — everything you record now feeds the system the moment you upgrade."));
+                    "Keep logging below — everything you record now feeds the system the moment you upgrade."),
+                  // The built-but-locked plan as an evidence-backed teaser, same honesty pattern as
+                  // the findings: it renders only when a plan genuinely exists, names what it's
+                  // made of, and shows NO numbers — calories, macros, and targets are the product.
+                  (function () {
+                    const cfg = data.customProgramConfig && data.customProgramConfig.setupComplete ? data.customProgramConfig : null;
+                    if (!cfg || !cfg.mealsByWeek || !cfg.mealsByWeek[1]) return null;
+                    const meals = cfg.mealsByWeek[1].filter(function (m) { return m.id !== "iw"; });
+                    const names = [];
+                    meals.forEach(function (m) { (m.items || []).forEach(function (it) { if (names.indexOf(it.name) === -1) names.push(it.name); }); });
+                    return h("p", { style: { margin: "8px 0 0", fontSize: 12, color: "#4eba6f" } },
+                      "\ud83d\udd12 Your plan is already built — " + meals.length + " meals a day around your picks" +
+                      (names.length ? " (" + names.slice(0, 4).join(", ") + "\u2026)" : "") +
+                      ". Portions and targets unlock with the full plan.");
+                  })());
               })(),
               h(FoodSearchLog, { foodLog: todaysFoodLog, logFood: logFood, removeEntry: removeFoodLogEntry, updateGrams: updateFoodLogGrams, allFoods: allFoods, addCustomFood: addCustomFood, quickFoods: quickAddFoods })),
             tab === "nutrition" && tierHasNutrition && h(NutritionTab, {
