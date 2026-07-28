@@ -976,16 +976,22 @@ const EXERCISE_POOL = [
 // Picks the best available exercise for a required muscle group/mechanic, given the equipment the
 // person actually has. Falls back progressively (relax mechanic, then fall back to bodyweight) so
 // there's always something usable rather than a dead end for an unusual equipment combination.
-function pickExercise(muscle, mechanic, equipmentAvailable) {
+function pickExercise(muscle, mechanic, equipmentAvailable, excludeNames) {
   const eq = equipmentAvailable && equipmentAvailable.length ? equipmentAvailable : ["bodyweight"];
-  function matches(ex, requireMechanic) {
+  const excl = excludeNames || [];
+  function matches(ex, requireMechanic, honorExclude) {
     return ex.muscle === muscle && (!requireMechanic || ex.mechanic === mechanic) &&
+      (!honorExclude || excl.indexOf(ex.name) === -1) &&
       ex.equipment.some(function (e) { return eq.indexOf(e) !== -1; });
   }
-  const exact = EXERCISE_POOL.filter(function (ex) { return matches(ex, true); });
-  if (exact.length) return exact[0];
-  const relaxed = EXERCISE_POOL.filter(function (ex) { return matches(ex, false); });
-  if (relaxed.length) return relaxed[0];
+  // Exclusions let one day ask for the same muscle twice and get two DIFFERENT movements — the
+  // advanced split depends on it. If the pool runs dry under the person's equipment, the
+  // exclusion is dropped rather than failing: a repeat beats a hole in the program.
+  const stages = [[true, true], [false, true], [true, false], [false, false]];
+  for (let s = 0; s < stages.length; s++) {
+    const hit = EXERCISE_POOL.filter(function (ex) { return matches(ex, stages[s][0], stages[s][1]); })[0];
+    if (hit) return hit;
+  }
   const bodyweightFallback = EXERCISE_POOL.filter(function (ex) { return ex.muscle === muscle && ex.equipment.indexOf("bodyweight") !== -1; });
   return bodyweightFallback[0] || EXERCISE_POOL.filter(function (ex) { return ex.muscle === muscle; })[0];
 }
@@ -1011,8 +1017,8 @@ function titleCaseMuscle(muscle) {
 function consolidateMuscleGroup(muscle) {
   return MUSCLE_GROUP_CONSOLIDATION[muscle] || muscle;
 }
-function requirementToExercise(req, idSuffix, equipmentAvailable) {
-  const picked = pickExercise(req.muscle, req.mechanic, equipmentAvailable);
+function requirementToExercise(req, idSuffix, equipmentAvailable, excludeNames) {
+  const picked = pickExercise(req.muscle, req.mechanic, equipmentAvailable, excludeNames);
   return Object.assign({ id: req.slot + idSuffix }, {
     name: picked.name, weight: picked.weight, bodyweight: picked.bodyweight || false, isFailure: picked.isFailure || false,
     sets: 3, repLow: 10, repHigh: 15, // overwritten by goal-based rules right after selection
@@ -1045,7 +1051,12 @@ const INTERMEDIATE_LOWER_REQUIREMENTS = [
 ];
 
 function buildRequirementDay(label, requirements, equipmentAvailable) {
-  return { label: label, exercises: requirements.map(function (req) { return requirementToExercise(req, "", equipmentAvailable); }) };
+  const used = [];
+  return { label: label, exercises: requirements.map(function (req) {
+    const ex = requirementToExercise(req, "", equipmentAvailable, used);
+    used.push(ex.name);
+    return ex;
+  }) };
 }
 
 const EXPERIENCE_DAY_COUNT = { beginner: 3, intermediate: 4, advanced: 5 };
@@ -1060,6 +1071,46 @@ const INTRA_WORKOUT_DEFAULTS = {
   advanced: { p: 40, c: 30, f: 0 },
 };
 
+// Advanced: a 5-day push/pull/legs + upper/lower hybrid, expressed as REQUIREMENTS so it builds
+// against the person's equipment and the pool's generic starting weights — previously this tier
+// returned the Cutting program's days verbatim, which meant one specific person's exercise
+// selection and working weights presented as everyone's plan.
+const ADVANCED_PUSH_REQUIREMENTS = [
+  { slot: "advP1", muscle: "chest", mechanic: "compound" },
+  { slot: "advP2", muscle: "chest", mechanic: "compound" },
+  { slot: "advP3", muscle: "shoulders", mechanic: "compound" },
+  { slot: "advP4", muscle: "triceps", mechanic: "isolation" },
+  { slot: "advP5", muscle: "triceps", mechanic: "isolation" },
+];
+const ADVANCED_PULL_REQUIREMENTS = [
+  { slot: "advL1", muscle: "back_horizontal", mechanic: "compound" },
+  { slot: "advL2", muscle: "back_vertical", mechanic: "compound" },
+  { slot: "advL3", muscle: "back_horizontal", mechanic: "compound" },
+  { slot: "advL4", muscle: "biceps", mechanic: "isolation" },
+  { slot: "advL5", muscle: "biceps", mechanic: "isolation" },
+];
+const ADVANCED_LEGS_Q_REQUIREMENTS = [
+  { slot: "advQ1", muscle: "quads", mechanic: "compound" },
+  { slot: "advQ2", muscle: "quads", mechanic: "compound" },
+  { slot: "advQ3", muscle: "quads_isolation", mechanic: "isolation" },
+  { slot: "advQ4", muscle: "hamstrings_isolation", mechanic: "isolation" },
+  { slot: "advQ5", muscle: "hamstrings_glutes", mechanic: "compound" },
+];
+const ADVANCED_UPPER_REQUIREMENTS = [
+  { slot: "advU1", muscle: "chest", mechanic: "compound" },
+  { slot: "advU2", muscle: "back_vertical", mechanic: "compound" },
+  { slot: "advU3", muscle: "shoulders", mechanic: "compound" },
+  { slot: "advU4", muscle: "biceps", mechanic: "isolation" },
+  { slot: "advU5", muscle: "triceps", mechanic: "isolation" },
+];
+const ADVANCED_LEGS_H_REQUIREMENTS = [
+  { slot: "advH1", muscle: "hamstrings_glutes", mechanic: "compound" },
+  { slot: "advH2", muscle: "hamstrings_glutes", mechanic: "compound" },
+  { slot: "advH3", muscle: "quads", mechanic: "compound" },
+  { slot: "advH4", muscle: "quads_isolation", mechanic: "isolation" },
+  { slot: "advH5", muscle: "hamstrings_isolation", mechanic: "isolation" },
+];
+
 function experienceTemplates(experience, equipmentAvailable) {
   if (experience === "beginner") {
     const day = buildRequirementDay("Full Body", BEGINNER_REQUIREMENTS, equipmentAvailable);
@@ -1070,8 +1121,14 @@ function experienceTemplates(experience, equipmentAvailable) {
     const lower = buildRequirementDay("Lower", INTERMEDIATE_LOWER_REQUIREMENTS, equipmentAvailable);
     return [upper, lower, JSON.parse(JSON.stringify(upper)), JSON.parse(JSON.stringify(lower))];
   }
-  // advanced — reuse the same 5-day split already built for the other programs (assumes full gym access)
-  return ["Monday", "Tuesday", "Thursday", "Friday", "Saturday"].map(function (d) { return EXERCISES_CUTTING[d]; });
+  // advanced — built like the other tiers: requirements against the person's own equipment.
+  return [
+    buildRequirementDay("Push (Chest & Shoulders)", ADVANCED_PUSH_REQUIREMENTS, equipmentAvailable),
+    buildRequirementDay("Pull (Back & Arms)", ADVANCED_PULL_REQUIREMENTS, equipmentAvailable),
+    buildRequirementDay("Legs (Quad Focus)", ADVANCED_LEGS_Q_REQUIREMENTS, equipmentAvailable),
+    buildRequirementDay("Upper (Volume)", ADVANCED_UPPER_REQUIREMENTS, equipmentAvailable),
+    buildRequirementDay("Legs (Hinge & Hamstrings)", ADVANCED_LEGS_H_REQUIREMENTS, equipmentAvailable),
+  ];
 }
 
 // Builds a full week of exercises from an experience-tier template, placed onto whichever real
@@ -2663,7 +2720,7 @@ function programStateHasRealData(state) {
 // The build currently running. Surfaced in Settings -> Account, because "is the deploy actually
 // live?" has been the real answer to several apparent bugs, and inferring it from behaviour is slow
 // and error-prone. Compared against version.json by the update check below.
-const APP_VERSION = "2026-07-27T04:00:00";
+const APP_VERSION = "2026-07-27T04:45:00";
 
 // Signing out has to be unconditional, because every failure mode here ends the same way: a person
 // tapping a button that does nothing.
@@ -9097,6 +9154,8 @@ function CustomSetupWizard(props) {
     }),
     h("div", { style: { display: "flex", gap: 8, marginTop: 16, alignItems: "stretch" } },
       h("button", { className: "ex-action-btn", style: { flex: "0 0 auto", padding: "8px 20px" }, onClick: function () { setStep("foods"); } }, "Back"),
+      h("p", { style: { fontSize: 11, color: "#737373", margin: "0 0 8px", width: "100%" } },
+        "Starting weights are estimates from the exercise database \u2014 treat week 1 as calibration and adjust them freely; the program learns from what you actually log."),
       h("button", { className: "generate-btn", style: { flex: 1, marginTop: 0 }, onClick: confirm }, "Confirm & Start My Program")
     )
   );
