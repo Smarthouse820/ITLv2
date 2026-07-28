@@ -2728,7 +2728,7 @@ function programStateHasRealData(state) {
 // The build currently running. Surfaced in Settings -> Account, because "is the deploy actually
 // live?" has been the real answer to several apparent bugs, and inferring it from behaviour is slow
 // and error-prone. Compared against version.json by the update check below.
-const APP_VERSION = "2026-07-27T06:00:00";
+const APP_VERSION = "2026-07-27T06:15:00";
 
 // Signing out has to be unconditional, because every failure mode here ends the same way: a person
 // tapping a button that does nothing.
@@ -5553,13 +5553,13 @@ function WorkoutsTab(props) {
         // that comment history is the cautionary tale.)
         h("button", {
           className: "icon-btn", "aria-label": (actionsOpen[ex.id] ? "Hide" : "Show") + " exercise options",
-          style: { width: "100%", justifyContent: "center", padding: 4, color: "#737373" },
+          style: { width: "100%", justifyContent: "center", alignItems: "center", gap: 4, padding: 4, color: "#737373", fontSize: 12 },
           onClick: function () {
             const next = Object.assign({}, actionsOpen);
             next[ex.id] = !next[ex.id];
             setActionsOpen(next);
           },
-        }, actionsOpen[ex.id] ? h(ChevronUp, { size: 16 }) : h(ChevronDown, { size: 16 })),
+        }, "Actions", actionsOpen[ex.id] ? h(ChevronUp, { size: 14 }) : h(ChevronDown, { size: 14 })),
         actionsOpen[ex.id] && h("div", { className: "ex-actions" },
           !isSkipped && h("button", { className: "ex-action-btn", onClick: function () { props.toggleSkip(ex.id); } }, "Skip Exercise"),
           !isSkipped && canEnter && !ex.isWeekSubstitute && h("button", {
