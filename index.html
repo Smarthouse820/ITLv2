@@ -2720,7 +2720,7 @@ function programStateHasRealData(state) {
 // The build currently running. Surfaced in Settings -> Account, because "is the deploy actually
 // live?" has been the real answer to several apparent bugs, and inferring it from behaviour is slow
 // and error-prone. Compared against version.json by the update check below.
-const APP_VERSION = "2026-07-27T05:25:00";
+const APP_VERSION = "2026-07-27T05:40:00";
 
 // Signing out has to be unconditional, because every failure mode here ends the same way: a person
 // tapping a button that does nothing.
@@ -5386,6 +5386,7 @@ function WorkoutsTab(props) {
   const [swapOpen, setSwapOpen] = useState({});
   const [historyOpen, setHistoryOpen] = useState({});
   const [muscleEditOpen, setMuscleEditOpen] = useState({});
+  const [actionsOpen, setActionsOpen] = useState({}); // per-exercise: the collapsed button cluster
   const [groupingMode, setGroupingMode] = useState(false);
   const [pendingSelection, setPendingSelection] = useState([]);
   const day = props.exercises[props.selectedDay];
@@ -5528,7 +5529,21 @@ function WorkoutsTab(props) {
         isOpen ? h(ChevronUp, { size: 16 }) : h(ChevronDown, { size: 16 })
       ),
       isOpen && h("div", { className: "ex-body" },
-        h("div", { className: "ex-actions" },
+        // The action cluster grew to seven controls and started crowding the card, so the WHOLE
+        // cluster now lives behind this one chevron, collapsed by default. (A predecessor hid only
+        // SOME buttons behind a "\u22ef" menu and was reverted for being unfindable — one toggle
+        // over everything is a different, learnable shape. If it still hides too well in practice,
+        // that comment history is the cautionary tale.)
+        h("button", {
+          className: "icon-btn", "aria-label": (actionsOpen[ex.id] ? "Hide" : "Show") + " exercise options",
+          style: { width: "100%", justifyContent: "center", padding: 4, color: "#737373" },
+          onClick: function () {
+            const next = Object.assign({}, actionsOpen);
+            next[ex.id] = !next[ex.id];
+            setActionsOpen(next);
+          },
+        }, actionsOpen[ex.id] ? h(ChevronUp, { size: 16 }) : h(ChevronDown, { size: 16 })),
+        actionsOpen[ex.id] && h("div", { className: "ex-actions" },
           !isSkipped && h("button", { className: "ex-action-btn", onClick: function () { props.toggleSkip(ex.id); } }, "Skip Exercise"),
           !isSkipped && canEnter && !ex.isWeekSubstitute && h("button", {
             className: "ex-action-btn", onClick: function () {
@@ -5541,18 +5556,6 @@ function WorkoutsTab(props) {
             className: "ex-action-btn",
             onClick: function () { props.clearWeekSwap(ex.originalExercise.id); },
           }, "Revert to original now"),
-          // Manual set add/subtract. Rides the SAME setsOverride the autoregulation volume-accept
-          // writes, so RIR targets, deload halving, and completion all just follow. While coached,
-          // adjustSets routes to a request.
-          // Sits inside .ex-actions, whose buttons default to flex-grow with a 110px floor —
-          // exactly wrong for a compact stepper. This row takes the full width and pins its
-          // buttons to fixed 44px squares so the label never wraps and the +/- never balloon.
-          !isSkipped && h("span", { style: { flex: "1 1 100%", display: "flex", alignItems: "center", gap: 8, fontSize: 12, color: "#a3a3a3", margin: "2px 0", whiteSpace: "nowrap" } },
-            h("span", null, "Sets: " + setsToday),
-            h("button", { className: "ex-action-btn", style: { flex: "0 0 auto", minWidth: 0, width: 44, padding: "6px 0" }, "aria-label": "one set fewer",
-              onClick: function () { props.adjustSets(ex.id, -1); } }, "\u2212"),
-            h("button", { className: "ex-action-btn", style: { flex: "0 0 auto", minWidth: 0, width: 44, padding: "6px 0" }, "aria-label": "one set more",
-              onClick: function () { props.adjustSets(ex.id, 1); } }, "+")),
           h("button", {
             className: "ex-action-btn", onClick: function () {
               const next = Object.assign({}, historyOpen);
@@ -5585,7 +5588,16 @@ function WorkoutsTab(props) {
             onClick: function () {
               window.open("https://www.youtube.com/results?search_query=" + encodeURIComponent(ex.name + " exercise form"), "_blank", "noopener,noreferrer");
             },
-          }, "Watch Demo")
+          }, "Watch Demo"),
+          // Manual set add/subtract, centered as the cluster's last row. Rides the SAME
+          // setsOverride the autoregulation volume-accept writes, so RIR targets, deload halving,
+          // and completion all just follow; while coached, adjustSets routes to a request.
+          !isSkipped && h("span", { style: { flex: "1 1 100%", display: "flex", alignItems: "center", justifyContent: "center", gap: 8, fontSize: 12, color: "#a3a3a3", margin: "2px 0", whiteSpace: "nowrap" } },
+            h("span", null, "Sets: " + setsToday),
+            h("button", { className: "ex-action-btn", style: { flex: "0 0 auto", minWidth: 0, width: 44, padding: "6px 0" }, "aria-label": "one set fewer",
+              onClick: function () { props.adjustSets(ex.id, -1); } }, "\u2212"),
+            h("button", { className: "ex-action-btn", style: { flex: "0 0 auto", minWidth: 0, width: 44, padding: "6px 0" }, "aria-label": "one set more",
+              onClick: function () { props.adjustSets(ex.id, 1); } }, "+"))
         ),
         muscleEditOpen[ex.id] && h("div", { style: { marginBottom: 12 } },
           h("p", { style: { fontSize: "11px", color: "#737373", margin: "0 0 6px" } },
