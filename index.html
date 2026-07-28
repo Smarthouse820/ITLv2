@@ -364,7 +364,15 @@ const EXERCISES_HYPERTROPHY = JSON.parse(JSON.stringify(EXERCISES_CUTTING));
 const DAYS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
 // The days that actually have exercises to complete — rest days (Wed/Sun) aren't part of the
 // day-to-day completion/advance flow since there's nothing to finish there.
-const TRAINING_DAY_ORDER = ["Monday", "Tuesday", "Thursday", "Friday", "Saturday"];
+const WEEK_DAY_NAMES = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
+// The training-day sequence belongs to the PROGRAM: built-ins train Mon/Tue/Thu/Fri/Sat, but a
+// Custom program trains whatever days its wizard chose — a hardcoded list sent "next day" to
+// days that don't exist and returned -1 for days it never heard of (a silent no-op on tap).
+function trainingDayOrder(exercisesByDay) {
+  return WEEK_DAY_NAMES.filter(function (d) {
+    return exercisesByDay[d] && exercisesByDay[d].exercises && exercisesByDay[d].exercises.length;
+  });
+}
 
 const MEALS_CUTTING = {
   1: [
@@ -2720,7 +2728,7 @@ function programStateHasRealData(state) {
 // The build currently running. Surfaced in Settings -> Account, because "is the deploy actually
 // live?" has been the real answer to several apparent bugs, and inferring it from behaviour is slow
 // and error-prone. Compared against version.json by the update check below.
-const APP_VERSION = "2026-07-27T05:40:00";
+const APP_VERSION = "2026-07-27T06:00:00";
 
 // Signing out has to be unconditional, because every failure mode here ends the same way: a person
 // tapping a button that does nothing.
@@ -4204,18 +4212,27 @@ function App() {
   }
 
   function completeDay() {
-    const dayExercises = def.exercises[selectedDay].exercises;
+    // The completion check MUST see the same exercises the card showed: a this-week substitute
+    // logs under its OWN id (altId — its history is deliberately separate), so checking the raw
+    // definition list finds no logs on the original and silently no-ops — a button that appeared
+    // pressable but did nothing. Map the week's substitutions in before checking.
+    const weekOverrides = (prog.exerciseWeekOverrides && prog.exerciseWeekOverrides[prog.currentWeek]) || {};
+    const dayExercises = def.exercises[selectedDay].exercises.map(function (ex) {
+      const o = weekOverrides[ex.id];
+      return o ? Object.assign({}, ex, { id: o.altId, bodyweight: o.bodyweight }) : ex;
+    });
     const weekLogs = prog.logs[prog.currentWeek] || {};
     const weekSkipped = prog.skipped[prog.currentWeek] || {};
     const weekDifficulty = prog.exerciseDifficulty[prog.currentWeek] || {};
     if (!isDayFullyComplete(dayExercises, isDeloadWeek, weekLogs, weekSkipped, weekDifficulty, effectiveExerciseState)) return;
-    const idx = TRAINING_DAY_ORDER.indexOf(selectedDay);
+    const order = trainingDayOrder(def.exercises);
+    const idx = order.indexOf(selectedDay);
     if (idx === -1) return;
-    if (idx === TRAINING_DAY_ORDER.length - 1) {
+    if (idx === order.length - 1) {
       const didComplete = completeWeek();
-      if (didComplete) setSelectedDay(TRAINING_DAY_ORDER[0]);
+      if (didComplete) setSelectedDay(order[0]);
     } else {
-      const nextDay = TRAINING_DAY_ORDER[idx + 1];
+      const nextDay = order[idx + 1];
       setSelectedDay(nextDay);
       showToast(selectedDay + " complete — on to " + nextDay + "!");
     }
@@ -5810,8 +5827,9 @@ function WorkoutsTab(props) {
       const weekSkipped = props.data.skipped[props.data.currentWeek] || {};
       const weekDifficulty = props.data.exerciseDifficulty[props.data.currentWeek] || {};
       const dayComplete = isDayFullyComplete(effectiveExercises, props.isDeloadWeek, weekLogs, weekSkipped, weekDifficulty, props.data.exerciseState);
-      const trainingIdx = TRAINING_DAY_ORDER.indexOf(props.selectedDay);
-      const isLastTrainingDay = trainingIdx === TRAINING_DAY_ORDER.length - 1;
+      const order = trainingDayOrder(props.exercises);
+      const trainingIdx = order.indexOf(props.selectedDay);
+      const isLastTrainingDay = trainingIdx === order.length - 1;
       if (!dayComplete) {
         return h("p", { className: "complete-hint" },
           "Finish and rate every exercise above to complete " + props.selectedDay + ".");
@@ -5820,7 +5838,7 @@ function WorkoutsTab(props) {
         h("button", { className: "complete-btn", onClick: props.completeDay },
           isLastTrainingDay
             ? "✓ " + props.selectedDay + " Complete — Finish Week " + props.data.currentWeek
-            : "✓ " + props.selectedDay + " Complete — Continue to " + TRAINING_DAY_ORDER[trainingIdx + 1]),
+            : "✓ " + props.selectedDay + " Complete — Continue to " + order[trainingIdx + 1]),
         h("p", { className: "complete-hint" },
           isLastTrainingDay
             ? "Applies progression to every exercise logged this week, then advances to Week " + (props.data.currentWeek + 1) + "."
