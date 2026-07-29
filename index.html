@@ -2105,6 +2105,21 @@ function evaluateRirMissPattern(missHistory) {
   return { shouldRecalibrate: shouldRecalibrate, shouldEscalateToDeload: shouldEscalateToDeload, trailingConsecutiveMisses: trailingConsecutiveMisses };
 }
 
+// Week 1 of a brand-new RIR program has no prior data to build a graded miss-pattern from yet — a
+// single big undershoot here isn't "fatigue mid-block" (what evaluateRirMissPattern's graded
+// recalibrate/deload response exists for); it's evidence the exercise DB's starting-weight guess
+// was simply too heavy for this person. Calibration week treats it as exactly that: drop the
+// weight now and reset the target to the range's own low end, rather than feeding a nonsense raw
+// target (or a false "miss") into the normal RIR ramp. Deliberately narrow: only fires when
+// clearly undershot by more than UNDERSHOOT_MARGIN reps below the range's low end — landing at or
+// near repLow just means the estimate was fine, let the normal RIR math run from there untouched.
+function computeCalibrationWeekAdjustment(actualReps, range, currentWeight) {
+  if (actualReps == null) return null;
+  const UNDERSHOOT_MARGIN = 2;
+  if (actualReps >= range.repLow - UNDERSHOOT_MARGIN) return null;
+  return { weight: nextWeightDecrement(currentWeight), repsTarget: range.repLow };
+}
+
 // Ties the three pieces above together into the one full update completeWeek() runs per RIR-mode
 // exercise: was this week's target met, what's the updated miss-history (resetting at a phase
 // boundary), does the miss pattern call for recalibrating or escalating to a deload, and what's the
@@ -2327,6 +2342,13 @@ const INSIGHT_THRESHOLDS = {
   MIN_WEEKDAY_DAYS: 4,
   WEEKEND_EXCESS_PCT: 0.20,
   WEEKEND_SEVERE_PCT: 0.35,
+
+  // --- goal transition ---
+  GOAL_ARRIVAL_MARGIN_LB: 2, // within this many lb of target counts as "arrived" — a cut doesn't
+                             // have to touch the exact number to the decimal for this to be real.
+
+  // --- lapse nudge ---
+  LAPSE_NUDGE_MIN_DAYS: 3, // days since any dated activity before the calibration nudge shows
 };
 
 // The three built-in programs encode their goal in the program itself; Custom
@@ -2514,6 +2536,44 @@ function insightWeightTrendDivergence(ctx) {
     },
     references: ["adaptiveTDEE"],
     sortKey: "weight_trend_divergence",
+  };
+}
+
+// ---- Finding: goal transition arrived [weight x goal] ----------------------
+// The opposite news from weight_trend_divergence: the trend hasn't drifted off the
+// goal, it's reached it. Scoped to custom-program cuts specifically, because only
+// Custom carries a real numeric targetWeight from the wizard — the built-in Cutting
+// template has no specific number to have "arrived" at. Self-resolving by design:
+// the moment the person actually switches off a cut goal (Cruise, or edits their
+// custom goal), ctx.goal stops being "cut" and this stops firing on its own — no
+// separate dismiss-tracking needed, unlike a UI-only banner would require.
+function insightGoalTransitionArrived(ctx) {
+  const T = INSIGHT_THRESHOLDS;
+  if (ctx.goal !== "cut") return null;
+  const config = ctx.data.customProgramConfig;
+  if (ctx.data.activeProgram !== "custom" || !config || config.targetWeight == null) return null;
+  if (!ctx.trend) return null;
+  if (ctx.trend.secondAvg > config.targetWeight + T.GOAL_ARRIVAL_MARGIN_LB) return null;
+
+  return {
+    id: "goal_transition_arrived",
+    domains: ["nutrition"],
+    severity: 1, // good news, not a problem — sorts below anything that actually needs attention
+    title: "You've reached your goal weight",
+    sentence:
+      "Your trend is sitting at " + ctx.trend.secondAvg + " lb, at or within " + T.GOAL_ARRIVAL_MARGIN_LB +
+      " lb of your " + config.targetWeight + " lb target. Cruise holds here at maintenance so the " +
+      "result sticks, instead of drifting back — switch whenever you're ready.",
+    evidence: {
+      weeks: { uptoWeek: ctx.lastCompletedWeek },
+      numbers: {
+        trendWeightLb: ctx.trend.secondAvg,
+        targetWeightLb: config.targetWeight,
+        weighInsUsed: ctx.trend.daysUsed,
+      },
+    },
+    references: [],
+    sortKey: "goal_transition_arrived",
   };
 }
 
@@ -2705,9 +2765,15 @@ function analyzeProgram(data, def, opts) {
   ctx.fuel = insightFoodDays(prog, today, INSIGHT_THRESHOLDS.FUEL_WINDOW_DAYS, foods);
   ctx.trend = insightWeightTrend(prog, today, INSIGHT_THRESHOLDS.WEIGHT_WINDOW_DAYS);
 
+  // goal_transition_arrived and weight_trend_divergence can both look at the same flat-at-target
+  // trend and each say something technically true but contradictory in the same digest ("trend
+  // isn't falling anymore" right next to "you've arrived"). Arrival takes precedence — same
+  // suppression pattern insightLiftPlateaus already uses under a broad stall.
+  const goalTransition = insightGoalTransitionArrived(ctx);
   const findings = []
     .concat(insightUnderFuelStall(ctx) || [])
-    .concat(insightWeightTrendDivergence(ctx) || [])
+    .concat(goalTransition ? [] : (insightWeightTrendDivergence(ctx) || []))
+    .concat(goalTransition || [])
     .concat(insightAdherenceGap(ctx) || [])
     .concat(insightLiftPlateaus(ctx))
     .concat(insightWeekendVariance(ctx) || []);
@@ -2745,6 +2811,32 @@ function insightLastActivityKey(prog) {
     });
   });
   return best;
+}
+
+// Days between two YYYY-MM-DD keys, parsed as LOCAL midnight — same reasoning the coach-triage
+// "as of" label already uses: parsing as UTC would shift the day for western timezones. Assumes
+// a is on/after b chronologically (that's the only order this app ever calls it with).
+function daysBetweenKeys(a, b) {
+  function local(k) { const p = k.split("-"); return new Date(+p[0], +p[1] - 1, +p[2]); }
+  return Math.round((local(a) - local(b)) / 86400000);
+}
+
+// LAPSE NUDGE: reuses insightLastActivityKey — the exact same "last dated activity" signal coach
+// triage already anchors to, so the two features can never disagree about what counts as a lapse.
+// Deliberately has no dismiss-state of its own to track: logging a fresh weigh-in or food entry IS
+// what resolves it — the moment that happens, the underlying signal moves and this stops firing on
+// its own, same self-resolving shape as goal_transition_arrived. The copy is framed as calibration
+// upkeep, never guilt — this exists to keep adaptive TDEE accurate, not to scold a gap in logging.
+function computeLapseNudge(prog, todayK) {
+  const lastActive = insightLastActivityKey(prog);
+  if (!lastActive) return null;
+  const daysSince = daysBetweenKeys(todayK, lastActive);
+  if (daysSince < INSIGHT_THRESHOLDS.LAPSE_NUDGE_MIN_DAYS) return null;
+  return {
+    daysSince: daysSince,
+    message: "It's been " + daysSince + " days since your last weigh-in or food log. Your adaptive " +
+      "TDEE estimate is only as fresh as what it's built from \u2014 one weigh-in keeps it calibrated.",
+  };
 }
 
 // ---- Storage key scoping ----
@@ -3219,7 +3311,7 @@ function programStateHasRealData(state) {
 // The build currently running. Surfaced in Settings -> Account, because "is the deploy actually
 // live?" has been the real answer to several apparent bugs, and inferring it from behaviour is slow
 // and error-prone. Compared against version.json by the update check below.
-const APP_VERSION = "2026-07-29T13:30:00";
+const APP_VERSION = "2026-07-29T21:23:00";
 
 // Signing out has to be unconditional, because every failure mode here ends the same way: a person
 // tapping a button that does nothing.
@@ -4376,6 +4468,9 @@ function App() {
   }
 
   const isDeloadWeek = prog.currentWeek % 5 === 0 || (prog.extraDeloadWeeks || []).indexOf(prog.currentWeek) !== -1;
+  // Recomputed on every render, not stored — deliberately, same reasoning as every other insight
+  // finding: it's a live read of "what's true right now," not a snapshot that could go stale.
+  const lapseNudge = computeLapseNudge(prog, todayKey());
   // Digest inputs — reuses the exact same phase/deload logic already driving RIR and volume-increase
   // elsewhere, so this can never disagree with what those actually do.
   const phaseWeekPosition = computePhaseWeeks(prog.currentWeek, prog.extraDeloadWeeks).length; // 0 on a deload week itself
@@ -4624,6 +4719,21 @@ function App() {
           // Heading INTO a deload next week — hold flat; a recovery week isn't part of the
           // progressive proximity-to-failure schedule, so there's nothing to compute for it.
           newState[ex.id] = cur;
+          return;
+        }
+        // CALIBRATION WEEK: week 1 of a brand-new RIR program has no prior data at all — a big
+        // undershoot here means the exercise DB's starting-weight guess was wrong, not that
+        // fatigue is building mid-block (what the graded miss-pattern system below exists to
+        // read). Scoped strictly to week === 1 so a later single miss still goes through the
+        // normal graded response untouched — this only intercepts the very first data point.
+        const calibration = week === 1 ? computeCalibrationWeekAdjustment(maxReps, effectiveRepRange(ex, cur), cur.weight) : null;
+        if (calibration) {
+          newState[ex.id] = Object.assign({}, cur, {
+            weight: calibration.weight,
+            repsTarget: calibration.repsTarget,
+            rirTargetReps: null,   // no valid RIR target comes out of a corrected-weight week —
+            rirMissHistory: [],    // week 2 starts the graded system clean, not mid-pattern from
+          });                     // what was actually a bad estimate, not real fatigue.
           return;
         }
         const update = computeNextWeekRirUpdate(maxReps, cur.rirTargetReps, cur.rirMissHistory, prevWeekPositionInPhase, nextWeekPositionInPhase, RIR_PHASE_LENGTH, cur.weight);
@@ -5764,10 +5874,13 @@ function App() {
             : h(CustomSetupWizard, { onComplete: completeCustomSetup, allFoods: allFoods }))
       : h(React.Fragment, null,
           h("main", null,
+            tab === "workouts" && lapseNudge && h(LapseNudgeBanner, { nudge: lapseNudge }),
+            tab === "workouts" && rirModeEnabled && prog.currentWeek === 1 && h(CalibrationWeekBanner),
             tab === "workouts" && insightDigestPending && h(InsightDigest, {
               findings: insightFindings, week: insightLastCompletedWeek, prog: prog,
               tierHasTraining: tierHasTraining, tierHasNutrition: tierHasNutrition,
               onDismiss: dismissInsightDigest,
+              onSwitchToCruise: function () { setActiveProgram("cruise"); },
             }),
             tab === "workouts" && h(WorkoutsTab, {
               selectedDay: selectedDay, setSelectedDay: setSelectedDay, data: Object.assign({}, prog, { exerciseState: effectiveExerciseState }), exercises: def.exercises, isDeloadWeek: isDeloadWeek,
@@ -5932,10 +6045,37 @@ function isDayFullyComplete(dayExercises, isDeloadWeek, weekLogs, weekSkipped, w
 // #3): a locked teaser renders only when the engine actually found something,
 // and it carries evidence COUNTS, never the numbers — calories, rates, and
 // percentages are the product, same rule as the locked built-plan teaser.
+// Shown whenever computeLapseNudge finds a real gap — no dismiss button, because logging
+// something today is what actually makes it go away, not tapping a button that hides it while
+// the underlying gap is still true.
+function LapseNudgeBanner(props) {
+  return h("div", { className: "plan-error", style: { borderColor: "#4eba6f", marginBottom: 16 } },
+    h("strong", null, "Welcome back"),
+    h("p", { style: { margin: "6px 0 0", fontSize: 13 } }, props.nudge.message)
+  );
+}
+
+// Week-1 discovery framing for RIR-mode programs. Purely informational — no state, nothing to
+// dismiss or persist — since it only ever shows during week 1 itself (prog.currentWeek === 1),
+// and simply stops rendering once week 2 begins. Reuses the app's existing "plan-error" card
+// styling (same class the nutrition-lock and other informational banners already use) rather
+// than inventing new visual language for a one-off.
+function CalibrationWeekBanner() {
+  return h("div", { className: "plan-error", style: { borderColor: "#3d97d3", marginBottom: 16 } },
+    h("strong", null, "This week is calibration"),
+    h("p", { style: { margin: "6px 0 0", fontSize: 13 } },
+      "Starting weights are estimates from the exercise database, not tuned to you yet. Treat them " +
+      "as a first guess: if a set leaves way more than about 2 reps in reserve, add weight before " +
+      "your next set. If you're grinding well past that, it's fine to drop it — badly undershoot " +
+      "the rep range on any exercise and next week's weight adjusts down for you automatically, no " +
+      "need to fix it by hand."),
+    h("p", { style: { margin: "6px 0 0", fontSize: 11, color: "#737373" } },
+      "From week 2 on, the RIR ramp takes over and ties weight to what you actually logged.")
+  );
+}
+
 function InsightDigest(props) {
   const findings = props.findings || [];
-  const nutritionFindings = findings.filter(function (f) { return f.domains.indexOf("nutrition") !== -1; });
-  const trainingFindings = findings.filter(function (f) { return f.domains.indexOf("nutrition") === -1; });
   function accent(f) { return f.severity >= 3 ? "#d9822b" : "#3d97d3"; }
   function findingCard(f, i) {
     return h("div", { key: f.id, style: { marginTop: i > 0 ? 12 : 0, paddingLeft: 10, borderLeft: "3px solid " + accent(f) } },
@@ -5950,6 +6090,7 @@ function InsightDigest(props) {
     if (f.id === "under_fuel_stall") return "A pattern links your food log and your training — built from " + n.foodDaysLogged + " logged days and " + w.window + " weeks of lifts.";
     if (f.id === "weight_trend_divergence") return "Your weigh-in trend has something to say about your goal — " + n.weighInsUsed + " weigh-ins of evidence.";
     if (f.id === "weekend_variance") return "A weekly rhythm shows up in your food log — " + (n.weekendDaysLogged + n.weekdayDaysLogged) + " logged days of evidence.";
+    if (f.id === "goal_transition_arrived") return "Your weight trend has reached a milestone tied to your goal.";
     return "A pattern was found in your logged data.";
   }
   const isFree = props.tierHasTraining === false;
@@ -5976,15 +6117,29 @@ function InsightDigest(props) {
         : h("p", { style: { margin: "8px 0 0", fontSize: 12, color: "#737373" } },
             "Keep logging — everything you record sharpens what the app can find."));
   } else {
-    const visible = showNutrition ? findings : trainingFindings;
-    const locked = showNutrition ? [] : nutritionFindings;
+    const goalTransition = findings.find(function (f) { return f.id === "goal_transition_arrived"; });
+    const rest = findings.filter(function (f) { return f.id !== "goal_transition_arrived"; });
+    const restNutrition = rest.filter(function (f) { return f.domains.indexOf("nutrition") !== -1; });
+    const restTraining = rest.filter(function (f) { return f.domains.indexOf("nutrition") === -1; });
+    const visible = showNutrition ? rest : restTraining;
+    const locked = showNutrition ? [] : restNutrition;
+    // goal_transition_arrived is domain nutrition — same gate as any other nutrition finding, so a
+    // tier-2 (training-only) account gets it as a locked teaser like everything else in that
+    // domain, never an early peek at what's actually a nutrition-tier moment.
+    const goalTransitionLocked = goalTransition && !showNutrition;
+    const goalTransitionVisible = goalTransition && showNutrition;
     body = h(React.Fragment, null,
-      visible.length === 0 && locked.length === 0 && h("p", { style: { margin: 0, fontSize: 13, color: "#a3a3a3" } },
+      goalTransitionVisible && h("div", { style: { padding: 10, marginBottom: 12, background: "rgba(78,186,111,0.08)", border: "1px solid #4eba6f", borderRadius: 8 } },
+        h("p", { style: { margin: 0, fontWeight: 600, fontSize: 13, color: "#4eba6f" } }, "\ud83c\udf89 " + goalTransition.title),
+        h("p", { style: { margin: "4px 0 8px", fontSize: 13, lineHeight: 1.5 } }, goalTransition.sentence),
+        h("button", { className: "ex-action-btn", onClick: props.onSwitchToCruise }, "Switch to Cruise")),
+      visible.length === 0 && locked.length === 0 && !goalTransition && h("p", { style: { margin: 0, fontSize: 13, color: "#a3a3a3" } },
         "No flags in your data this week. Progression and targets keep updating on their own as you log."),
       visible.map(findingCard),
-      locked.length > 0 && h("div", { style: { marginTop: visible.length > 0 ? 12 : 0, paddingLeft: 10, borderLeft: "3px solid #4eba6f" } },
+      (locked.length > 0 || goalTransitionLocked) && h("div", { style: { marginTop: visible.length > 0 ? 12 : 0, paddingLeft: 10, borderLeft: "3px solid #4eba6f" } },
         h("p", { style: { margin: 0, fontWeight: 600, fontSize: 13 } },
-          "\ud83d\udd12 " + locked.length + " nutrition finding" + (locked.length === 1 ? "" : "s") + " this week"),
+          "\ud83d\udd12 " + (locked.length + (goalTransitionLocked ? 1 : 0)) + " nutrition finding" + (locked.length + (goalTransitionLocked ? 1 : 0) === 1 ? "" : "s") + " this week"),
+        goalTransitionLocked && h("p", { style: { margin: "4px 0 0", fontSize: 12, color: "#a3a3a3" } }, teaserLine(goalTransition)),
         locked.map(function (f) {
           return h("p", { key: f.id, style: { margin: "4px 0 0", fontSize: 12, color: "#a3a3a3" } }, teaserLine(f));
         }),
