@@ -752,9 +752,21 @@ function interpolateMealTimes(startStr, endStr, count) {
 // Shared by the initial Mifflin-St Jeor estimate AND the adaptive-TDEE recalibration — both need
 // the exact same goal-adjustment and diet-style split logic applied to a maintenance-calorie number,
 // they just arrive at that number differently (estimated vs. measured from real weigh-ins).
+// Protein per POUND of bodyweight, by goal. Cut and maintain sit at ~1g/lb, the standard
+// evidence-based target. Bulk runs higher at 1.5g/lb (user-set, 2026-07-30): more than the
+// literature strictly requires for muscle growth, but harmless in healthy individuals and
+// deliberately chosen — the extra just displaces carbs, since carbs absorb the remainder below.
+const GOAL_PROTEIN_PER_LB = { cut: 1.0, bulk: 1.5, maintain: 1.0 };
+// Never prescribe below this fraction of a person's own maintenance, no matter what the goal
+// multiplier or a chosen timeline works out to. A percentage deficit is bodyweight-blind: for a
+// small, sedentary person a straight 20% cut can land at an intake that's hard to hit protein and
+// micronutrients within. This is a floor, not a target — most people never touch it.
+const MIN_CAL_FRACTION_OF_MAINTENANCE = 0.6;
+
 function macrosFromMaintenance(maintenance, weight, goal, dietStyle) {
-  const targetCal = Math.round(maintenance * (GOAL_CAL_ADJUST[goal] || 1.0));
-  const protein = Math.round(weight * 1.0); // ~1g/lb, standard evidence-based target used throughout this app
+  const rawCal = Math.round(maintenance * (GOAL_CAL_ADJUST[goal] || 1.0));
+  const targetCal = Math.max(Math.round(maintenance * MIN_CAL_FRACTION_OF_MAINTENANCE), rawCal);
+  const protein = Math.round(weight * (GOAL_PROTEIN_PER_LB[goal] || 1.0));
   let fat, carb;
   if (dietStyle === "keto") {
     carb = 25; // conservative, standard starting point for keto — not zero, since some carb intake still matters for micronutrients/fiber
@@ -787,6 +799,50 @@ function computeWeeksNeeded(currentWeight, targetWeight, goal, maintenance, targ
   if (dailyAdjust < 1) return 12;
   const weeklyRateLb = (dailyAdjust * 7) / 3500;
   return Math.min(24, Math.max(4, Math.ceil(diff / weeklyRateLb)));
+}
+
+// The safe span a goal can honestly be spread across. The FAST end is capped by a sane maximum
+// rate (1% of bodyweight/week — beyond that a "cut" is mostly muscle and water, and this app
+// shouldn't offer a timeline it doesn't stand behind); the SLOW end is where the daily adjustment
+// gets so small it's inside the noise of daily weight fluctuation. Returns null when the concept
+// doesn't apply (maintenance, or already at goal) so callers can hide the control entirely.
+function goalWeekBounds(currentWeight, targetWeight, goal) {
+  const diff = Math.abs(targetWeight - currentWeight);
+  if (goal === "maintain" || diff < 1) return null;
+  const maxWeeklyLb = Math.max(0.5, currentWeight * 0.01);
+  const minWeeklyLb = 0.25;
+  return {
+    fastest: Math.max(4, Math.ceil(diff / maxWeeklyLb)),
+    slowest: Math.min(52, Math.max(6, Math.ceil(diff / minWeeklyLb))),
+  };
+}
+
+// Re-derives calories/macros so the plan actually MATCHES a chosen timeline. Choosing a longer
+// runway has to mean a smaller daily deficit — otherwise the number of weeks is just a label on a
+// plan that still eats like the original pace, and the milestones would be fiction. Protein, fat
+// ratio, and diet-style rules all stay exactly as macrosFromMaintenance computes them; only the
+// calorie target moves, and carbs absorb the difference the same way they already do.
+function macrosForChosenPace(maintenance, weight, targetWeight, goal, dietStyle, weeks) {
+  const base = macrosFromMaintenance(maintenance, weight, goal, dietStyle);
+  const diff = Math.abs(targetWeight - weight);
+  if (goal === "maintain" || diff < 1 || !weeks || weeks < 1) return base;
+  const dailyAdjust = (diff * 3500) / (weeks * 7);
+  const targetCal = Math.round(goal === "bulk" ? maintenance + dailyAdjust : maintenance - dailyAdjust);
+  // Same floor the default path applies — one constant, so the two paths can never drift apart.
+  const safeCal = Math.max(Math.round(maintenance * MIN_CAL_FRACTION_OF_MAINTENANCE), targetCal);
+  const protein = base.p;
+  let fat, carb;
+  if (dietStyle === "keto") {
+    carb = 25;
+    fat = Math.max(0, Math.round((safeCal - protein * 4 - carb * 4) / 9));
+  } else if (dietStyle === "lowfat") {
+    fat = Math.round((safeCal * 0.15) / 9);
+    carb = Math.max(0, Math.round((safeCal - protein * 4 - fat * 9) / 4));
+  } else {
+    fat = Math.round((safeCal * 0.25) / 9);
+    carb = Math.max(0, Math.round((safeCal - protein * 4 - fat * 9) / 4));
+  }
+  return { cal: safeCal, p: protein, c: carb, f: fat, maintenance: base.maintenance };
 }
 
 const ALL_WEEKDAYS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
@@ -3311,7 +3367,7 @@ function programStateHasRealData(state) {
 // The build currently running. Surfaced in Settings -> Account, because "is the deploy actually
 // live?" has been the real answer to several apparent bugs, and inferring it from behaviour is slow
 // and error-prone. Compared against version.json by the update check below.
-const APP_VERSION = "2026-07-29T21:23:00";
+const APP_VERSION = "2026-07-30T08:39:00";
 
 // Signing out has to be unconditional, because every failure mode here ends the same way: a person
 // tapping a button that does nothing.
@@ -8509,6 +8565,34 @@ function CoachPrescriptionEditor(props) {
   // the apply path uses.
   const def = PROGRAM_DEFS[programKey];
   const rotationGuess = ((weekNum - 1) % 4) + 1;
+  // The client's REAL meal slots, not a hardcoded m1–m4. A Custom client can have any number of
+  // meals (the wizard builds slots from their own answers), so hardcoding four both hid meals 5+
+  // entirely and offered slots that don't exist for a 3-meal client. Custom reads the client's
+  // own saved slots; the three built-ins read their program definition's. Falls back to the old
+  // fixed four only if neither has loaded yet, so the editor is never empty mid-fetch.
+  const clientSlots = (function () {
+    if (programKey === "custom") {
+      const cfg = clientPlan && clientPlan.config;
+      if (cfg && Array.isArray(cfg.slots) && cfg.slots.length) return cfg.slots;
+      return null;
+    }
+    return (def && def.slots) || null;
+  })();
+  // Slot ids in the program definition are prefixed ("cm1"), while meal ids in mealsByWeek and in
+  // meal_overrides payloads are "m1" — normalising here keeps the assignment payload in exactly
+  // the shape the client's apply path already expects, unchanged.
+  const mealSlotOptions = clientSlots
+    ? clientSlots.map(function (s, i) {
+        return { id: "m" + (i + 1), label: s.label || ("Meal " + (i + 1)), target: s };
+      })
+    : ["m1", "m2", "m3", "m4"].map(function (id, i) { return { id: id, label: "Meal " + (i + 1), target: null }; });
+  const selectedSlot = mealSlotOptions.filter(function (o) { return o.id === mealId; })[0] || null;
+  // If the client has fewer meals than the currently-selected slot (e.g. coach was on Meal 4, then
+  // opened a 3-meal client), snap back to a slot that actually exists rather than prescribing into
+  // a meal the client will never see.
+  useEffect(function () {
+    if (mealSlotOptions.length && !selectedSlot) setMealId(mealSlotOptions[0].id);
+  }, [mealSlotOptions.length, mealId]);
   const defMeal = def && def.mealsByWeek && def.mealsByWeek[rotationGuess]
     ? def.mealsByWeek[rotationGuess].filter(function (m) { return m.id === mealId; })[0] : null;
 
@@ -8517,7 +8601,7 @@ function CoachPrescriptionEditor(props) {
     setBusy(true); setStatus("");
     const mealObj = {
       id: mealId,
-      name: (defMeal && defMeal.name) || ("Meal " + mealId.slice(1)),
+      name: (defMeal && defMeal.name) || (selectedSlot && selectedSlot.label) || ("Meal " + mealId.slice(1)),
       time: (defMeal && defMeal.time) || "",
       food: food,
       cal: Math.max(0, Math.round(Number(cal) || 0)),
@@ -8570,14 +8654,36 @@ function CoachPrescriptionEditor(props) {
           onChange: function (e) { setWeek(e.target.value); } }, { style: inputStyle }))),
       h("label", { style: { flex: 1, fontSize: 11, color: "#737373" } }, "meal",
         h("select", { value: mealId, onChange: function (e) { setMealId(e.target.value); }, style: inputStyle },
-          ["m1", "m2", "m3", "m4"].map(function (id) { return h("option", { key: id, value: id }, "Meal " + id.slice(1)); })))
+          mealSlotOptions.map(function (o) { return h("option", { key: o.id, value: o.id }, o.label); })))
     ),
+    programKey === "custom" && !clientPlan && h("p", { style: { fontSize: 11, color: "#737373", margin: "0 0 8px" } },
+      "Loading their meal slots\u2026"),
     weekIsPast && h("p", { style: { fontSize: 11, color: "#f87171", margin: "0 0 8px" } },
       "Client is on week " + clientWeek + " — prescriptions target a future week, never the current one."),
     !weekIsPast && weekIsDeload && h("p", { style: { fontSize: 11, color: "#4eba6f", margin: "0 0 8px" } },
       "Week " + weekNum + " is a deload — the suggested anchor for training changes; nutrition can move sooner."),
     defMeal && h("p", { style: { fontSize: 11, color: "#525252", margin: "0 0 8px" } },
-      "Currently: " + defMeal.food + " (" + defMeal.cal + " cal · " + defMeal.p + "p/" + defMeal.c + "c/" + defMeal.f + "f)"),
+      "Currently: " + defMeal.food + " (" + defMeal.cal + " cal \u00b7 " + defMeal.p + "p/" + defMeal.c + "c/" + defMeal.f + "f)"),
+    // Slot targets + live variance. This is the whole point of prescribing "against client slots":
+    // the coach can see what this meal is SUPPOSED to hit for this specific client and how far off
+    // what they're typing is, instead of prescribing macros blind and finding out later.
+    selectedSlot && selectedSlot.target && (function () {
+      const t = selectedSlot.target;
+      const has = p !== "" || cb !== "" || f !== "";
+      const dp = has ? Math.round((Number(p) || 0) - (t.p || 0)) : null;
+      const dc = has ? Math.round((Number(cb) || 0) - (t.c || 0)) : null;
+      const df = has ? Math.round((Number(f) || 0) - (t.f || 0)) : null;
+      function delta(d) {
+        if (d === null || d === 0) return "";
+        return " (" + (d > 0 ? "+" : "") + d + ")";
+      }
+      // Amber only when something is meaningfully off — small rounding drift isn't worth alarming
+      // a coach who deliberately chose those numbers.
+      const off = has && (Math.abs(dp) > 5 || Math.abs(dc) > 10 || Math.abs(df) > 5);
+      return h("p", { style: { fontSize: 11, color: off ? "#f0b429" : "#525252", margin: "0 0 8px" } },
+        "Slot target: " + (t.p || 0) + "p" + delta(dp) + " / " + (t.c || 0) + "c" + delta(dc) + " / " + (t.f || 0) + "f" + delta(df) +
+        (off ? " \u2014 prescribing off-target, which is fine if deliberate." : ""));
+    })(),
     h("input", Object.assign({ placeholder: "Meal description, e.g. 6oz chicken + 150g rice + veg", value: food,
       onChange: function (e) { setFood(e.target.value); } }, { style: Object.assign({}, inputStyle, { marginBottom: 6 }) })),
     h("div", { style: { display: "flex", gap: 6, marginBottom: 6 } },
@@ -9714,6 +9820,8 @@ function CustomSetupWizard(props) {
   const [heightInches, setHeightInches] = useState("");
   const [eatingStart, setEatingStart] = useState("08:00");
   const [eatingEnd, setEatingEnd] = useState("18:00");
+  const [mealsPerDay, setMealsPerDay] = useState(4); // 3 / 4 / 5 presets; 4 is the historical default
+  const [weeksOverride, setWeeksOverride] = useState(""); // blank = use the computed pace
   const [trainingTime, setTrainingTime] = useState(""); // optional — empty means no bias applied
   const [wantsIntraWorkout, setWantsIntraWorkout] = useState(false);
   const [dietStyle, setDietStyle] = useState("standard");
@@ -9795,8 +9903,13 @@ function CustomSetupWizard(props) {
       }
     }
     const heightCm = (feet * 12 + inches) * 2.54;
-    const macros = computeCustomMacros(cw, activity, goal, gender, heightCm, ageNum, dietStyle);
-    const weeksNeeded = computeWeeksNeeded(cw, tw, goal, macros.maintenance, macros.cal);
+    const baseMacros = computeCustomMacros(cw, activity, goal, gender, heightCm, ageNum, dietStyle);
+    const pacedWeeks = weeksOverride !== "" ? Math.max(1, Math.round(Number(weeksOverride) || 0)) : null;
+    // An explicit timeline drives the calories; otherwise the calories drive the timeline (the
+    // original behaviour, untouched). Either way the two always agree — the plan never shows a
+    // week count its own macros wouldn't actually produce.
+    const macros = pacedWeeks ? macrosForChosenPace(baseMacros.maintenance, cw, tw, goal, dietStyle, pacedWeeks) : baseMacros;
+    const weeksNeeded = pacedWeeks || computeWeeksNeeded(cw, tw, goal, macros.maintenance, macros.cal);
     const exercises = buildCustomExercises(goal, experience, trainingDays, cardioDays, equipmentAvailable);
     const milestones = buildCustomMilestones(cw, tw, weeksNeeded, cbf, tbf);
     // Reserved, not added on top: the drink's macros come OUT of the day's computed total before the
@@ -9806,11 +9919,12 @@ function CustomSetupWizard(props) {
     const remaining = intraWorkoutMacros
       ? { p: macros.p - intraWorkoutMacros.p, c: macros.c - intraWorkoutMacros.c, f: macros.f - intraWorkoutMacros.f }
       : { p: macros.p, c: macros.c, f: macros.f };
-    const perMeal = { p: remaining.p / 4, c: remaining.c / 4, f: remaining.f / 4 };
-    const mealTimes = interpolateMealTimes(eatingStart, eatingEnd, 4);
-    const slots = [1, 2, 3, 4].map(function (i) {
-      return { id: "cm" + i, label: "Meal " + i, time: mealTimes[i - 1], p: Math.round(perMeal.p), c: Math.round(perMeal.c), f: Math.round(perMeal.f) };
-    });
+    const perMeal = { p: remaining.p / mealsPerDay, c: remaining.c / mealsPerDay, f: remaining.f / mealsPerDay };
+    const mealTimes = interpolateMealTimes(eatingStart, eatingEnd, mealsPerDay);
+    const slots = [];
+    for (let i = 1; i <= mealsPerDay; i++) {
+      slots.push({ id: "cm" + i, label: "Meal " + i, time: mealTimes[i - 1], p: Math.round(perMeal.p), c: Math.round(perMeal.c), f: Math.round(perMeal.f) });
+    }
     setComputed({
       currentWeight: cw, targetWeight: Math.round(tw * 10) / 10, currentBF: cbf, targetBF: tbf,
       usedBFMethod: goalMethod === "bodyfat" && goal !== "maintain", age: ageNum, gender: gender, heightCm: heightCm,
@@ -9896,7 +10010,14 @@ function CustomSetupWizard(props) {
         h("input", { type: "time", className: "search-input", value: eatingEnd, onChange: function (e) { setEatingEnd(e.target.value); } })
       ),
       h("p", { style: { fontSize: "11px", color: "#737373", marginTop: 4 } },
-        "Your 4 meals will be spaced evenly across this window — also what meal-time reminders will be based on."),
+        "Your " + mealsPerDay + " meals will be spaced evenly across this window — also what meal-time reminders will be based on."),
+      h("div", { className: "food-cat-title" }, "Meals Per Day"),
+      h("div", { className: "food-chip-grid" },
+        [3, 4, 5].map(function (n) {
+          return h("button", { key: n, className: "food-chip" + (mealsPerDay === n ? " liked" : ""), onClick: function () { setMealsPerDay(n); } }, String(n) + " meals");
+        })),
+      h("p", { style: { fontSize: "11px", color: "#737373", marginTop: 4 } },
+        "Your day's total macros stay the same either way — this only changes how they're split up. Fewer, bigger meals or more, smaller ones, whichever you'll actually stick to."),
       h("div", { className: "food-cat-title" }, "Training Time (optional)"),
       h("input", { type: "time", className: "search-input", value: trainingTime, onChange: function (e) { setTrainingTime(e.target.value); } }),
       h("p", { style: { fontSize: "11px", color: "#737373", marginTop: 4 } },
@@ -9920,7 +10041,32 @@ function CustomSetupWizard(props) {
               h("p", { style: { fontSize: "11px", color: "#737373", marginTop: 4 } },
                 "Your target weight will be estimated from this, assuming " + (goal === "cut" ? "80% of the change is fat, 20% lean mass (typical for a cut with adequate protein)" : "35% of the change is fat, 65% lean mass (typical for a moderate, controlled bulk)") +
                 " — a research-based estimate, not a guarantee.")
-            )
+            ),
+        // Optional timeline. Blank = the app picks the pace from a standard deficit (what it has
+        // always done). Setting a number works the other way round — the timeline drives the
+        // calories — so the weeks shown are always weeks the macros actually deliver.
+        (function () {
+          const cwNum = Number(currentWeight);
+          const twNum = goalMethod === "weight" ? Number(targetWeight)
+            : (Number(currentBF) && Number(targetBF) ? impliedTargetWeightFromBF(cwNum, Number(currentBF), Number(targetBF), goal) : 0);
+          if (!cwNum || !twNum) return null;
+          const bounds = goalWeekBounds(cwNum, twNum, goal);
+          if (!bounds) return null;
+          const chosen = weeksOverride !== "" ? Math.round(Number(weeksOverride) || 0) : null;
+          const tooFast = chosen !== null && chosen > 0 && chosen < bounds.fastest;
+          const tooSlow = chosen !== null && chosen > bounds.slowest;
+          return h(React.Fragment, null,
+            h("div", { className: "food-cat-title" }, "Timeline (optional)"),
+            h("input", { type: "number", inputMode: "numeric", className: "search-input", placeholder: "weeks — leave blank to let the app choose",
+              value: weeksOverride, onChange: function (e) { setWeeksOverride(e.target.value); } }),
+            h("p", { style: { fontSize: "11px", color: tooFast || tooSlow ? "#f0b429" : "#737373", marginTop: 4 } },
+              tooFast
+                ? "Faster than " + bounds.fastest + " weeks would mean losing more than about 1% of your bodyweight a week — that's mostly muscle and water, not fat. " + bounds.fastest + "\u2013" + bounds.slowest + " weeks is the range this plan can honestly deliver."
+                : tooSlow
+                  ? "Slower than " + bounds.slowest + " weeks puts the weekly change inside normal day-to-day weight fluctuation, so progress becomes hard to even measure. " + bounds.fastest + "\u2013" + bounds.slowest + " weeks is the workable range."
+                  : "Leave blank and the app sets the pace from a standard deficit. Set a number and the calories are worked backwards from it instead \u2014 a longer timeline means a smaller daily deficit and more food. Sensible range here: " + bounds.fastest + "\u2013" + bounds.slowest + " weeks.")
+          );
+        })()
       ),
       h("div", { className: "food-cat-title" }, "Activity Level"),
       h("div", { className: "food-chip-grid" },
