@@ -167,17 +167,28 @@
   .complete-hint { font-size: 12px; color: #525252; margin-top: 8px; text-align: center; padding: 0 16px; }
 
   .navbar { position: fixed; bottom: 0; left: 0; right: 0; background: #171717; border-top: 1px solid #262626;
-    display: flex; justify-content: space-around; padding: 8px 0; max-width: 32rem; margin: 0 auto; }
-  .rest-timer-bar { position: fixed; bottom: 64px; left: 50%; transform: translateX(-50%); width: calc(100% - 32px);
+    display: flex; justify-content: space-around; padding: 8px 0; max-width: 32rem; margin: 0 auto; }  .rest-timer-bar { position: fixed; bottom: 64px; left: 50%; transform: translateX(-50%); width: calc(100% - 32px);
     max-width: calc(32rem - 32px); background: #1d4ed8; color: #fff; border-radius: 10px; padding: 8px 12px;
     display: flex; align-items: center; justify-content: space-between; gap: 10px; font-size: 13px; z-index: 40;
     box-shadow: 0 2px 10px rgba(0,0,0,0.4); }
   .rest-timer-bar .rest-time { font-variant-numeric: tabular-nums; letter-spacing: normal; font-weight: 700; font-size: 16px; }
   .rest-timer-bar button { background: rgba(255,255,255,0.15); border: none; color: #fff; border-radius: 6px;
     padding: 5px 10px; font-size: 12px; cursor: pointer; }
-  .nav-btn { display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 6px 12px;
-    border-radius: 8px; font-size: 11px; background: none; border: none; color: #737373; cursor: pointer; }
+  /* flex:1 1 0 + min-width:0 makes every tab share the bar equally and shrink as tabs are added.
+     Without it, buttons kept their natural width and a 7th tab (owner: +Clients +Admin) simply
+     overflowed past the right edge of the screen — rendered, but invisible and untappable.
+     Horizontal padding is small and the label ellipsises rather than wrapping, so the bar keeps
+     one consistent height no matter how many tabs the account actually has. */
+  .nav-btn { display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 6px 2px;
+    flex: 1 1 0; min-width: 0; border-radius: 8px; font-size: 11px; background: none; border: none;
+    color: #737373; cursor: pointer; }
+  .nav-btn > span:last-child, .nav-btn { white-space: nowrap; }
+  .nav-btn { overflow: hidden; text-overflow: ellipsis; }
   .nav-btn.active { color: #3d97d3; }
+  /* At 7 tabs (owner + coach) on a typical ~390px phone each tab gets ~55px — enough for the icon
+     but tight for "Milestones" at 11px. One step down keeps every label readable and un-truncated
+     rather than relying on the ellipsis, which is there as a floor, not the plan. */
+  @media (max-width: 430px) { .nav-btn { font-size: 10px; gap: 3px; } }
 
   .meal-card { width: 100%; text-align: left; padding: 12px 16px; border-radius: 12px; border: 1px solid #262626;
     background: #171717; color: #f5f5f5; display: flex; align-items: flex-start; gap: 12px; cursor: pointer; margin-bottom: 8px; }
@@ -3377,7 +3388,7 @@ function programStateHasRealData(state) {
 // The build currently running. Surfaced in Settings -> Account, because "is the deploy actually
 // live?" has been the real answer to several apparent bugs, and inferring it from behaviour is slow
 // and error-prone. Compared against version.json by the update check below.
-const APP_VERSION = "2026-07-30T15:05:00";
+const APP_VERSION = "2026-07-30T15:12:00";
 
 // Signing out has to be unconditional, because every failure mode here ends the same way: a person
 // tapping a button that does nothing.
@@ -5948,9 +5959,12 @@ function App() {
         },
           h(Gear, { size: 22 }),
           pendingInvites.length > 0 && h("span", {
+            // Flex centring rather than lineHeight/textAlign: line-height centring depends on the
+            // font's own metrics and drifts visibly at these sizes. Flex centres by box, always.
             style: { position: "absolute", top: 2, right: 2, background: "#ef4444", color: "#fff",
-                     fontSize: 10, fontWeight: 700, lineHeight: "16px", minWidth: 16, height: 16,
-                     borderRadius: 999, textAlign: "center", padding: "0 3px", pointerEvents: "none" },
+                     fontSize: 10, fontWeight: 700, minWidth: 16, height: 16,
+                     display: "flex", alignItems: "center", justifyContent: "center",
+                     borderRadius: 999, padding: "0 3px", pointerEvents: "none", boxSizing: "border-box" },
           }, pendingInvites.length)
         )
       ),
@@ -6209,10 +6223,13 @@ function TabButton(props) {
       h(props.Icon, { size: 20 }),
       props.badge > 0 && h("span", {
         style: { position: "absolute", top: -4, right: -8, background: "#ef4444", color: "#fff",
-                 fontSize: 9, fontWeight: 700, lineHeight: "14px", minWidth: 14, height: 14,
-                 borderRadius: 999, textAlign: "center", padding: "0 3px", pointerEvents: "none" },
+                 fontSize: 9, fontWeight: 700, minWidth: 14, height: 14,
+                 display: "flex", alignItems: "center", justifyContent: "center",
+                 borderRadius: 999, padding: "0 3px", pointerEvents: "none", boxSizing: "border-box" },
       }, props.badge)),
-    props.label);
+    // Wrapped rather than a bare text node: text-overflow needs a real block box to apply to, and
+    // in a column flex container a loose text node becomes an anonymous item that won't truncate.
+    h("span", { style: { maxWidth: "100%", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" } }, props.label));
 }
 
 function allSetsHaveReps(logsForEx, setsToday) {
