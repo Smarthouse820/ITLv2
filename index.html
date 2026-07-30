@@ -262,6 +262,9 @@ function Dumbbell(p) { return h(Icon, p,
 function Gear(p) { return h(Icon, p,
   h("circle", { cx: 12, cy: 12, r: 3 }),
   h("path", { d: "M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" })); }
+function ShieldCheck(p) { return h(Icon, p,
+  h("path", { d: "M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10Z" }),
+  h("path", { d: "m9 12 2 2 4-4" })); }
 function Droplet(p) { return h(Icon, p, h("path", { d: "M12 2.69 7.5 8.44a6 6 0 1 0 9 0L12 2.69Z" })); }
 function UtensilsCrossed(p) { return h(Icon, p,
   h("path", { d: "m16 2-2.3 2.3a3 3 0 0 0 0 4.2l1.8 1.8a3 3 0 0 0 4.2 0L22 8" }),
@@ -3374,7 +3377,7 @@ function programStateHasRealData(state) {
 // The build currently running. Surfaced in Settings -> Account, because "is the deploy actually
 // live?" has been the real answer to several apparent bugs, and inferring it from behaviour is slow
 // and error-prone. Compared against version.json by the update check below.
-const APP_VERSION = "2026-07-30T13:05:00";
+const APP_VERSION = "2026-07-30T14:44:00";
 
 // Signing out has to be unconditional, because every failure mode here ends the same way: a person
 // tapping a button that does nothing.
@@ -4045,6 +4048,10 @@ function App() {
   // guard inside invite_client(), both of which hold no matter what this value is — which is the
   // point, since a client-side boolean is a hint, never a boundary.
   const [amICoach, setAmICoach] = useState(false);
+  // Owner state lives up here rather than inside the panel, because the TAB BADGE needs the count
+  // before the panel is ever opened — same reason clientRequests sits at this level.
+  const [isOwner, setIsOwner] = useState(false);
+  const [pendingSignups, setPendingSignups] = useState([]);
 
   const [clientRequests, setClientRequests] = useState([]); // pending requests from MY clients (coach view)
   const [myRequests, setMyRequests] = useState([]);         // my own recent requests (client view)
@@ -4103,6 +4110,33 @@ function App() {
     supabaseClient.from("change_requests").update({ status: "rejected" }).eq("id", req.id)
       .then(function () { showToast("Rejected"); refreshCoaching(); });
   }
+  // Owner check + pending-signup list. is_owner() is asked once per sign-in (it can't change
+  // mid-session without database access), but the LIST refreshes on the same cadence as coaching —
+  // a badge is only honest if it stays current while the app sits open.
+  function refreshPendingSignups() {
+    return supabaseClient.rpc("pending_signups").then(function (r) {
+      setPendingSignups(r.error ? [] : (r.data || []));
+    });
+  }
+  useEffect(function () {
+    if (!userId) { setIsOwner(false); setPendingSignups([]); return; }
+    let cancelled = false;
+    supabaseClient.rpc("is_owner").then(function (r) {
+      if (cancelled) return;
+      const owner = !r.error && r.data === true;
+      setIsOwner(owner);
+      if (owner) refreshPendingSignups();
+    });
+    return function () { cancelled = true; };
+  }, [userId]);
+  useEffect(function () {
+    if (!isOwner) return;
+    const interval = setInterval(refreshPendingSignups, 5 * 60 * 1000);
+    function onVisible() { if (document.visibilityState === "visible") refreshPendingSignups(); }
+    document.addEventListener("visibilitychange", onVisible);
+    return function () { clearInterval(interval); document.removeEventListener("visibilitychange", onVisible); };
+  }, [isOwner]);
+
   useEffect(function () { refreshCoaching(); }, [userId]);
   // Safety net for the pre-built program claim. respondToInvite() claims at the natural moment,
   // but the link can become active without this device ever seeing that moment — accepted on a
@@ -4121,7 +4155,10 @@ function App() {
   // referencing it from above its own const is the same TDZ class as setCustomPlan/currentMeal.
   useEffect(function () {
     if (tab === "clients" && !(myClients && myClients.length)) setTab("workouts");
-  }, [tab, myClients]);
+    // Same reasoning for the admin tab: if the flag is ever revoked, don't strand someone on a
+    // screen that no longer has anything to show them.
+    if (tab === "admin" && !isOwner) setTab("workouts");
+  }, [tab, myClients, isOwner]);
   // The invite badge on the gear (below) is only honest if the list stays current while the app is
   // open — refreshCoaching keyed on userId alone means an invite sent mid-session would sit
   // invisible until the next full reload. Same cadence as the version check: every 5 minutes plus
@@ -4247,6 +4284,17 @@ function App() {
   const effectiveTier = myCoachRow ? 3 : accountTier;
   const tierHasTraining = effectiveTier >= 2;  // exercise DB, demos, autoregulation, RIR, milestones
   const tierHasNutrition = effectiveTier >= 3; // meal planning, adaptive TDEE, the solver
+  // The built-in programs (Cutting/Cruise/Hypertrophy) predate the tier system and have always had
+  // their own flag. Two independent switches meant approving someone at the TOP tier still left
+  // them stuck on Custom — which is exactly the bug this derivation fixes. Tier 3 now implies
+  // built-in programs, while full_program_access survives as an INDEPENDENT override, so programs
+  // can still be granted on their own (a trial, a comp, a program-only pack later) without giving
+  // away the full nutrition tier. Same shape as effectiveTier above: derived, nothing collapsed,
+  // fully reversible. Note fullProgramAccess is tri-state — null means "still loading", and must
+  // not be treated as false, or the gate flashes for a legitimate user on every load.
+  const effectiveProgramAccess = fullProgramAccess === null && !tierHasNutrition
+    ? null
+    : (tierHasNutrition || fullProgramAccess === true);
 
   // Revoking from the CLIENT side. Deliberately separate from endCoaching(), which is the coach's
   // action — the consent document promises the participant can withdraw, so it can't be something
@@ -5988,12 +6036,12 @@ function App() {
           uiPrefs: data.uiPrefs, updateUiPrefs: updateUiPrefs,
           exportData: exportData, importData: importData, resetAll: resetAll,
         }))
-      : (data.activeProgram !== "custom" && fullProgramAccess !== true)
+      : (data.activeProgram !== "custom" && effectiveProgramAccess !== true)
       ? h("main", null,
           // Waiting on the access check rather than assuming the restriction applies — otherwise a
           // coordinator on Cutting sees "isn't available in this version" flash before it corrects
           // itself, which reads as a broken app rather than a moment of latency.
-          fullProgramAccess === null
+          effectiveProgramAccess === null
             ? h("div", { style: { textAlign: "center", padding: "60px 24px", color: "#737373", fontSize: 13 } }, "Loading\u2026")
             : h(CoordinatorPlaceholder, { programLabel: def.label }))
       : def.needsSetup
@@ -6117,6 +6165,11 @@ function App() {
                 clientRequests: clientRequests, myRequests: myRequests,
                 approveRequest: approveRequest, rejectRequest: rejectRequest,
               })),
+            // isOwner re-checked here as well as on the tab button: cheap, and it means a stale
+            // `tab` value can never render this panel to someone who isn't the owner.
+            tab === "admin" && isOwner && h(AdminTab, {
+              pendingSignups: pendingSignups, onRefresh: refreshPendingSignups,
+            }),
             tab === "grocery" && !tierHasNutrition && h("p", { className: "plan-error", style: { borderColor: "#3d97d3" } },
               "The grocery list is built from your meal plan — part of the full nutrition tier. See the Nutrition tab for what it unlocks."),
             tab === "grocery" && tierHasNutrition && h(GroceryTab, {
@@ -6134,7 +6187,11 @@ function App() {
             // Only rendered when the coach actually has active clients — for everyone else (all
             // clients, and coaches between clients) the tab simply doesn't exist. Invite flow
             // stays reachable from Settings → Coaching, which is where the first client comes from.
-            !!(myClients && myClients.length) && h(TabButton, { Icon: Users, label: "Clients", badge: clientRequests.length, active: tab === "clients", onClick: function () { setTab("clients"); } })
+            !!(myClients && myClients.length) && h(TabButton, { Icon: Users, label: "Clients", badge: clientRequests.length, active: tab === "clients", onClick: function () { setTab("clients"); } }),
+            // Owner only — the tab doesn't exist for anyone else. Badge shows how many signups are
+            // waiting, so approvals get noticed without opening anything, same as the Clients tab's
+            // request badge.
+            isOwner && h(TabButton, { Icon: ShieldCheck, label: "Admin", badge: pendingSignups.length, active: tab === "admin", onClick: function () { setTab("admin"); } })
           )
         )
   );
@@ -9502,38 +9559,22 @@ function SettingsTab(props) {
       ),
       h(SettingsRow, { style: { borderBottom: "none" } },
         h("button", { className: "ex-action-btn", style: { width: "100%", textAlign: "left", color: "#f87171", borderColor: "#5b2626" }, onClick: props.resetAll }, "Reset progress\u2026"))
-    ),
-    h(OwnerAdminSection, { uiPrefs: props.uiPrefs, updateUiPrefs: props.updateUiPrefs })
+    )
   );
 }
 
-// Owner-only signup approval. Renders NOTHING at all for everyone else — not a locked card, not a
-// disabled row: a non-owner has no reason to know this exists. The gate is is_owner() in SQL
-// (migration 15), asked once on mount; the UI hiding is presentation, never the security boundary.
-// Both functions it calls re-check is_owner() server-side on every call, so a tampered client
-// gains nothing.
+// Owner-only signup approvals, rendered as its own bottom tab (the tab itself only exists for the
+// owner — see the navbar). Presentational: it receives the list and reports approvals upward, so
+// the badge count and the list can never disagree. The UI hiding is convenience, never the
+// security boundary — pending_signups() and owner_approve_user() both re-check is_owner() in SQL
+// on every call, so a tampered client gains nothing.
 //
-// This is additive to the email-approve flow, not a replacement — that one stays useful for
-// approving from a phone notification without opening the app.
-function OwnerAdminSection(props) {
-  const [isOwner, setIsOwner] = useState(false);
-  const [pending, setPending] = useState([]);
+// Additive to the email-approve flow, not a replacement — that one stays useful for approving
+// from a phone notification without opening the app.
+function AdminTab(props) {
   const [busyId, setBusyId] = useState(null);
-  const [loaded, setLoaded] = useState(false);
   const [error, setError] = useState("");
-
-  function loadPending() {
-    supabaseClient.rpc("pending_signups").then(function (r) {
-      setPending(r.error ? [] : (r.data || []));
-      setLoaded(true);
-    });
-  }
-  useEffect(function () {
-    supabaseClient.rpc("is_owner").then(function (r) {
-      if (!r.error && r.data === true) { setIsOwner(true); loadPending(); }
-      else setLoaded(true);
-    });
-  }, []);
+  const pending = props.pendingSignups || [];
 
   function approve(userId, tier) {
     setBusyId(userId);
@@ -9542,47 +9583,34 @@ function OwnerAdminSection(props) {
         setBusyId(null);
         if (r.error) { setError("Couldn't approve — " + (r.error.message || "try again")); return; }
         setError("");
-        // Refetch rather than removing locally: the list is the source of truth, and this also
-        // picks up anyone who signed up while this screen was open.
-        loadPending();
+        // Refetch rather than splicing locally: the server list is the source of truth, and this
+        // also picks up anyone who signed up while this screen was open.
+        props.onRefresh();
       });
   }
 
-  if (!isOwner) return null;
-  return h(SettingsSection, {
-    id: "owner", title: "Signup approvals",
-    uiPrefs: props.uiPrefs, updateUiPrefs: props.updateUiPrefs,
-    // Opens itself when people are actually waiting, and shows the count in the collapsed header —
-    // an approval queue is only useful if you notice it without going looking.
-    defaultOpen: pending.length > 0,
-    status: pending.length > 0 ? String(pending.length) + " waiting" : null,
-    statusOn: pending.length > 0,
-  },
-    error && h(SettingsRow, null, h("span", { style: { fontSize: 12, color: "#d9822b" } }, error)),
-    !loaded && h(SettingsRow, { style: { borderBottom: "none" } },
-      h("span", { style: { fontSize: 12, color: "#737373" } }, "Loading\u2026")),
-    loaded && pending.length === 0 && h(SettingsRow, { style: { borderBottom: "none" } },
-      h("span", { style: { fontSize: 12, color: "#737373" } }, "Nobody waiting. New signups show up here.")),
-    pending.map(function (p, i) {
-      return h(SettingsRow, { key: p.user_id, style: i === pending.length - 1 ? { borderBottom: "none" } : null },
-        h("div", { style: { width: "100%" } },
-          h("p", { style: { margin: "0 0 2px", fontSize: 13, overflow: "hidden", textOverflow: "ellipsis" } }, p.email),
-          h("p", { style: { margin: "0 0 8px", fontSize: 11, color: "#737373" } },
-            "Signed up " + new Date(p.signed_up_at).toLocaleDateString(undefined, { month: "short", day: "numeric" })),
-          h("div", { style: { display: "flex", gap: 6 } },
-            h("button", { className: "ex-action-btn", style: { flex: 1 }, disabled: busyId === p.user_id,
-              onClick: function () { approve(p.user_id, 1); } }, busyId === p.user_id ? "\u2026" : "Approve (free)"),
-            h("button", { className: "swap-save-btn", style: { flex: 1 }, disabled: busyId === p.user_id,
-              onClick: function () { approve(p.user_id, 3); } }, busyId === p.user_id ? "\u2026" : "Approve (full)"))));
-    })
+  return h("div", null,
+    h("h2", { style: { fontSize: 16, margin: "0 0 4px" } }, "Signup approvals"),
+    h("p", { style: { fontSize: 12, color: "#737373", margin: "0 0 12px", lineHeight: 1.5 } },
+      "People who signed up and are waiting to be let in. Anyone a coach has already invited " +
+      "skips this queue \u2014 the invitation itself counts as approval."),
+    error && h("p", { style: { fontSize: 12, color: "#d9822b", margin: "0 0 8px" } }, error),
+    pending.length === 0
+      ? h("p", { style: { fontSize: 13, color: "#737373" } }, "Nobody waiting right now.")
+      : pending.map(function (p) {
+          return h("div", { key: p.user_id, style: { background: "#171717", border: "1px solid #262626", borderRadius: 8, padding: 12, marginBottom: 8 } },
+            h("p", { style: { margin: "0 0 2px", fontSize: 13, overflow: "hidden", textOverflow: "ellipsis" } }, p.email),
+            h("p", { style: { margin: "0 0 10px", fontSize: 11, color: "#737373" } },
+              "Signed up " + new Date(p.signed_up_at).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" })),
+            h("div", { style: { display: "flex", gap: 8 } },
+              h("button", { className: "ex-action-btn", style: { flex: 1 }, disabled: busyId === p.user_id,
+                onClick: function () { approve(p.user_id, 1); } }, busyId === p.user_id ? "\u2026" : "Approve (free)"),
+              h("button", { className: "swap-save-btn", style: { flex: 1 }, disabled: busyId === p.user_id,
+                onClick: function () { approve(p.user_id, 3); } }, busyId === p.user_id ? "\u2026" : "Approve (full)")));
+        })
   );
 }
 
-// Derives a short quick-add list from the full food-log history (all dates for the active program):
-// the foods logged most often, so staples (chicken, rice, eggs) surface reliably rather than being
-// bumped by whatever happened to be logged today. Ties (equally-frequent foods) break by recency.
-// Each entry keeps its last grams + per100 so a tap re-logs with sensible defaults. Pure — safe to
-// call in render.
 function computeQuickAddFoods(foodLogByDate, limit) {
   limit = limit || 8;
   const byName = {};
