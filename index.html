@@ -3374,7 +3374,7 @@ function programStateHasRealData(state) {
 // The build currently running. Surfaced in Settings -> Account, because "is the deploy actually
 // live?" has been the real answer to several apparent bugs, and inferring it from behaviour is slow
 // and error-prone. Compared against version.json by the update check below.
-const APP_VERSION = "2026-07-30T12:56:00";
+const APP_VERSION = "2026-07-30T13:05:00";
 
 // Signing out has to be unconditional, because every failure mode here ends the same way: a person
 // tapping a button that does nothing.
@@ -9502,7 +9502,79 @@ function SettingsTab(props) {
       ),
       h(SettingsRow, { style: { borderBottom: "none" } },
         h("button", { className: "ex-action-btn", style: { width: "100%", textAlign: "left", color: "#f87171", borderColor: "#5b2626" }, onClick: props.resetAll }, "Reset progress\u2026"))
-    )
+    ),
+    h(OwnerAdminSection, { uiPrefs: props.uiPrefs, updateUiPrefs: props.updateUiPrefs })
+  );
+}
+
+// Owner-only signup approval. Renders NOTHING at all for everyone else — not a locked card, not a
+// disabled row: a non-owner has no reason to know this exists. The gate is is_owner() in SQL
+// (migration 15), asked once on mount; the UI hiding is presentation, never the security boundary.
+// Both functions it calls re-check is_owner() server-side on every call, so a tampered client
+// gains nothing.
+//
+// This is additive to the email-approve flow, not a replacement — that one stays useful for
+// approving from a phone notification without opening the app.
+function OwnerAdminSection(props) {
+  const [isOwner, setIsOwner] = useState(false);
+  const [pending, setPending] = useState([]);
+  const [busyId, setBusyId] = useState(null);
+  const [loaded, setLoaded] = useState(false);
+  const [error, setError] = useState("");
+
+  function loadPending() {
+    supabaseClient.rpc("pending_signups").then(function (r) {
+      setPending(r.error ? [] : (r.data || []));
+      setLoaded(true);
+    });
+  }
+  useEffect(function () {
+    supabaseClient.rpc("is_owner").then(function (r) {
+      if (!r.error && r.data === true) { setIsOwner(true); loadPending(); }
+      else setLoaded(true);
+    });
+  }, []);
+
+  function approve(userId, tier) {
+    setBusyId(userId);
+    supabaseClient.rpc("owner_approve_user", { target: userId, new_tier: tier })
+      .then(function (r) {
+        setBusyId(null);
+        if (r.error) { setError("Couldn't approve — " + (r.error.message || "try again")); return; }
+        setError("");
+        // Refetch rather than removing locally: the list is the source of truth, and this also
+        // picks up anyone who signed up while this screen was open.
+        loadPending();
+      });
+  }
+
+  if (!isOwner) return null;
+  return h(SettingsSection, {
+    id: "owner", title: "Signup approvals",
+    uiPrefs: props.uiPrefs, updateUiPrefs: props.updateUiPrefs,
+    // Opens itself when people are actually waiting, and shows the count in the collapsed header —
+    // an approval queue is only useful if you notice it without going looking.
+    defaultOpen: pending.length > 0,
+    status: pending.length > 0 ? String(pending.length) + " waiting" : null,
+    statusOn: pending.length > 0,
+  },
+    error && h(SettingsRow, null, h("span", { style: { fontSize: 12, color: "#d9822b" } }, error)),
+    !loaded && h(SettingsRow, { style: { borderBottom: "none" } },
+      h("span", { style: { fontSize: 12, color: "#737373" } }, "Loading\u2026")),
+    loaded && pending.length === 0 && h(SettingsRow, { style: { borderBottom: "none" } },
+      h("span", { style: { fontSize: 12, color: "#737373" } }, "Nobody waiting. New signups show up here.")),
+    pending.map(function (p, i) {
+      return h(SettingsRow, { key: p.user_id, style: i === pending.length - 1 ? { borderBottom: "none" } : null },
+        h("div", { style: { width: "100%" } },
+          h("p", { style: { margin: "0 0 2px", fontSize: 13, overflow: "hidden", textOverflow: "ellipsis" } }, p.email),
+          h("p", { style: { margin: "0 0 8px", fontSize: 11, color: "#737373" } },
+            "Signed up " + new Date(p.signed_up_at).toLocaleDateString(undefined, { month: "short", day: "numeric" })),
+          h("div", { style: { display: "flex", gap: 6 } },
+            h("button", { className: "ex-action-btn", style: { flex: 1 }, disabled: busyId === p.user_id,
+              onClick: function () { approve(p.user_id, 1); } }, busyId === p.user_id ? "\u2026" : "Approve (free)"),
+            h("button", { className: "swap-save-btn", style: { flex: 1 }, disabled: busyId === p.user_id,
+              onClick: function () { approve(p.user_id, 3); } }, busyId === p.user_id ? "\u2026" : "Approve (full)"))));
+    })
   );
 }
 
