@@ -2189,36 +2189,86 @@ function evaluateRirMissPattern(missHistory) {
 // session already moved. If that ever changes, this needs a guard.
 const CALIBRATION_UNDERSHOOT_MARGIN = 2;
 const CALIBRATION_OVERSHOOT_MARGIN = 2;
-// Overshoot converts reps-over into weight steps rather than a single flat bump: someone who got 25
-// on a range topping out at 12 is not one 5% step away from the right load. This app's increments
-// (2.5 / 5 / 10 across the weight tiers) each land near 5% of the bar, and ~1 rep is worth roughly
-// 2-3% of load, so one step ≈ 2 reps.
-const CALIBRATION_REPS_PER_STEP = 2;
-// Capped hard, and the cap is a safety limit rather than a tuning choice: a mistyped rep count (50
-// instead of 5) must never be able to jump someone's working weight by an unbounded amount. Three
-// steps is ~15%, which meaningfully corrects a bad guess while staying inside what a person could
-// have reasonably warmed up to. A very light starting guess may therefore still need one more nudge
-// in week 2 — the banner says so plainly rather than pretending one pass always lands it.
-const CALIBRATION_MAX_STEPS = 3;
 
-function computeCalibrationWeekAdjustment(actualReps, range, currentWeight, isBodyweight) {
-  if (actualReps == null || currentWeight == null) return null;
+// ---- The load model -------------------------------------------------------
+// REPLACED the original linear "one weight step per 2 reps" heuristic (2026-07-30). That was wrong
+// in a way that mattered: the reps-to-%1RM relationship is a CURVE, not a line — a 2024
+// meta-regression over 952 reps-to-failure tests from ~7,000 people found it is best described by
+// natural cubic splines. A linear conversion is roughly right mid-range and badly wrong at the
+// edges: applied to a 30-rep set it demanded ~45% more load, when the real gap between a 30-rep
+// load and a 12-rep load is nearer 20%. The safety cap wasn't protecting anyone from a typo, it
+// was hiding a bad formula.
+// Wathen is used because it is an exponential-decay model rather than a linear one, so it actually
+// flattens where the real curve flattens. Epley and Brzycki are both linear in reps and reproduce
+// the same overestimate at the top end (Brzycki additionally goes unstable approaching 37 reps).
+// Only the RATIO of two points on this curve is ever used, never an absolute 1RM, so the model's
+// known offset at 1 rep is irrelevant here.
+const WATHEN_A = 48.8, WATHEN_B = 53.8, WATHEN_K = 0.075;
+function pctOf1RMForReps(reps) {
+  return (WATHEN_A + WATHEN_B * Math.exp(-WATHEN_K * reps)) / 100;
+}
+
+// ---- The bound ------------------------------------------------------------
+// The asymmetry between correcting UP and DOWN is not a judgement about which direction is scarier.
+// It falls out of the evidence: the same meta-regression found both mean reps AND the
+// between-individual standard deviation rise as %1RM falls, and every standard 1RM formula loses
+// reliability past ~11-12 reps. So a correction computed from a 30-rep set rests on the noisiest
+// part of the curve, while one computed from a 3-rep set sits where the formulas agree. High rep
+// counts are simply a less trustworthy INPUT — and high rep counts are what an overshoot is made of.
+const CALIBRATION_RELIABLE_MAX_REPS = 12;
+const CALIBRATION_MAX_CHANGE = 0.20;             // observation inside the well-evidenced band
+const CALIBRATION_MAX_CHANGE_UNRELIABLE = 0.125; // observation outside it, and nothing corroborating
+
+// ---- What the rating does now ---------------------------------------------
+// Corroboration no longer sets the DISTANCE — the load curve does that. A rating answers a
+// different question: is this rep count real? That is the only thing the tighter bound is
+// defending against out at 30 reps, so a rating that agrees with the numbers restores the normal
+// bound rather than extending anything. Physics sets how far; corroboration decides whether to
+// trust the number enough to go there. Directional, as before: only a rating that AGREES counts.
+function computeCalibrationWeekAdjustment(actualReps, range, currentWeight, isBodyweight, rating) {
+  if (actualReps == null || currentWeight == null || currentWeight <= 0) return null;
   // A bodyweight exercise has no database weight guess to be wrong about, which is this whole
   // mechanism's premise — and the within-session autoregulator excludes bodyweight for the same
   // reason. Returning null hands both directions back to the normal RIR ramp, which carries the
   // actual rep count forward and is the right handler when load isn't the variable.
   if (isBodyweight) return null;
-  if (actualReps < range.repLow - CALIBRATION_UNDERSHOOT_MARGIN) {
-    return { weight: nextWeightDecrement(currentWeight), repsTarget: range.repLow, direction: "down" };
+
+  const under = actualReps < range.repLow - CALIBRATION_UNDERSHOOT_MARGIN;
+  const over = actualReps > range.repHigh + CALIBRATION_OVERSHOOT_MARGIN;
+  if (!under && !over) return null;
+
+  // The nearest edge of the range, in both directions — the most conservative target that still
+  // brings the lift back inside where it was programmed to live.
+  const targetReps = under ? range.repLow : range.repHigh;
+  const corroborated = under ? rating === "hard" : rating === "easy";
+  const reliable = actualReps <= CALIBRATION_RELIABLE_MAX_REPS || corroborated;
+  const maxChange = reliable ? CALIBRATION_MAX_CHANGE : CALIBRATION_MAX_CHANGE_UNRELIABLE;
+
+  const ratio = pctOf1RMForReps(targetReps) / pctOf1RMForReps(actualReps);
+  const bounded = Math.min(1 + maxChange, Math.max(1 - maxChange, ratio));
+  const targetWeight = currentWeight * bounded;
+  const ceiling = currentWeight * (1 + maxChange);
+  const floor = currentWeight * (1 - maxChange);
+
+  // Walk the app's own increment ladder toward that load and stop at the closest representable
+  // weight, never stepping outside the bound. Using the ladder rather than rounding the raw number
+  // keeps calibration on the same plate/pin jumps as every other weight change in the app.
+  let weight = currentWeight;
+  for (let i = 0; i < 40; i++) {
+    const next = over ? nextWeightIncrement(weight) : nextWeightDecrement(weight);
+    if (next == null || next === weight) break;
+    if (next > ceiling || next < floor) break;
+    if (Math.abs(next - targetWeight) >= Math.abs(weight - targetWeight)) break;
+    weight = next;
   }
-  if (actualReps > range.repHigh + CALIBRATION_OVERSHOOT_MARGIN) {
-    const stepsWanted = Math.floor((actualReps - range.repHigh) / CALIBRATION_REPS_PER_STEP);
-    const steps = Math.max(1, Math.min(CALIBRATION_MAX_STEPS, stepsWanted));
-    let weight = currentWeight;
-    for (let i = 0; i < steps; i++) weight = nextWeightIncrement(weight);
-    return { weight: weight, repsTarget: range.repHigh, direction: "up" };
-  }
-  return null;
+  if (weight === currentWeight) return null; // nothing representable to move to — don't fake a change
+  return {
+    weight: weight,
+    repsTarget: targetReps,
+    direction: over ? "up" : "down",
+    changePct: Math.round((weight / currentWeight - 1) * 1000) / 10,
+    corroborated: corroborated,
+  };
 }
 
 // Ties the three pieces above together into the one full update completeWeek() runs per RIR-mode
@@ -2228,7 +2278,7 @@ function computeCalibrationWeekAdjustment(actualReps, range, currentWeight, isBo
 // the SCHEDULE'S demanded step specifically (not the carried-forward actual) — only half the normal
 // delta gets applied, rather than the full ramp, when a short run of misses suggests the pace is
 // currently too aggressive for this particular exercise.
-function computeNextWeekRirUpdate(prevActualReps, prevWeekTargetReps, priorMissHistory, prevWeekPositionInPhase, nextWeekPositionInPhase, phaseLength, currentWeight) {
+function computeNextWeekRirUpdate(prevActualReps, prevWeekTargetReps, priorMissHistory, prevWeekPositionInPhase, nextWeekPositionInPhase, phaseLength, currentWeight, prevRating) {
   const startingNewPhase = nextWeekPositionInPhase === 1 && prevWeekPositionInPhase !== 1;
   const missedThisWeek = prevWeekTargetReps != null && prevActualReps != null && prevActualReps < prevWeekTargetReps;
   const baseMissHistory = startingNewPhase ? [] : (priorMissHistory || []).slice();
@@ -2239,7 +2289,24 @@ function computeNextWeekRirUpdate(prevActualReps, prevWeekTargetReps, priorMissH
   const nextTargetRIR = computeTargetRIRForWeek(nextWeekPositionInPhase, phaseLength);
   let computed = computeRirAdjustedTarget(prevActualReps, prevTargetRIR, nextTargetRIR, currentWeight);
 
-  if (pattern.shouldRecalibrate && prevActualReps != null) {
+  // CORROBORATION (added 2026-07-30). Two independent signals — what was performed, and what the
+  // person said about it — should not be read one at a time when both are sitting right there.
+  //   missed + "hard"  -> dampen NOW, on the first miss, instead of waiting for a second
+  //                       consecutive one. The miss pattern alone needs two weeks to be sure;
+  //                       a rating that agrees with the first miss IS the second piece of evidence.
+  //   met + "hard"     -> the target was reached but it cost everything. The ramp is about to
+  //                       demand more (target RIR drops as the phase runs); dampen that step
+  //                       rather than walking someone into a wall they already told us about.
+  //   met + "easy"     -> HOLD. Explicit product decision (user, 2026-07-30): the schedule already
+  //                       plans the progression, and feeling good on a met target doesn't earn a
+  //                       jump ahead of it. Ratings brake here; they never accelerate.
+  //   missed + "easy"  -> the two disagree. Trust the numbers, run the normal path, no dampening.
+  // Deload escalation stays NUMBERS-ONLY on purpose: a rating can slow the next step down, but
+  // pulling someone into a recovery week is a big enough action to require the performance pattern.
+  const ratedHard = prevRating === "hard";
+  const shouldDampen = (pattern.shouldRecalibrate || ratedHard) && !pattern.shouldEscalateToDeload;
+
+  if (shouldDampen && prevActualReps != null) {
     const fullDelta = prevTargetRIR - nextTargetRIR;
     const dampenedDelta = Math.round(fullDelta / 2);
     const dampenedRaw = Math.max(1, prevActualReps + dampenedDelta);
@@ -2450,6 +2517,14 @@ const INSIGHT_THRESHOLDS = {
 
   // --- lapse nudge ---
   LAPSE_NUDGE_MIN_DAYS: 3, // days since any dated activity before the calibration nudge shows
+
+  // --- work regression (finding 6) ---
+  // Measures top-set WORK (weight x reps), not load alone. The RIR ramp deliberately trades reps
+  // for weight as a phase progresses, so work wobbles week to week even when everything is fine —
+  // these are set well past that wobble. A 25% drop is roughly "you did a quarter less than your
+  // best recent week," which the ramp alone does not produce.
+  WORK_DROP_PCT: 0.25,
+  WORK_DROP_SEVERE_PCT: 0.40,
 };
 
 // The three built-in programs encode their goal in the program itself; Custom
@@ -2789,6 +2864,133 @@ function insightLiftPlateaus(ctx) {
   return out;
 }
 
+// ---- Finding 6: work regression [training] -------------------------------
+// THE GAP THIS EXISTS TO CLOSE (found live 2026-07-30, from real user data):
+// insightLiftPlateaus measures LOAD only — topSetValueForWeek returns max weight and discards
+// reps. A lift going 20lb x30 -> 27.5lb x20 -> 30lb x5 therefore reads as three weeks of strictly
+// increasing weight and never trips the stall check, while the actual work done collapsed from 600
+// to 150 (75% down). The person had also rated it "Too Difficult" — a signal they typed in
+// themselves, which no detector read at all. Load-only progression scored a burial as progress.
+//
+// So: top-set WORK (weight x reps; reps alone for bodyweight, matching topSetValueForWeek's own
+// convention), compared against the best week earlier in the same window. Difficulty CORROBORATES
+// but never fires alone — a "Too Difficult" in the last week of a phase is the RIR ramp working as
+// designed (it peaks at RIR 0), so on its own it means nothing. The two together mean something.
+function insightTopSetWorkForWeek(weekLogs, exId, isBodyweight) {
+  const sets = ((weekLogs || {})[exId] || []).filter(function (s) { return s && s.reps != null; });
+  if (sets.length === 0) return null;
+  let best = null;
+  sets.forEach(function (s) {
+    const reps = s.reps || 0;
+    const weight = isBodyweight ? null : (s.weight || 0);
+    const work = isBodyweight ? reps : weight * reps;
+    if (best == null || work > best.work) best = { work: work, reps: reps, weight: weight };
+  });
+  return best;
+}
+
+// The every-5th-week-or-extraDeloadWeeks rule, as one expression. The same test is inlined in
+// computePhaseWeeks and weeksUntilNextDeload; this is a shared copy for new code rather than a
+// refactor of those two, which are load-bearing and verified.
+function isDeloadWeekNumber(week, extraDeloadWeeks) {
+  return week % 5 === 0 || (extraDeloadWeeks || []).indexOf(week) !== -1;
+}
+
+function insightWorkRegression(ctx) {
+  const T = INSIGHT_THRESHOLDS;
+  if (ctx.lastCompletedWeek < T.STALL_WINDOW_WEEKS) return [];
+  const logs = ctx.prog.logs || {};
+  const extra = ctx.prog.extraDeloadWeeks;
+  const firstWeek = ctx.lastCompletedWeek - T.STALL_WINDOW_WEEKS + 1;
+  if (firstWeek < 1) return [];
+  // A window containing a recovery week isn't comparable: deload sets are halved, so work drops by
+  // design and every exercise would flag. Skipping the whole window rather than just the deload
+  // week keeps the comparison honest — "less work than your best recent week" has to mean weeks
+  // that were actually asking for the same thing.
+  for (let w = firstWeek; w <= ctx.lastCompletedWeek; w++) {
+    if (isDeloadWeekNumber(w, extra)) return [];
+  }
+
+  const latestRatings = (ctx.prog.exerciseDifficulty || {})[ctx.lastCompletedWeek] || {};
+  const considered = [], dropped = [];
+  allExercises(ctx.def.exercises).forEach(function (ex) {
+    const weeks = [];
+    for (let w = firstWeek; w <= ctx.lastCompletedWeek; w++) {
+      const v = insightTopSetWorkForWeek(logs[w], ex.id, ex.bodyweight);
+      if (v == null) return; // incomplete window — not judgeable, same rule as the stall check
+      weeks.push(v);
+    }
+    considered.push(ex);
+    const latest = weeks[weeks.length - 1];
+    const earlier = weeks.slice(0, weeks.length - 1);
+    let bestEarlier = earlier[0];
+    earlier.forEach(function (v) { if (v.work > bestEarlier.work) bestEarlier = v; });
+    if (bestEarlier.work <= 0) return;
+    const dropRatio = (bestEarlier.work - latest.work) / bestEarlier.work;
+    if (dropRatio < T.WORK_DROP_PCT) return;
+    dropped.push({ ex: ex, latest: latest, bestEarlier: bestEarlier, dropRatio: dropRatio,
+                   ratedHard: latestRatings[ex.id] === "hard", weeks: weeks });
+  });
+
+  if (considered.length < T.MIN_CONSIDERED_LIFTS || dropped.length === 0) return [];
+
+  function setLabel(v, isBodyweight) {
+    return isBodyweight ? v.reps + " reps" : v.weight + "lb x" + v.reps;
+  }
+  const pct = function (r) { return Math.round(r * 100); };
+
+  // Program-wide rather than per-lift when most of the roster moved together — same reasoning as
+  // insightLiftPlateaus' broad-stall suppression, and it keeps a genuinely bad week from filling
+  // the digest with one card per exercise.
+  if (dropped.length / considered.length >= T.BROAD_STALL_RATIO) {
+    const hardCount = dropped.filter(function (d) { return d.ratedHard; }).length;
+    const severe = dropped.length / considered.length >= T.BROAD_STALL_SEVERE_RATIO || hardCount > 0;
+    return [{
+      id: "work_regression_broad",
+      domains: ["training"],
+      severity: severe ? 3 : 2,
+      title: "Your sessions got noticeably harder",
+      sentence:
+        dropped.length + " of " + considered.length + " tracked lifts did meaningfully less work in week " +
+        ctx.lastCompletedWeek + " than in their best of the previous " + (T.STALL_WINDOW_WEEKS - 1) +
+        " weeks" + (hardCount > 0 ? ", and you rated " + hardCount + " of them too difficult" : "") +
+        ". Weight on the bar can still be climbing while this happens — it's the reps paying for it.",
+      evidence: {
+        weeks: { window: T.STALL_WINDOW_WEEKS, uptoWeek: ctx.lastCompletedWeek,
+                 droppedLifts: dropped.length, consideredLifts: considered.length },
+        numbers: { droppedCount: dropped.length, consideredCount: considered.length, ratedHardCount: hardCount },
+      },
+      references: [],
+      sortKey: "work_regression_broad",
+    }];
+  }
+
+  return dropped.map(function (d) {
+    const state = ctx.exerciseStateSource[d.ex.id] || {};
+    const name = state.nameOverride || d.ex.name;
+    const severe = d.dropRatio >= T.WORK_DROP_SEVERE_PCT || d.ratedHard;
+    return {
+      id: "work_regression:" + d.ex.id,
+      domains: ["training"],
+      severity: severe ? 3 : 2,
+      title: name + " is doing less work than it was",
+      sentence:
+        name + "'s best set went from " + setLabel(d.bestEarlier, d.ex.bodyweight) + " to " +
+        setLabel(d.latest, d.ex.bodyweight) + " — about " + pct(d.dropRatio) + "% less work" +
+        (d.ratedHard ? ", and you rated it too difficult" : "") +
+        (d.ex.bodyweight ? "." : ". The weight went up or held, so load alone looks like progress."),
+      evidence: {
+        weeks: { window: T.STALL_WINDOW_WEEKS, uptoWeek: ctx.lastCompletedWeek,
+                 works: d.weeks.map(function (v) { return v.work; }) },
+        numbers: { dropPct: pct(d.dropRatio), latestWork: d.latest.work, bestEarlierWork: d.bestEarlier.work,
+                   ratedHard: d.ratedHard, exerciseId: d.ex.id },
+      },
+      references: [],
+      sortKey: "work_regression:" + d.ex.id,
+    };
+  });
+}
+
 // ---- Finding 5: weekend variance [nutrition x time] ----------------------
 // Weekend intake running consistently above weekday intake. Pure calendar-space,
 // so no week/date join is involved. Unlogged days are excluded, not zeroed —
@@ -2871,12 +3073,24 @@ function analyzeProgram(data, def, opts) {
   // isn't falling anymore" right next to "you've arrived"). Arrival takes precedence — same
   // suppression pattern insightLiftPlateaus already uses under a broad stall.
   const goalTransition = insightGoalTransitionArrived(ctx);
+  // A lift whose LOAD stalled or went backward is already reported by insightLiftPlateaus, and its
+  // work will usually have dropped too — reporting both would be the same lift twice in one digest,
+  // in two vocabularies. Plateau wins because it's the more specific claim; work regression exists
+  // for the case plateau structurally cannot see (load climbing while reps collapse).
+  const plateaus = insightLiftPlateaus(ctx);
+  const plateauIds = {};
+  plateaus.forEach(function (f) { plateauIds[(f.evidence.numbers || {}).exerciseId] = true; });
+  const workRegressions = insightWorkRegression(ctx).filter(function (f) {
+    const exId = (f.evidence.numbers || {}).exerciseId;
+    return !exId || !plateauIds[exId];
+  });
   const findings = []
     .concat(insightUnderFuelStall(ctx) || [])
     .concat(goalTransition ? [] : (insightWeightTrendDivergence(ctx) || []))
     .concat(goalTransition || [])
     .concat(insightAdherenceGap(ctx) || [])
-    .concat(insightLiftPlateaus(ctx))
+    .concat(plateaus)
+    .concat(workRegressions)
     .concat(insightWeekendVariance(ctx) || []);
 
   findings.forEach(function (f) {
@@ -3419,7 +3633,7 @@ function programStateHasRealData(state) {
 // The build currently running. Surfaced in Settings -> Account, because "is the deploy actually
 // live?" has been the real answer to several apparent bugs, and inferring it from behaviour is slow
 // and error-prone. Compared against version.json by the update check below.
-const APP_VERSION = "2026-07-30T19:50:00";
+const APP_VERSION = "2026-07-30T21:52:00";
 
 // Signing out has to be unconditional, because every failure mode here ends the same way: a person
 // tapping a button that does nothing.
@@ -4937,7 +5151,10 @@ function App() {
           }
           const lastTrainedMaxReps = Math.max.apply(null, lastTrainedLogs.map(function (s) { return s.reps || 0; }));
           const lastTrainedPosition = computePhaseWeeks(week - 1, prog.extraDeloadWeeks).length;
-          const update = computeNextWeekRirUpdate(lastTrainedMaxReps, cur.rirTargetReps, cur.rirMissHistory, lastTrainedPosition, nextWeekPositionInPhase, RIR_PHASE_LENGTH, cur.weight);
+          // Rating comes from the same week as lastTrainedMaxReps (week - 1), not the deload week —
+          // the two must describe the same session or the corroboration is meaningless.
+          const lastTrainedRating = ((prog.exerciseDifficulty || {})[week - 1] || {})[ex.id] || null;
+          const update = computeNextWeekRirUpdate(lastTrainedMaxReps, cur.rirTargetReps, cur.rirMissHistory, lastTrainedPosition, nextWeekPositionInPhase, RIR_PHASE_LENGTH, cur.weight, lastTrainedRating);
           if (update.shouldEscalateToDeload) rirEscalatedExercises.push({ exerciseId: ex.id, exerciseName: cur.nameOverride || ex.name });
           newState[ex.id] = Object.assign({}, cur, {
             weight: update.weightBump != null ? update.weightBump : cur.weight,
@@ -4958,7 +5175,7 @@ function App() {
         // not that fatigue is building mid-block (what the graded miss-pattern system below exists
         // to read). Scoped strictly to week === 1 so a later single miss still goes through the
         // normal graded response untouched — this only intercepts the very first data point.
-        const calibration = week === 1 ? computeCalibrationWeekAdjustment(maxReps, effectiveRepRange(ex, cur), cur.weight, ex.bodyweight) : null;
+        const calibration = week === 1 ? computeCalibrationWeekAdjustment(maxReps, effectiveRepRange(ex, cur), cur.weight, ex.bodyweight, weekDifficulty[ex.id] || null) : null;
         if (calibration) {
           newState[ex.id] = Object.assign({}, cur, {
             weight: calibration.weight,
@@ -4968,7 +5185,7 @@ function App() {
           });                     // what was actually a bad estimate, not real fatigue.
           return;
         }
-        const update = computeNextWeekRirUpdate(maxReps, cur.rirTargetReps, cur.rirMissHistory, prevWeekPositionInPhase, nextWeekPositionInPhase, RIR_PHASE_LENGTH, cur.weight);
+        const update = computeNextWeekRirUpdate(maxReps, cur.rirTargetReps, cur.rirMissHistory, prevWeekPositionInPhase, nextWeekPositionInPhase, RIR_PHASE_LENGTH, cur.weight, weekDifficulty[ex.id] || null);
         if (update.shouldEscalateToDeload) rirEscalatedExercises.push({ exerciseId: ex.id, exerciseName: cur.nameOverride || ex.name });
         newState[ex.id] = Object.assign({}, cur, {
           weight: update.weightBump != null ? update.weightBump : cur.weight,
@@ -6136,6 +6353,11 @@ function App() {
       : h(React.Fragment, null,
           h("main", null,
             tab === "workouts" && lapseNudge && h(LapseNudgeBanner, { nudge: lapseNudge }),
+            tab === "workouts" && rirModeEnabled && !isDeloadWeek && h(RirWeekBanner, {
+              // Position within the phase, not the absolute week — the same input the progression
+              // math uses, so the number shown can never disagree with the targets computed from it.
+              targetRIR: computeTargetRIRForWeek(computePhaseWeeks(prog.currentWeek, prog.extraDeloadWeeks).length, RIR_PHASE_LENGTH),
+            }),
             tab === "workouts" && rirModeEnabled && prog.currentWeek === 1 && h(CalibrationWeekBanner),
             tab === "workouts" && insightDigestPending && h(InsightDigest, {
               findings: insightFindings, week: insightLastCompletedWeek, prog: prog,
@@ -6328,6 +6550,26 @@ function LapseNudgeBanner(props) {
   );
 }
 
+// The week's RIR intent, stated plainly. computeTargetRIRForWeek has always driven the progression
+// math (3 / 3 / 1 / 0 across a phase) but was rendered NOWHERE — RIR mode asked people to hit a rep
+// number without ever saying what proximity to failure that number was chosen to produce. You
+// cannot autoregulate to a target you can't see, so this says it out loud every week.
+// Deliberately shows the reps-in-reserve number rather than the phase week: "leave 1 in the tank"
+// is actionable mid-set, "phase week 3 of 4" is not.
+function RirWeekBanner(props) {
+  const rir = props.targetRIR;
+  const copy = rir === 0
+    ? { head: "This week goes to failure", body: "Take your working sets to the point where you genuinely cannot complete another rep with good form. This is the peak before your deload — it's meant to be the hardest week of the phase." }
+    : rir === 1
+      ? { head: "This week: about 1 rep in reserve", body: "Stop each working set when you think you have roughly one more rep in you. Close to failure, but not at it." }
+      : { head: "This week: about " + rir + " reps in reserve", body: "Stop each working set when you could still do about " + rir + " more with good form. Leaving something in the tank now is what makes the harder weeks later in the phase possible." };
+  return h("div", { className: "plan-error", style: { borderColor: "#8b7bd8", marginBottom: 16 } },
+    h("strong", null, copy.head),
+    h("p", { style: { margin: "6px 0 0", fontSize: 13 } }, copy.body),
+    h("p", { style: { margin: "6px 0 0", fontSize: 11, color: "#737373" } },
+      "Your rep targets are already set to match — this is the intent behind them."));
+}
+
 // Week-1 discovery framing for RIR-mode programs. Purely informational — no state, nothing to
 // dismiss or persist — since it only ever shows during week 1 itself (prog.currentWeek === 1),
 // and simply stops rendering once week 2 begins. Reuses the app's existing "plan-error" card
@@ -6343,9 +6585,9 @@ function CalibrationWeekBanner() {
       "right by hand though — land well outside an exercise's rep range this week, in either " +
       "direction, and next week's weight moves for you."),
     h("p", { style: { margin: "6px 0 0", fontSize: 11, color: "#737373" } },
-      "A big overshoot moves the weight up a few steps at most, so a very light starting guess may " +
-      "still want one more nudge from you. From week 2 on, the RIR ramp takes over and ties weight " +
-      "to what you actually logged.")
+      "Rating each exercise sharpens that correction: a rep count and an honest rating that agree " +
+      "let the app move further in one go than a rep count on its own. From week 2 the RIR ramp " +
+      "takes over and ties weight to what you actually logged.")
   );
 }
 
@@ -6423,9 +6665,13 @@ function InsightDigest(props) {
         "Observations from your own logs — nothing here changes your plan automatically."));
   }
   return h("div", { className: "preview-banner", style: { marginBottom: 16 } },
-    h("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 } },
+    h("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, marginBottom: 8 } },
       h("p", { style: { margin: 0, fontWeight: 600 } }, "Week " + props.week + " in review"),
-      h("button", { className: "ex-action-btn", onClick: props.onDismiss }, "Got it")),
+      // flex override is REQUIRED here: .ex-action-btn is `flex: 1 1 calc(50% - 4px)`, sized for the
+      // two-button rows inside exercise cards. In a space-between header it grows to fill every
+      // spare pixel and squashes the title against it (seen live 2026-07-30). Any reuse of this
+      // class outside a two-button row needs the same override.
+      h("button", { className: "ex-action-btn", style: { flex: "0 0 auto" }, onClick: props.onDismiss }, "Got it")),
     body);
 }
 
