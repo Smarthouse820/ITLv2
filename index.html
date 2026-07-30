@@ -3388,7 +3388,7 @@ function programStateHasRealData(state) {
 // The build currently running. Surfaced in Settings -> Account, because "is the deploy actually
 // live?" has been the real answer to several apparent bugs, and inferring it from behaviour is slow
 // and error-prone. Compared against version.json by the update check below.
-const APP_VERSION = "2026-07-30T15:12:00";
+const APP_VERSION = "2026-07-30T15:31:00";
 
 // Signing out has to be unconditional, because every failure mode here ends the same way: a person
 // tapping a button that does nothing.
@@ -5652,7 +5652,14 @@ function App() {
     const sourceList = byMeal[sourceMealKey] || [];
     if (sourceList.length === 0) return;
     const next = Object.assign({}, byMeal);
-    ["m1", "m2", "m3", "m4"].forEach(function (k) {
+    // Derived from the program's real slot count rather than a hardcoded m1–m4, which silently
+    // skipped Meal 5+ once meals-per-day became configurable.
+    const cfg = data.customProgramConfig;
+    const slotCount = cfg && Array.isArray(cfg.slots) && cfg.slots.length ? cfg.slots.length : 4;
+    const keys = {};
+    for (let i = 1; i <= slotCount; i++) keys["m" + i] = true;
+    Object.keys(byMeal).forEach(function (k) { keys[k] = true; });
+    Object.keys(keys).forEach(function (k) {
       if (k !== sourceMealKey && (!byMeal[k] || byMeal[k].length === 0)) next[k] = sourceList.slice();
     });
     save(Object.assign({}, data, { likedFoodsByMeal: next }));
@@ -6056,12 +6063,31 @@ function App() {
           uiPrefs: data.uiPrefs, updateUiPrefs: updateUiPrefs,
           exportData: exportData, importData: importData, resetAll: resetAll,
         }))
-      : (data.activeProgram !== "custom" && effectiveProgramAccess !== true)
+      : (data.activeProgram !== "custom" && (myCoachRow || effectiveProgramAccess !== true))
       ? h("main", null,
-          // Waiting on the access check rather than assuming the restriction applies — otherwise a
-          // coordinator on Cutting sees "isn't available in this version" flash before it corrects
-          // itself, which reads as a broken app rather than a moment of latency.
-          effectiveProgramAccess === null
+          // A coached client is on their coach's program, full stop — tier doesn't override that.
+          // The coach prescribes into Custom, so a built-in program would be a plan nobody is
+          // managing, silently diverging from what the coach thinks they're training. Checked
+          // BEFORE the access check because it applies even at tier 3, which is exactly the case
+          // that slipped through before.
+          myCoachRow
+            ? h("div", { style: { textAlign: "center", padding: "60px 24px", color: "#a3a3a3", fontSize: 14, lineHeight: 1.6 } },
+                h("p", { style: { fontSize: 16, color: "#f5f5f5", marginBottom: 12 } }, def.label + " isn't available while you're coached"),
+                h("p", null,
+                  "Your training and meal plan are managed by " +
+                  // personLabel falls back to the email when there's no display name, so only
+                  // append the address when a real name is what's being shown — otherwise a
+                  // nameless coach renders as "sam@x.com (sam@x.com)".
+                  (myCoachRow.coach_name
+                    ? myCoachRow.coach_name + (myCoachRow.coach_email ? " (" + myCoachRow.coach_email + ")" : "")
+                    : (myCoachRow.coach_email || "your coach")) +
+                  " — switching to a program they aren't managing would put you on a plan nobody is watching."),
+                h("p", { style: { fontSize: 12, color: "#737373", marginTop: 16 } },
+                  "Switch back to your coached program from the selector above. Want to train on your own instead? Revoke coach access in Settings \u2192 Privacy & Health Data."))
+            : effectiveProgramAccess === null
+            // Waiting on the access check rather than assuming the restriction applies — otherwise a
+            // coordinator on Cutting sees "isn't available in this version" flash before it corrects
+            // itself, which reads as a broken app rather than a moment of latency.
             ? h("div", { style: { textAlign: "center", padding: "60px 24px", color: "#737373", fontSize: 13 } }, "Loading\u2026")
             : h(CoordinatorPlaceholder, { programLabel: def.label }))
       : def.needsSetup
@@ -10206,7 +10232,13 @@ function CustomSetupWizard(props) {
       const sourceList = cur[sourceMealKey] || [];
       if (sourceList.length === 0) return cur;
       const next = Object.assign({}, cur);
-      ["m1", "m2", "m3", "m4"].forEach(function (k) {
+      // Derived from the chosen meal count, not a hardcoded m1–m4 — that skipped Meal 5 entirely
+      // once meals-per-day became configurable. Union with existing keys so nothing already
+      // present is missed regardless of how the count has changed.
+      const keys = {};
+      for (let i = 1; i <= mealsPerDay; i++) keys["m" + i] = true;
+      Object.keys(cur).forEach(function (k) { keys[k] = true; });
+      Object.keys(keys).forEach(function (k) {
         if (k !== sourceMealKey && (!cur[k] || cur[k].length === 0)) next[k] = sourceList.slice();
       });
       return next;
@@ -10596,10 +10628,12 @@ function CustomSetupWizard(props) {
         h("div", { className: "plan-macro-row" }, Math.round(r.cal) + " cal · " + Math.round(r.p) + "p / " + Math.round(r.c) + "c / " + Math.round(r.f) + "f")
       );
     }),
-    h("div", { style: { display: "flex", gap: 8, marginTop: 16, alignItems: "stretch" } },
+    // Note sits ABOVE the button row, not inside it. As a third flex item between the two buttons
+    // it squeezed "Confirm & Start My Program" into a narrow column that wrapped onto four lines.
+    h("p", { style: { fontSize: 11, color: "#737373", margin: "16px 0 8px" } },
+      "Starting weights are estimates from the exercise database \u2014 treat week 1 as calibration and adjust them freely; the program learns from what you actually log."),
+    h("div", { style: { display: "flex", gap: 8, alignItems: "stretch" } },
       h("button", { className: "ex-action-btn", style: { flex: "0 0 auto", padding: "8px 20px" }, onClick: function () { setStep("foods"); } }, "Back"),
-      h("p", { style: { fontSize: 11, color: "#737373", margin: "0 0 8px", width: "100%" } },
-        "Starting weights are estimates from the exercise database \u2014 treat week 1 as calibration and adjust them freely; the program learns from what you actually log."),
       h("button", { className: "generate-btn", style: { flex: 1, marginTop: 0 }, onClick: confirm }, "Confirm & Start My Program")
     )
   );
