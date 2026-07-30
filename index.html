@@ -3141,7 +3141,14 @@ function loadData() {
 function fireRestNotification(label) {
   if (typeof Notification === "undefined" || Notification.permission !== "granted") return;
   const title = "Rest over";
-  const opts = { body: "Time for your next set" + (label ? " — " + label : ""), tag: "rest-timer" };
+  const opts = {
+    body: "Time for your next set" + (label ? " — " + label : ""),
+    tag: "rest-timer",
+    renotify: true,          // a new round should alert again, not silently replace the last one
+    requireInteraction: true, // don't auto-dismiss after a few seconds — you may be mid-set
+    vibrate: [200, 100, 200], // carried through to the OS notification, and on to a paired watch
+    silent: false,
+  };
   if (navigator.serviceWorker) {
     navigator.serviceWorker.getRegistration().then(function (reg) {
       if (reg && reg.showNotification) reg.showNotification(title, opts);
@@ -3367,7 +3374,7 @@ function programStateHasRealData(state) {
 // The build currently running. Surfaced in Settings -> Account, because "is the deploy actually
 // live?" has been the real answer to several apparent bugs, and inferring it from behaviour is slow
 // and error-prone. Compared against version.json by the update check below.
-const APP_VERSION = "2026-07-30T10:30:00";
+const APP_VERSION = "2026-07-30T12:09:00";
 
 // Signing out has to be unconditional, because every failure mode here ends the same way: a person
 // tapping a button that does nothing.
@@ -3500,23 +3507,52 @@ function App() {
   const [restTimer, setRestTimer] = useState(null); // { endsAt, label } | null
   const [restRemaining, setRestRemaining] = useState(0);
   const restFiredRef = useRef(false);
+  const restWakeLockRef = useRef(null);
 
   useEffect(function () {
     if (!restTimer) return;
+    function fireNow() {
+      restFiredRef.current = true;
+      fireRestNotification(restTimer.label);
+      if (navigator.vibrate) { try { navigator.vibrate([200, 100, 200]); } catch (e) {} }
+      showToast("Rest over — next set!");
+      setRestTimer(null);
+    }
     function tick() {
       const remaining = Math.max(0, Math.ceil((restTimer.endsAt - Date.now()) / 1000));
       setRestRemaining(remaining);
-      if (remaining <= 0 && !restFiredRef.current) {
-        restFiredRef.current = true;
-        fireRestNotification(restTimer.label);
-        if (navigator.vibrate) { try { navigator.vibrate([200, 100, 200]); } catch (e) {} }
-        showToast("Rest over — next set!");
-        setRestTimer(null);
-      }
+      if (remaining <= 0 && !restFiredRef.current) fireNow();
     }
     tick();
     const iv = setInterval(tick, 1000);
-    return function () { clearInterval(iv); };
+    // Phones aggressively throttle (or entirely freeze) page timers once the screen is off or the
+    // browser is backgrounded — which is exactly what happens when you put the phone down between
+    // sets. Without this, the interval simply never reaches zero and no notification ever fires.
+    // Two defences:
+    //   1. A screen wake lock while resting, so the countdown keeps running in the common case of
+    //      the phone sitting face-up on the bench. Released as soon as rest ends.
+    //   2. A visibility check that compares against the WALL CLOCK on return, so a rest that
+    //      expired while the page was frozen still fires the moment you come back, rather than
+    //      silently never firing at all.
+    function onVisible() {
+      if (document.visibilityState !== "visible") return;
+      tick();
+      if (!restFiredRef.current && Date.now() >= restTimer.endsAt) fireNow();
+    }
+    document.addEventListener("visibilitychange", onVisible);
+    if (navigator.wakeLock && navigator.wakeLock.request) {
+      navigator.wakeLock.request("screen")
+        .then(function (lock) { restWakeLockRef.current = lock; })
+        .catch(function () { /* denied or unsupported — the visibility fallback still covers it */ });
+    }
+    return function () {
+      clearInterval(iv);
+      document.removeEventListener("visibilitychange", onVisible);
+      if (restWakeLockRef.current) {
+        try { restWakeLockRef.current.release(); } catch (e) {}
+        restWakeLockRef.current = null;
+      }
+    };
   }, [restTimer]);
 
   function startRestTimer(label) {
@@ -3532,8 +3568,18 @@ function App() {
     save(Object.assign({}, data, { restTimerSettings: next }));
     // Ask for notification permission at the moment the feature is switched on — the only point
     // where the request has clear context. The in-app countdown works regardless of the answer.
-    if (patch.enabled && typeof Notification !== "undefined" && Notification.permission === "default") {
-      Notification.requestPermission();
+    // If permission was previously DENIED, requestPermission() resolves instantly without ever
+    // prompting (browsers won't re-ask), so the timer would run visually while silently never
+    // notifying. Say so plainly instead — it's the only way the person can know to fix it in
+    // their browser's site settings.
+    if (patch.enabled && typeof Notification !== "undefined") {
+      if (Notification.permission === "default") {
+        Notification.requestPermission().then(function (result) {
+          if (result !== "granted") showToast("Timer will show in-app, but can't send notifications without permission");
+        });
+      } else if (Notification.permission === "denied") {
+        showToast("Notifications are blocked for this site — the countdown still works on screen");
+      }
     }
   }
 
