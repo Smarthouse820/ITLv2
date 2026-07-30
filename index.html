@@ -3367,7 +3367,7 @@ function programStateHasRealData(state) {
 // The build currently running. Surfaced in Settings -> Account, because "is the deploy actually
 // live?" has been the real answer to several apparent bugs, and inferring it from behaviour is slow
 // and error-prone. Compared against version.json by the update check below.
-const APP_VERSION = "2026-07-30T08:39:00";
+const APP_VERSION = "2026-07-30T10:30:00";
 
 // Signing out has to be unconditional, because every failure mode here ends the same way: a person
 // tapping a button that does nothing.
@@ -4099,7 +4099,15 @@ function App() {
     return supabaseClient.from("coaching_links")
       .update({ status: accept ? "active" : "revoked" }).eq("id", linkId)
       .then(function (r) {
-        showToast(r.error ? "Couldn't update that invitation" : accept ? "Coach connected" : "Invitation declined");
+        if (!r.error) { showToast(accept ? "Coach connected" : "Invitation declined"); return refreshCoaching(); }
+        // The DB enforces one active coach per client (unique partial index). That surfaces here as
+        // a raw constraint error, which is accurate but unreadable — someone accepting a second
+        // invitation just needs to be told what's actually true, and what to do about it.
+        const msg = String((r.error && (r.error.message || r.error.details)) || "").toLowerCase();
+        const alreadyCoached = msg.indexOf("duplicate") !== -1 || msg.indexOf("unique") !== -1 || msg.indexOf("already") !== -1;
+        showToast(alreadyCoached
+          ? "You already have a coach. End that connection first, then accept this invitation."
+          : "Couldn't update that invitation");
         return refreshCoaching();
       })
       .finally(function () { setCoachingBusy(false); });
@@ -6266,6 +6274,13 @@ function WorkoutsTab(props) {
   // Extracted so both a normal single card and a superset-wrapped card render identically —
   // grouping is purely a visual/organizational layer on top of this, nothing about logging,
   // history, notes, or swapping changes based on whether an exercise is in a superset.
+  // Superset grouping is computed HERE, above renderCard, because renderCard needs it for the rest
+  // timer (see below) — and referencing a const declared further down would be a temporal-dead-zone
+  // hazard, which preflight explicitly checks for.
+  const dayGroups = (props.supersetGroups && props.supersetGroups[props.selectedDay]) || [];
+  const groupOf = {};
+  dayGroups.forEach(function (ids, gi) { ids.forEach(function (id) { groupOf[id] = gi; }); });
+
   function renderCard(ex, idx) {
     // Merged, not `||` — a partial saved entry (e.g. one that only ever set muscleOverride via
     // setMuscleOverride, or nameOverride via clearSwap, with no prior weight/reps recorded) must
@@ -6461,11 +6476,29 @@ function WorkoutsTab(props) {
                 return h(SetLogger, {
                   key: props.data.currentWeek + "-" + i, setIdx: i, exercise: ex, state: state,
                   existing: logsForEx[i], onLog: function (reps, weight) { props.logSet(ex.id, i, reps, weight, range.repLow, range.repHigh, ex.bodyweight, state.repsTarget); },
-                  // On the final set there's nothing left to rest for within this exercise — clear any
-                  // countdown still running from the previous set rather than starting a new one.
+                  // SUPERSET-AWARE REST. The whole point of a superset is that you move straight to
+                  // the next exercise in the group instead of resting — so resting after exercise A
+                  // is exactly wrong. Rest belongs only after the LAST member of the group has
+                  // logged this set index (a full round is done); before that, clear any countdown
+                  // so the bar isn't telling someone to rest when they should be lifting.
+                  // For an ungrouped exercise the group is just itself, so this reduces to the
+                  // original behaviour with no special-casing.
                   onSetCommitted: function () {
+                    const gi = groupOf[ex.id];
+                    const groupIds = gi != null ? (dayGroups[gi] || [ex.id]) : [ex.id];
+                    // Which members still owe a log at THIS set index? Read straight from the saved
+                    // logs (this exercise's own entry included, since onSetCommitted fires after the
+                    // log is saved) rather than tracking separate state that could drift.
+                    const roundIncomplete = groupIds.some(function (id) {
+                      if (id === ex.id) return false; // just logged
+                      return !((weekLogs[id] || [])[i]);
+                    });
+                    // Last set = the last INDEX of the last member to finish, not merely this
+                    // exercise's own last set — otherwise finishing A's final set would end rest
+                    // while B still has a set to go.
+                    if (roundIncomplete) { if (props.skipRestTimer) props.skipRestTimer(); return; }
                     if (isLastSet) { if (props.skipRestTimer) props.skipRestTimer(); }
-                    else if (props.startRestTimer) props.startRestTimer(displayName);
+                    else if (props.startRestTimer) props.startRestTimer(groupIds.length > 1 ? "superset round" : displayName);
                   },
                 });
               }),
@@ -6489,9 +6522,7 @@ function WorkoutsTab(props) {
   // container wrapping several cards together. Grouping is purely organizational: each exercise
   // inside a superset still renders through the exact same renderCard function above, so logging,
   // swapping, history, and notes behave identically whether an exercise is grouped or not.
-  const dayGroups = (props.supersetGroups && props.supersetGroups[props.selectedDay]) || [];
-  const groupOf = {};
-  dayGroups.forEach(function (ids, gi) { ids.forEach(function (id) { groupOf[id] = gi; }); });
+  // (dayGroups/groupOf are computed above renderCard — see the note there.)
   const seen = {};
   const renderUnits = [];
   effectiveExercises.forEach(function (ex, idx) {
