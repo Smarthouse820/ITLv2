@@ -2176,18 +2176,49 @@ function evaluateRirMissPattern(missHistory) {
 }
 
 // Week 1 of a brand-new RIR program has no prior data to build a graded miss-pattern from yet — a
-// single big undershoot here isn't "fatigue mid-block" (what evaluateRirMissPattern's graded
-// recalibrate/deload response exists for); it's evidence the exercise DB's starting-weight guess
-// was simply too heavy for this person. Calibration week treats it as exactly that: drop the
-// weight now and reset the target to the range's own low end, rather than feeding a nonsense raw
-// target (or a false "miss") into the normal RIR ramp. Deliberately narrow: only fires when
-// clearly undershot by more than UNDERSHOOT_MARGIN reps below the range's low end — landing at or
-// near repLow just means the estimate was fine, let the normal RIR math run from there untouched.
-function computeCalibrationWeekAdjustment(actualReps, range, currentWeight) {
-  if (actualReps == null) return null;
-  const UNDERSHOOT_MARGIN = 2;
-  if (actualReps >= range.repLow - UNDERSHOOT_MARGIN) return null;
-  return { weight: nextWeightDecrement(currentWeight), repsTarget: range.repLow };
+// single big miss here, in EITHER direction, isn't "fatigue mid-block" (what evaluateRirMissPattern's
+// graded recalibrate/deload response exists for); it's evidence the exercise DB's starting-weight
+// guess was simply wrong for this person. Calibration week treats it as exactly that: move the
+// weight now and reset the target to the edge of the range they were nearest, rather than feeding a
+// nonsense raw target (or a false "miss") into the normal RIR ramp.
+// Deliberately narrow in both directions: only fires when clearly outside the range by more than the
+// margin — landing at or near repLow/repHigh just means the estimate was fine, so let the normal RIR
+// math run from there untouched.
+// NOTE ON DOUBLE-CORRECTION: the within-session autoregulator (logSet) is skipped entirely while RIR
+// mode is on, so sessionAdjustments is always empty here and this can never re-correct a weight the
+// session already moved. If that ever changes, this needs a guard.
+const CALIBRATION_UNDERSHOOT_MARGIN = 2;
+const CALIBRATION_OVERSHOOT_MARGIN = 2;
+// Overshoot converts reps-over into weight steps rather than a single flat bump: someone who got 25
+// on a range topping out at 12 is not one 5% step away from the right load. This app's increments
+// (2.5 / 5 / 10 across the weight tiers) each land near 5% of the bar, and ~1 rep is worth roughly
+// 2-3% of load, so one step ≈ 2 reps.
+const CALIBRATION_REPS_PER_STEP = 2;
+// Capped hard, and the cap is a safety limit rather than a tuning choice: a mistyped rep count (50
+// instead of 5) must never be able to jump someone's working weight by an unbounded amount. Three
+// steps is ~15%, which meaningfully corrects a bad guess while staying inside what a person could
+// have reasonably warmed up to. A very light starting guess may therefore still need one more nudge
+// in week 2 — the banner says so plainly rather than pretending one pass always lands it.
+const CALIBRATION_MAX_STEPS = 3;
+
+function computeCalibrationWeekAdjustment(actualReps, range, currentWeight, isBodyweight) {
+  if (actualReps == null || currentWeight == null) return null;
+  // A bodyweight exercise has no database weight guess to be wrong about, which is this whole
+  // mechanism's premise — and the within-session autoregulator excludes bodyweight for the same
+  // reason. Returning null hands both directions back to the normal RIR ramp, which carries the
+  // actual rep count forward and is the right handler when load isn't the variable.
+  if (isBodyweight) return null;
+  if (actualReps < range.repLow - CALIBRATION_UNDERSHOOT_MARGIN) {
+    return { weight: nextWeightDecrement(currentWeight), repsTarget: range.repLow, direction: "down" };
+  }
+  if (actualReps > range.repHigh + CALIBRATION_OVERSHOOT_MARGIN) {
+    const stepsWanted = Math.floor((actualReps - range.repHigh) / CALIBRATION_REPS_PER_STEP);
+    const steps = Math.max(1, Math.min(CALIBRATION_MAX_STEPS, stepsWanted));
+    let weight = currentWeight;
+    for (let i = 0; i < steps; i++) weight = nextWeightIncrement(weight);
+    return { weight: weight, repsTarget: range.repHigh, direction: "up" };
+  }
+  return null;
 }
 
 // Ties the three pieces above together into the one full update completeWeek() runs per RIR-mode
@@ -3388,7 +3419,7 @@ function programStateHasRealData(state) {
 // The build currently running. Surfaced in Settings -> Account, because "is the deploy actually
 // live?" has been the real answer to several apparent bugs, and inferring it from behaviour is slow
 // and error-prone. Compared against version.json by the update check below.
-const APP_VERSION = "2026-07-30T18:48:00";
+const APP_VERSION = "2026-07-30T19:50:00";
 
 // Signing out has to be unconditional, because every failure mode here ends the same way: a person
 // tapping a button that does nothing.
@@ -4923,11 +4954,11 @@ function App() {
           return;
         }
         // CALIBRATION WEEK: week 1 of a brand-new RIR program has no prior data at all — a big
-        // undershoot here means the exercise DB's starting-weight guess was wrong, not that
-        // fatigue is building mid-block (what the graded miss-pattern system below exists to
-        // read). Scoped strictly to week === 1 so a later single miss still goes through the
+        // miss in either direction here means the exercise DB's starting-weight guess was wrong,
+        // not that fatigue is building mid-block (what the graded miss-pattern system below exists
+        // to read). Scoped strictly to week === 1 so a later single miss still goes through the
         // normal graded response untouched — this only intercepts the very first data point.
-        const calibration = week === 1 ? computeCalibrationWeekAdjustment(maxReps, effectiveRepRange(ex, cur), cur.weight) : null;
+        const calibration = week === 1 ? computeCalibrationWeekAdjustment(maxReps, effectiveRepRange(ex, cur), cur.weight, ex.bodyweight) : null;
         if (calibration) {
           newState[ex.id] = Object.assign({}, cur, {
             weight: calibration.weight,
@@ -6308,11 +6339,13 @@ function CalibrationWeekBanner() {
     h("p", { style: { margin: "6px 0 0", fontSize: 13 } },
       "Starting weights are estimates from the exercise database, not tuned to you yet. Treat them " +
       "as a first guess: if a set leaves way more than about 2 reps in reserve, add weight before " +
-      "your next set. If you're grinding well past that, it's fine to drop it — badly undershoot " +
-      "the rep range on any exercise and next week's weight adjusts down for you automatically, no " +
-      "need to fix it by hand."),
+      "your next set, and if you're grinding well past that, drop it. You don't have to get it " +
+      "right by hand though — land well outside an exercise's rep range this week, in either " +
+      "direction, and next week's weight moves for you."),
     h("p", { style: { margin: "6px 0 0", fontSize: 11, color: "#737373" } },
-      "From week 2 on, the RIR ramp takes over and ties weight to what you actually logged.")
+      "A big overshoot moves the weight up a few steps at most, so a very light starting guess may " +
+      "still want one more nudge from you. From week 2 on, the RIR ramp takes over and ties weight " +
+      "to what you actually logged.")
   );
 }
 
