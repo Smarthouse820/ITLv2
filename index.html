@@ -777,6 +777,40 @@ const GOAL_PROTEIN_PER_LB = { cut: 1.0, bulk: 1.5, maintain: 1.0 };
 // micronutrients within. This is a floor, not a target — most people never touch it.
 const MIN_CAL_FRACTION_OF_MAINTENANCE = 0.6;
 
+// EXTRACTED from App (2026-07-30) so nutrition-sim.js can drive it. This number sets people's
+// calorie targets from their own weigh-ins and food logs, which makes it the most consequential
+// arithmetic in the app — and it had no test coverage of any kind until now.
+// PURE: takes the weight log and a calories-for-date lookup, returns the same shape as before.
+// ADAPTIVE_MIN_DAYS is the floor the two-half comparison needs to mean anything; below it the
+// caller shows "keep logging" rather than a number built on noise.
+// Energy density of body tissue, kcal per lb. Lives at top level because computeAdaptiveTDEEFrom
+// (also top level) needs it — it was declared inside App, which made the extracted function throw a
+// ReferenceError the moment it ran. Caught by nutrition-sim.js on its first execution; preflight
+// passed it because preflight never calls that path. Structure checks cannot catch scope bugs.
+const ADAPTIVE_ENERGY_DENSITY_PER_LB = 3500;
+const ADAPTIVE_MIN_DAYS = 8;
+const ADAPTIVE_WINDOW_DAYS = 14;
+function computeAdaptiveTDEEFrom(dailyWeightLogs, caloriesForDate) {
+  const dateKeys = Object.keys(dailyWeightLogs || {}).sort();
+  if (dateKeys.length < ADAPTIVE_MIN_DAYS) return { insufficientData: true, daysLogged: dateKeys.length, daysNeeded: ADAPTIVE_MIN_DAYS };
+  const recent = dateKeys.slice(-ADAPTIVE_WINDOW_DAYS);
+  const mid = Math.floor(recent.length / 2);
+  const firstHalf = recent.slice(0, mid);
+  const secondHalf = recent.slice(mid);
+  function avgWeight(keys) { return keys.reduce(function (a, k) { return a + dailyWeightLogs[k]; }, 0) / keys.length; }
+  const firstAvg = avgWeight(firstHalf);
+  const secondAvg = avgWeight(secondHalf);
+  const halfSpanDays = recent.length / 2;
+  const weeklyRateLb = ((secondAvg - firstAvg) / halfSpanDays) * 7;
+  const avgCalories = recent.reduce(function (a, k) { return a + caloriesForDate(k); }, 0) / recent.length;
+  const impliedTDEE = avgCalories - (weeklyRateLb * ADAPTIVE_ENERGY_DENSITY_PER_LB) / 7;
+  return {
+    insufficientData: false, daysUsed: recent.length,
+    weeklyRateLb: Math.round(weeklyRateLb * 100) / 100,
+    avgCalories: Math.round(avgCalories), impliedTDEE: Math.round(impliedTDEE),
+  };
+}
+
 function macrosFromMaintenance(maintenance, weight, goal, dietStyle) {
   const rawCal = Math.round(maintenance * (GOAL_CAL_ADJUST[goal] || 1.0));
   const targetCal = Math.max(Math.round(maintenance * MIN_CAL_FRACTION_OF_MAINTENANCE), rawCal);
@@ -2151,10 +2185,16 @@ function computeTargetRIRForWeek(weekPositionInPhase, phaseLength) {
 // steady within the same block just carries the actual forward unchanged. Above RIR_REP_CEILING,
 // the excess demand redirects into a weight bump instead (same nextWeightIncrement used everywhere
 // else in this app), rather than showing an unreasonable rep number.
-function computeRirAdjustedTarget(prevActualReps, prevTargetRIR, currentTargetRIR, currentWeight) {
+function computeRirAdjustedTarget(prevActualReps, prevTargetRIR, currentTargetRIR, currentWeight, isBodyweight) {
   if (prevActualReps == null) return { targetReps: null, weightBump: null };
   const rirDelta = prevTargetRIR - currentTargetRIR; // positive = schedule now wants closer to failure
   const rawTarget = Math.max(1, prevActualReps + rirDelta);
+  // BODYWEIGHT HAS NO LOAD TO REDIRECT INTO (found 2026-07-30 by progression-sim.js, which caught
+  // pull-ups climbing 0 -> 2.5 -> 5 -> 7.5lb over three weeks). The ceiling exists because past ~20
+  // a rep count stops being a meaningful target ON ITS OWN and the demand is better expressed as
+  // load — but a bodyweight movement IS rep-driven, and 25 pull-ups is a real answer, not an
+  // overflow. So the redirect is skipped and the rep target simply carries.
+  if (isBodyweight) return { targetReps: rawTarget, weightBump: null };
   if (rawTarget <= RIR_REP_CEILING) return { targetReps: rawTarget, weightBump: null };
   return { targetReps: RIR_REP_CEILING, weightBump: nextWeightIncrement(currentWeight) };
 }
@@ -2271,6 +2311,120 @@ function computeCalibrationWeekAdjustment(actualReps, range, currentWeight, isBo
   };
 }
 
+// EXTRACTED VERBATIM from completeWeek's per-exercise loop (2026-07-30) so it can be driven by a
+// harness. The whole reason today's bugs got through is that every check was unit-level while every
+// bug was an ORCHESTRATION bug — the sequence of weeks, not the individual formula. This function is
+// that sequence's single step, and progression-sim.js now runs it across full 15-week programs.
+// PURE: reads only ex + cur + ctx, returns a new state rather than mutating anything. completeWeek
+// keeps ownership of the loop, the deload-escalation list, and every write.
+// Returns { state, escalateToDeload }; state === null means "hold this exercise unchanged".
+function computeExerciseWeekProgression(ex, ctx) {
+  let out = null, escalate = false;
+      if (ctx.skipped) return { state: null, escalateToDeload: false };
+      const setsLogged = (ctx.logs || []).filter(Boolean);
+      // Merged, not `||` — same reasoning as renderCard's state resolution: a partial stub entry
+      // (missing weight/repsTarget) must still inherit the exercise's own defaults for progression
+      // math to work off a real number, not undefined.
+      const rawCur = Object.assign({ weight: ex.weight, repsTarget: ex.repLow, nameOverride: null }, ctx.priorState || {});
+      // If a within-session adjustment happened this week (undershoot drop or overshoot bump), next
+      // week's progression should build from that realistic weight/target, not the stale pre-
+      // adjustment one — otherwise the safety mechanism would just get silently undone the moment
+      // the week completes.
+      const cur = ctx.sessionAdjustment != null ? Object.assign({}, rawCur, ctx.sessionAdjustment) : rawCur;
+      if (setsLogged.length === 0) return { state: null, escalateToDeload: false };
+      const maxReps = Math.max.apply(null, setsLogged.map(function (s) { return s.reps || 0; }));
+
+      if (ctx.effectiveRirModeEnabled) {
+        if (ctx.rirModeTurningOnNow && !ctx.rirModeEnabled) {
+          // Fresh activation — RIR mode wasn't tracked at all during the phase that just ended, so
+          // there's no valid prior RIR state to build from. Trains within the normal fixed rep range
+          // this first week; that becomes the real seed computeNextWeekRirUpdate builds from starting
+          // next week, exactly like turning RIR mode on for the very first time.
+          out = Object.assign({}, cur, { rirTargetReps: null, rirMissHistory: [] });
+          return { state: out, escalateToDeload: escalate };
+        }
+        if (ctx.prevWeekPositionInPhase === 0 && ctx.enteringNewPhase) {
+          // Coming OUT of the deload just completed, into a new phase's week 1. The deload week
+          // itself has no meaningful failure-testing data (sets are halved), so this reseeds from
+          // the last REAL trained week (week - 1) — not the deload week, and not the frozen,
+          // undemanded target that would otherwise just sit there untouched. Also the moment
+          // missHistory genuinely resets for the new phase (computeNextWeekRirUpdate's own
+          // startingNewPhase check below), instead of silently carrying forward indefinitely.
+          const lastTrainedLogs = (ctx.lastTrainedLogs || []).filter(Boolean);
+          if (lastTrainedLogs.length === 0) {
+            // Nothing to reseed from (e.g. it was skipped that week) — fresh start, same as a
+            // brand-new activation, rather than guessing.
+            out = Object.assign({}, cur, { rirTargetReps: null, rirMissHistory: [] });
+            return { state: out, escalateToDeload: escalate };
+          }
+          const lastTrainedMaxReps = Math.max.apply(null, lastTrainedLogs.map(function (s) { return s.reps || 0; }));
+          const lastTrainedPosition = ctx.lastTrainedPosition;
+          // Rating comes from the same week as lastTrainedMaxReps (week - 1), not the deload week —
+          // the two must describe the same session or the corroboration is meaningless.
+          const lastTrainedRating = ctx.lastTrainedRating || null;
+          const update = computeNextWeekRirUpdate(lastTrainedMaxReps, cur.rirTargetReps, cur.rirMissHistory, lastTrainedPosition, ctx.nextWeekPositionInPhase, RIR_PHASE_LENGTH, cur.weight, lastTrainedRating, ex.bodyweight);
+          if (update.shouldEscalateToDeload) escalate = true;
+          out = Object.assign({}, cur, {
+            weight: update.weightBump != null ? update.weightBump : cur.weight,
+            repsTarget: update.targetReps != null ? update.targetReps : cur.repsTarget,
+            rirTargetReps: update.targetReps,
+            rirMissHistory: update.missHistory,
+          });
+          return { state: out, escalateToDeload: escalate };
+        }
+        if (ctx.nextWeekPositionInPhase === 0) {
+          // Heading INTO a deload next week — hold flat; a recovery week isn't part of the
+          // progressive proximity-to-failure schedule, so there's nothing to compute for it.
+          out = cur;
+          return { state: out, escalateToDeload: escalate };
+        }
+        // CALIBRATION WEEK: week 1 of a brand-new RIR program has no prior data at all — a big
+        // miss in either direction here means the exercise DB's starting-weight guess was wrong,
+        // not that fatigue is building mid-block (what the graded miss-pattern system below exists
+        // to read). Scoped strictly to ctx.week === 1 so a later single miss still goes through the
+        // normal graded response untouched — this only intercepts the very first data point.
+        const calibration = ctx.week === 1 ? computeCalibrationWeekAdjustment(maxReps, effectiveRepRange(ex, cur), cur.weight, ex.bodyweight, ctx.rating || null) : null;
+        if (calibration) {
+          out = Object.assign({}, cur, {
+            weight: calibration.weight,
+            repsTarget: calibration.repsTarget,
+            rirTargetReps: null,   // no valid RIR target comes out of a corrected-weight week —
+            rirMissHistory: [],    // week 2 starts the graded system clean, not mid-pattern from
+          });                     // what was actually a bad estimate, not real fatigue.
+          return { state: out, escalateToDeload: escalate };
+        }
+        const update = computeNextWeekRirUpdate(maxReps, cur.rirTargetReps, cur.rirMissHistory, ctx.prevWeekPositionInPhase, ctx.nextWeekPositionInPhase, RIR_PHASE_LENGTH, cur.weight, ctx.rating || null, ex.bodyweight);
+        if (update.shouldEscalateToDeload) escalate = true;
+        out = Object.assign({}, cur, {
+          weight: update.weightBump != null ? update.weightBump : cur.weight,
+          repsTarget: update.targetReps != null ? update.targetReps : cur.repsTarget,
+          rirTargetReps: update.targetReps,
+          rirMissHistory: update.missHistory,
+        });
+        return { state: out, escalateToDeload: escalate };
+      }
+
+      const rating = ctx.rating;
+      if (!rating) return { state: null, escalateToDeload: false }; // no rating given at all — no signal to act on, hold
+      const range = effectiveRepRange(ex, cur);
+      if (rating === "hard") {
+        // Too difficult — weight still holds, but the rep target now reflects what was actually
+        // achieved (their best set that week) instead of freezing at whatever the old target was
+        // regardless of real performance. Clamped to the exercise's own rep range either way.
+        out = Object.assign({}, cur, { repsTarget: Math.max(range.repLow, Math.min(maxReps, range.repHigh)) });
+        return { state: out, escalateToDeload: escalate };
+      }
+      if (maxReps >= range.repHigh) {
+        out = Object.assign({}, cur, {
+          weight: ex.bodyweight ? cur.weight : nextWeightIncrement(cur.weight),
+          repsTarget: ex.bodyweight ? Math.min(cur.repsTarget + 2, range.repHigh) : range.repLow,
+        });
+      } else {
+        out = Object.assign({}, cur, { repsTarget: Math.min(cur.repsTarget + 1, range.repHigh) });
+      }
+  return { state: out, escalateToDeload: escalate };
+}
+
 // Ties the three pieces above together into the one full update completeWeek() runs per RIR-mode
 // exercise: was this week's target met, what's the updated miss-history (resetting at a phase
 // boundary), does the miss pattern call for recalibrating or escalating to a deload, and what's the
@@ -2278,7 +2432,7 @@ function computeCalibrationWeekAdjustment(actualReps, range, currentWeight, isBo
 // the SCHEDULE'S demanded step specifically (not the carried-forward actual) — only half the normal
 // delta gets applied, rather than the full ramp, when a short run of misses suggests the pace is
 // currently too aggressive for this particular exercise.
-function computeNextWeekRirUpdate(prevActualReps, prevWeekTargetReps, priorMissHistory, prevWeekPositionInPhase, nextWeekPositionInPhase, phaseLength, currentWeight, prevRating) {
+function computeNextWeekRirUpdate(prevActualReps, prevWeekTargetReps, priorMissHistory, prevWeekPositionInPhase, nextWeekPositionInPhase, phaseLength, currentWeight, prevRating, isBodyweight) {
   const startingNewPhase = nextWeekPositionInPhase === 1 && prevWeekPositionInPhase !== 1;
   const missedThisWeek = prevWeekTargetReps != null && prevActualReps != null && prevActualReps < prevWeekTargetReps;
   const baseMissHistory = startingNewPhase ? [] : (priorMissHistory || []).slice();
@@ -2287,7 +2441,7 @@ function computeNextWeekRirUpdate(prevActualReps, prevWeekTargetReps, priorMissH
 
   const prevTargetRIR = computeTargetRIRForWeek(prevWeekPositionInPhase, phaseLength);
   const nextTargetRIR = computeTargetRIRForWeek(nextWeekPositionInPhase, phaseLength);
-  let computed = computeRirAdjustedTarget(prevActualReps, prevTargetRIR, nextTargetRIR, currentWeight);
+  let computed = computeRirAdjustedTarget(prevActualReps, prevTargetRIR, nextTargetRIR, currentWeight, isBodyweight);
 
   // CORROBORATION (added 2026-07-30). Two independent signals — what was performed, and what the
   // person said about it — should not be read one at a time when both are sitting right there.
@@ -2310,7 +2464,7 @@ function computeNextWeekRirUpdate(prevActualReps, prevWeekTargetReps, priorMissH
     const fullDelta = prevTargetRIR - nextTargetRIR;
     const dampenedDelta = Math.round(fullDelta / 2);
     const dampenedRaw = Math.max(1, prevActualReps + dampenedDelta);
-    computed = dampenedRaw <= RIR_REP_CEILING
+    computed = (isBodyweight || dampenedRaw <= RIR_REP_CEILING)
       ? { targetReps: dampenedRaw, weightBump: null }
       : { targetReps: RIR_REP_CEILING, weightBump: nextWeightIncrement(currentWeight) };
   }
@@ -3633,7 +3787,7 @@ function programStateHasRealData(state) {
 // The build currently running. Surfaced in Settings -> Account, because "is the deploy actually
 // live?" has been the real answer to several apparent bugs, and inferring it from behaviour is slow
 // and error-prone. Compared against version.json by the update check below.
-const APP_VERSION = "2026-07-30T21:52:00";
+const APP_VERSION = "2026-07-30T23:26:00";
 
 // Signing out has to be unconditional, because every failure mode here ends the same way: a person
 // tapping a button that does nothing.
@@ -5112,108 +5266,32 @@ function App() {
     const rirModeTurningOnNow = enteringNewPhase && rirModePendingEnable;
     const effectiveRirModeEnabled = rirModeEnabled || rirModeTurningOnNow;
     allExercises(def.exercises).forEach(function (ex) {
-      if (weekSkipped[ex.id]) return;
-      const setsLogged = (weekLogs[ex.id] || []).filter(Boolean);
-      // Merged, not `||` — same reasoning as renderCard's state resolution: a partial stub entry
-      // (missing weight/repsTarget) must still inherit the exercise's own defaults for progression
-      // math to work off a real number, not undefined.
-      const rawCur = Object.assign({ weight: ex.weight, repsTarget: ex.repLow, nameOverride: null }, newState[ex.id] || {});
-      // If a within-session adjustment happened this week (undershoot drop or overshoot bump), next
-      // week's progression should build from that realistic weight/target, not the stale pre-
-      // adjustment one — otherwise the safety mechanism would just get silently undone the moment
-      // the week completes.
-      const cur = weekAdjustments[ex.id] != null ? Object.assign({}, rawCur, weekAdjustments[ex.id]) : rawCur;
-      if (setsLogged.length === 0) return;
-      const maxReps = Math.max.apply(null, setsLogged.map(function (s) { return s.reps || 0; }));
-
-      if (effectiveRirModeEnabled) {
-        if (rirModeTurningOnNow && !rirModeEnabled) {
-          // Fresh activation — RIR mode wasn't tracked at all during the phase that just ended, so
-          // there's no valid prior RIR state to build from. Trains within the normal fixed rep range
-          // this first week; that becomes the real seed computeNextWeekRirUpdate builds from starting
-          // next week, exactly like turning RIR mode on for the very first time.
-          newState[ex.id] = Object.assign({}, cur, { rirTargetReps: null, rirMissHistory: [] });
-          return;
-        }
-        if (prevWeekPositionInPhase === 0 && enteringNewPhase) {
-          // Coming OUT of the deload just completed, into a new phase's week 1. The deload week
-          // itself has no meaningful failure-testing data (sets are halved), so this reseeds from
-          // the last REAL trained week (week - 1) — not the deload week, and not the frozen,
-          // undemanded target that would otherwise just sit there untouched. Also the moment
-          // missHistory genuinely resets for the new phase (computeNextWeekRirUpdate's own
-          // startingNewPhase check below), instead of silently carrying forward indefinitely.
-          const lastTrainedLogs = ((prog.logs[week - 1] || {})[ex.id] || []).filter(Boolean);
-          if (lastTrainedLogs.length === 0) {
-            // Nothing to reseed from (e.g. it was skipped that week) — fresh start, same as a
-            // brand-new activation, rather than guessing.
-            newState[ex.id] = Object.assign({}, cur, { rirTargetReps: null, rirMissHistory: [] });
-            return;
-          }
-          const lastTrainedMaxReps = Math.max.apply(null, lastTrainedLogs.map(function (s) { return s.reps || 0; }));
-          const lastTrainedPosition = computePhaseWeeks(week - 1, prog.extraDeloadWeeks).length;
-          // Rating comes from the same week as lastTrainedMaxReps (week - 1), not the deload week —
-          // the two must describe the same session or the corroboration is meaningless.
-          const lastTrainedRating = ((prog.exerciseDifficulty || {})[week - 1] || {})[ex.id] || null;
-          const update = computeNextWeekRirUpdate(lastTrainedMaxReps, cur.rirTargetReps, cur.rirMissHistory, lastTrainedPosition, nextWeekPositionInPhase, RIR_PHASE_LENGTH, cur.weight, lastTrainedRating);
-          if (update.shouldEscalateToDeload) rirEscalatedExercises.push({ exerciseId: ex.id, exerciseName: cur.nameOverride || ex.name });
-          newState[ex.id] = Object.assign({}, cur, {
-            weight: update.weightBump != null ? update.weightBump : cur.weight,
-            repsTarget: update.targetReps != null ? update.targetReps : cur.repsTarget,
-            rirTargetReps: update.targetReps,
-            rirMissHistory: update.missHistory,
-          });
-          return;
-        }
-        if (nextWeekPositionInPhase === 0) {
-          // Heading INTO a deload next week — hold flat; a recovery week isn't part of the
-          // progressive proximity-to-failure schedule, so there's nothing to compute for it.
-          newState[ex.id] = cur;
-          return;
-        }
-        // CALIBRATION WEEK: week 1 of a brand-new RIR program has no prior data at all — a big
-        // miss in either direction here means the exercise DB's starting-weight guess was wrong,
-        // not that fatigue is building mid-block (what the graded miss-pattern system below exists
-        // to read). Scoped strictly to week === 1 so a later single miss still goes through the
-        // normal graded response untouched — this only intercepts the very first data point.
-        const calibration = week === 1 ? computeCalibrationWeekAdjustment(maxReps, effectiveRepRange(ex, cur), cur.weight, ex.bodyweight, weekDifficulty[ex.id] || null) : null;
-        if (calibration) {
-          newState[ex.id] = Object.assign({}, cur, {
-            weight: calibration.weight,
-            repsTarget: calibration.repsTarget,
-            rirTargetReps: null,   // no valid RIR target comes out of a corrected-weight week —
-            rirMissHistory: [],    // week 2 starts the graded system clean, not mid-pattern from
-          });                     // what was actually a bad estimate, not real fatigue.
-          return;
-        }
-        const update = computeNextWeekRirUpdate(maxReps, cur.rirTargetReps, cur.rirMissHistory, prevWeekPositionInPhase, nextWeekPositionInPhase, RIR_PHASE_LENGTH, cur.weight, weekDifficulty[ex.id] || null);
-        if (update.shouldEscalateToDeload) rirEscalatedExercises.push({ exerciseId: ex.id, exerciseName: cur.nameOverride || ex.name });
-        newState[ex.id] = Object.assign({}, cur, {
-          weight: update.weightBump != null ? update.weightBump : cur.weight,
-          repsTarget: update.targetReps != null ? update.targetReps : cur.repsTarget,
-          rirTargetReps: update.targetReps,
-          rirMissHistory: update.missHistory,
-        });
-        return;
+      // The step itself lives in computeExerciseWeekProgression (pure, top-level, harness-driven by
+      // progression-sim.js). This loop keeps what it always owned: gathering each exercise's inputs,
+      // writing state, and collecting the deload-escalation list.
+      const lastTrainedLogs = ((prog.logs[week - 1] || {})[ex.id] || []).filter(Boolean);
+      const step = computeExerciseWeekProgression(ex, {
+        week: week,
+        priorState: newState[ex.id],
+        logs: weekLogs[ex.id],
+        skipped: !!weekSkipped[ex.id],
+        rating: weekDifficulty[ex.id],
+        sessionAdjustment: weekAdjustments[ex.id],
+        rirModeEnabled: rirModeEnabled,
+        effectiveRirModeEnabled: effectiveRirModeEnabled,
+        rirModeTurningOnNow: rirModeTurningOnNow,
+        prevWeekPositionInPhase: prevWeekPositionInPhase,
+        nextWeekPositionInPhase: nextWeekPositionInPhase,
+        enteringNewPhase: enteringNewPhase,
+        lastTrainedLogs: lastTrainedLogs,
+        lastTrainedPosition: computePhaseWeeks(week - 1, prog.extraDeloadWeeks).length,
+        lastTrainedRating: ((prog.exerciseDifficulty || {})[week - 1] || {})[ex.id] || null,
+      });
+      if (step.escalateToDeload) {
+        const nm = ((newState[ex.id] || {}).nameOverride) || ex.name;
+        rirEscalatedExercises.push({ exerciseId: ex.id, exerciseName: nm });
       }
-
-      const rating = weekDifficulty[ex.id];
-      if (!rating) return; // no rating given at all — no signal to act on, hold
-      const range = effectiveRepRange(ex, cur);
-      if (rating === "hard") {
-        // Too difficult — weight still holds, but the rep target now reflects what was actually
-        // achieved (their best set that week) instead of freezing at whatever the old target was
-        // regardless of real performance. Clamped to the exercise's own rep range either way.
-        newState[ex.id] = Object.assign({}, cur, { repsTarget: Math.max(range.repLow, Math.min(maxReps, range.repHigh)) });
-        return;
-      }
-      if (maxReps >= range.repHigh) {
-        newState[ex.id] = Object.assign({}, cur, {
-          weight: ex.bodyweight ? cur.weight : nextWeightIncrement(cur.weight),
-          repsTarget: ex.bodyweight ? Math.min(cur.repsTarget + 2, range.repHigh) : range.repLow,
-        });
-      } else {
-        newState[ex.id] = Object.assign({}, cur, { repsTarget: Math.min(cur.repsTarget + 1, range.repHigh) });
-      }
+      if (step.state != null) newState[ex.id] = step.state;
     });
     const nextWeekAlreadyDeload = (week + 1) % 5 === 0 || (prog.extraDeloadWeeks || []).indexOf(week + 1) !== -1;
     // The phase that just ended is the natural checkpoint to ask "has any muscle group earned more
@@ -5617,26 +5695,9 @@ function App() {
   // Simplification worth knowing: this uses one fixed blended energy density (3500 kcal/lb) rather
   // than a density that slides with your rate of change the way more sophisticated commercial
   // models do — it still self-corrects over time, just with less precision than that finer model.
-  const ADAPTIVE_ENERGY_DENSITY_PER_LB = 3500;
+  // Thin wrapper over the pure computeAdaptiveTDEEFrom (top level, harness-driven).
   function computeAdaptiveTDEE() {
-    const dateKeys = Object.keys(prog.dailyWeightLogs).sort();
-    if (dateKeys.length < 8) return { insufficientData: true, daysLogged: dateKeys.length, daysNeeded: 8 };
-    const recent = dateKeys.slice(-14);
-    const mid = Math.floor(recent.length / 2);
-    const firstHalf = recent.slice(0, mid);
-    const secondHalf = recent.slice(mid);
-    function avgWeight(keys) { return keys.reduce(function (a, k) { return a + prog.dailyWeightLogs[k]; }, 0) / keys.length; }
-    const firstAvg = avgWeight(firstHalf);
-    const secondAvg = avgWeight(secondHalf);
-    const halfSpanDays = recent.length / 2;
-    const weeklyRateLb = ((secondAvg - firstAvg) / halfSpanDays) * 7;
-    const avgCalories = recent.reduce(function (a, k) { return a + loggedCaloriesForDate(k); }, 0) / recent.length;
-    const impliedTDEE = avgCalories - (weeklyRateLb * ADAPTIVE_ENERGY_DENSITY_PER_LB) / 7;
-    return {
-      insufficientData: false, daysUsed: recent.length,
-      weeklyRateLb: Math.round(weeklyRateLb * 100) / 100,
-      avgCalories: Math.round(avgCalories), impliedTDEE: Math.round(impliedTDEE),
-    };
+    return computeAdaptiveTDEEFrom(prog.dailyWeightLogs, loggedCaloriesForDate);
   }
   const adaptiveTDEE = computeAdaptiveTDEE();
   const plannedCalories = (data.customProgramConfig && data.customProgramConfig.macros) ? data.customProgramConfig.macros.cal : null;
@@ -6816,7 +6877,12 @@ function WorkoutsTab(props) {
               ? "Skipped this week"
               : (ex.bodyweight ? "Bodyweight" : state.weight + "lb") + " · " + setsToday + "×" +
                 (props.rirModeEnabled && state.rirTargetReps != null
-                  ? state.rirTargetReps + " reps (this phase's target)"
+                  // Name the RIR alongside the number so the target reads as an intent rather than
+                  // an arbitrary figure — same reasoning as RirWeekBanner, restated where the
+                  // decision is actually made.
+                  ? state.rirTargetReps + " reps \u00b7 " +
+                    (function (r) { return r === 0 ? "to failure" : "leave ~" + r + " in reserve"; })(
+                      computeTargetRIRForWeek(computePhaseWeeks(props.data.currentWeek, props.data.extraDeloadWeeks).length, RIR_PHASE_LENGTH))
                   : ex.isFailure ? "to failure (target " + state.repsTarget + ", range " + range.repLow + "–" + range.repHigh + ")" : state.repsTarget + " (range " + range.repLow + "–" + range.repHigh + ")"),
             sessionAdjustmentDirection === "down" && h("span", { style: { color: "#f0b429" } }, " · reduced this session after a big rep miss"),
             sessionAdjustmentDirection === "up" && h("span", { style: { color: "#4eba6f" } }, " · increased this session after beating the top of your range"),
@@ -6932,6 +6998,7 @@ function WorkoutsTab(props) {
                 const isLastSet = i === setsToday - 1;
                 return h(SetLogger, {
                   key: props.data.currentWeek + "-" + i, setIdx: i, exercise: ex, state: state,
+                  rirModeEnabled: props.rirModeEnabled,
                   existing: logsForEx[i], onLog: function (reps, weight) { props.logSet(ex.id, i, reps, weight, range.repLow, range.repHigh, ex.bodyweight, state.repsTarget); },
                   // SUPERSET-AWARE REST. The whole point of a superset is that you move straight to
                   // the next exercise in the group instead of resting — so resting after exercise A
@@ -7508,7 +7575,20 @@ function SetLogger(props) {
         type: "number", inputMode: "numeric", value: reps,
         onChange: function (e) { setReps(e.target.value); }, onBlur: commitSet, placeholder: "reps", className: "set-input",
       }),
-      h("span", { className: "set-target" }, "target " + effectiveRepRange(props.exercise, props.state).repLow + "–" + effectiveRepRange(props.exercise, props.state).repHigh)
+      // THE MOST ANCHORING NUMBER ON THE SCREEN — it sits beside the input the person types into,
+      // and people work toward whatever goal they are shown. In RIR mode the static rep range is the
+      // WRONG goal: targets there are derived from what was actually logged last week, ramped by
+      // this week's target RIR, so a lift can legitimately sit well above its printed range.
+      // Showing "target 10-15" beside a computed target of 20 taught people to stop five reps early
+      // and then recorded it as a miss. Reported by the user 2026-07-30.
+      // A single number, not a band: the engine's own definition of a miss is `actual < target`, so
+      // a band whose bottom sat below the target would show something as in-range and then score it
+      // as a miss. Week 1 has no computed target yet and correctly falls back to the range — that
+      // week IS the range-finding exercise, and the calibration banner says so.
+      h("span", { className: "set-target" },
+        (props.rirModeEnabled && props.state.rirTargetReps != null)
+          ? "target " + props.state.rirTargetReps
+          : "target " + effectiveRepRange(props.exercise, props.state).repLow + "–" + effectiveRepRange(props.exercise, props.state).repHigh)
     )
   );
 }
