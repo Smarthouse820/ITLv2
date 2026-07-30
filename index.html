@@ -3374,7 +3374,7 @@ function programStateHasRealData(state) {
 // The build currently running. Surfaced in Settings -> Account, because "is the deploy actually
 // live?" has been the real answer to several apparent bugs, and inferring it from behaviour is slow
 // and error-prone. Compared against version.json by the update check below.
-const APP_VERSION = "2026-07-30T12:09:00";
+const APP_VERSION = "2026-07-30T12:56:00";
 
 // Signing out has to be unconditional, because every failure mode here ends the same way: a person
 // tapping a button that does nothing.
@@ -4104,6 +4104,17 @@ function App() {
       .then(function () { showToast("Rejected"); refreshCoaching(); });
   }
   useEffect(function () { refreshCoaching(); }, [userId]);
+  // Safety net for the pre-built program claim. respondToInvite() claims at the natural moment,
+  // but the link can become active without this device ever seeing that moment — accepted on a
+  // phone, opened later on a laptop; or the claim's network call failed at the time. The RPC is
+  // idempotent (already-claimed drafts are skipped) and returns 0 in the overwhelmingly common
+  // case of nothing waiting, so running it once per sign-in costs a single cheap call.
+  useEffect(function () {
+    if (!userId) return;
+    supabaseClient.rpc("claim_coach_drafts").then(function (c) {
+      if (!c.error && c.data > 0) refreshCoaching();
+    }).catch(function () {});
+  }, [userId]);
   // The Clients tab exists only while clients exist; ending the last relationship while standing
   // on it would strand the view, so fall back to Workouts the moment the condition goes false.
   // Placed HERE, after myClients' declaration — the deps array is evaluated during render, so
@@ -4145,7 +4156,22 @@ function App() {
     return supabaseClient.from("coaching_links")
       .update({ status: accept ? "active" : "revoked" }).eq("id", linkId)
       .then(function (r) {
-        if (!r.error) { showToast(accept ? "Coach connected" : "Invitation declined"); return refreshCoaching(); }
+        if (!r.error) {
+          showToast(accept ? "Coach connected" : "Invitation declined");
+          // A coach may have prepared a program before this person ever signed up (migration 14).
+          // Claiming is only possible now — the SQL side requires an ACTIVE link — so this is the
+          // exact moment to ask. Declining claims nothing, by design. Failure here is silent and
+          // harmless: the claim is idempotent and retried on the next load.
+          if (accept) {
+            return supabaseClient.rpc("claim_coach_drafts")
+              .then(function (c) {
+                if (!c.error && c.data > 0) showToast("Your coach already set up your program — applying it now");
+              })
+              .catch(function () {})
+              .then(function () { return refreshCoaching(); });
+          }
+          return refreshCoaching();
+        }
         // The DB enforces one active coach per client (unique partial index). That surfaces here as
         // a raw constraint error, which is accurate but unreadable — someone accepting a second
         // invitation just needs to be told what's actually true, and what to do about it.
@@ -8888,6 +8914,90 @@ function DisplayNameRow(props) {
     }));
 }
 
+// Prepare a full program for someone who hasn't signed up yet. Uses the SAME CustomSetupWizard and
+// the SAME buildWizardConfig payload as the coach-run setup for an existing client — the only
+// difference is where it lands: an email-keyed coach_program_drafts row (migration 14) instead of
+// a coach_assignments row, because there's no client_id to point at yet. The draft is inert until
+// that person signs up AND accepts this coach's invitation; claim_coach_drafts() enforces that in
+// SQL, not here.
+function PrepareProgramForNewClient(props) {
+  const [open, setOpen] = useState(false);
+  const [email, setEmail] = useState("");
+  const [wizardOpen, setWizardOpen] = useState(false);
+  const [status, setStatus] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [drafts, setDrafts] = useState([]);
+
+  function loadDrafts() {
+    supabaseClient.from("coach_program_drafts")
+      .select("id, client_email, created_at").is("claimed_at", null).order("created_at", { ascending: false })
+      .then(function (r) { if (!r.error) setDrafts(r.data || []); });
+  }
+  useEffect(function () { if (open) loadDrafts(); }, [open]);
+
+  function saveDraft(setup) {
+    const config = buildWizardConfig(setup, FOOD_DB);
+    const payload = Object.assign({}, config, { likedFoodsByMeal: setup.likedFoodsByMeal || null });
+    const normalized = email.trim().toLowerCase();
+    setBusy(true); setWizardOpen(false);
+    // Upsert on the (coach_id, client_email) open-draft index: re-preparing replaces rather than
+    // stacking, so nobody claims three half-finished versions of their own program.
+    supabaseClient.from("coach_program_drafts")
+      .select("id").eq("client_email", normalized).is("claimed_at", null)
+      .then(function (r) {
+        const existing = (r.data || [])[0];
+        return existing
+          ? supabaseClient.from("coach_program_drafts").update({ payload: payload }).eq("id", existing.id)
+          : supabaseClient.from("coach_program_drafts").insert({
+              coach_id: props.coachId, client_email: normalized, kind: "program_config",
+              program_key: "custom", payload: payload, note: "Prepared by your coach before you signed up",
+            });
+      })
+      .then(function (r) {
+        setBusy(false);
+        if (r && r.error) { setStatus("Couldn't save: " + (r.error.message || "unknown error")); return; }
+        setStatus("Saved for " + normalized + ". It applies once they sign up and accept your invitation.");
+        setEmail("");
+        loadDrafts();
+      });
+  }
+
+  function deleteDraft(id) {
+    supabaseClient.from("coach_program_drafts").delete().eq("id", id).then(function () { loadDrafts(); });
+  }
+
+  if (!open) {
+    return h("button", { className: "ex-action-btn", style: { width: "100%", marginBottom: 10 }, onClick: function () { setOpen(true); } },
+      "Prepare a program for someone new");
+  }
+  return h("div", { style: { border: "1px solid #262626", borderRadius: 8, padding: 10, marginBottom: 10 } },
+    h("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 } },
+      h("strong", { style: { fontSize: 13 } }, "Prepare a program ahead"),
+      h("button", { className: "ex-action-btn", style: { padding: "4px 10px" }, onClick: function () { setOpen(false); setWizardOpen(false); setStatus(""); } }, "Close")),
+    !wizardOpen && h(React.Fragment, null,
+      h("p", { style: { fontSize: 11, color: "#a3a3a3", margin: "0 0 8px", lineHeight: 1.5 } },
+        "Build someone's plan before they've signed up. It waits until they create an account with this email " +
+        "and accept your invitation \u2014 then it applies on their first sign-in, so they skip setup entirely. " +
+        "Nothing is sent to them and nothing applies until they've agreed to be coached by you."),
+      h("input", { type: "email", className: "search-input", placeholder: "their email address", value: email,
+        onChange: function (e) { setEmail(e.target.value); }, style: { marginBottom: 8 } }),
+      h("button", { className: "swap-save-btn", style: { width: "100%" }, disabled: busy || !email.trim() || email.indexOf("@") === -1,
+        onClick: function () { setStatus(""); setWizardOpen(true); } }, busy ? "Saving\u2026" : "Build their program"),
+      status && h("p", { style: { fontSize: 11, color: status.indexOf("Couldn't") === 0 ? "#d9822b" : "#4eba6f", margin: "8px 0 0" } }, status),
+      drafts.length > 0 && h("div", { style: { marginTop: 12, borderTop: "1px solid #262626", paddingTop: 8 } },
+        h("p", { style: { fontSize: 11, color: "#737373", margin: "0 0 6px" } }, "Waiting to be claimed:"),
+        drafts.map(function (d) {
+          return h("div", { key: d.id, style: { display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 } },
+            h("span", { style: { fontSize: 12 } }, d.client_email),
+            h("button", { className: "ex-action-btn", style: { padding: "2px 8px", fontSize: 11 }, onClick: function () { deleteDraft(d.id); } }, "Delete"));
+        }))),
+    wizardOpen && h(React.Fragment, null,
+      h("p", { style: { fontSize: 11, color: "#f0b429", margin: "0 0 8px" } },
+        "Answer as " + email.trim().toLowerCase() + " \u2014 their stats, their goals, their liked foods."),
+      h(CustomSetupWizard, { onComplete: saveDraft, allFoods: FOOD_DB }))
+  );
+}
+
 function CoachingPanel(props) {
   const [email, setEmail] = useState("");
   const [openEditor, setOpenEditor] = useState(null); // client_id of the card with the editor open
@@ -9033,6 +9143,8 @@ function CoachingPanel(props) {
 
     // ---- Coach side ----
     props.canCoach && h("div", null,
+      // Clients tab only — the Settings instance stays light, same rule as coach triage.
+      props.triage && h(PrepareProgramForNewClient, { coachId: props.coachId }),
       clients.length === 0
         ? h("p", { style: { fontSize: 12, color: "#737373", margin: "0 0 10px", lineHeight: 1.5 } },
             "No clients yet. Invite someone by the email address they signed up with — they'll need to accept before you can see anything.")
