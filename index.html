@@ -3377,7 +3377,7 @@ function programStateHasRealData(state) {
 // The build currently running. Surfaced in Settings -> Account, because "is the deploy actually
 // live?" has been the real answer to several apparent bugs, and inferring it from behaviour is slow
 // and error-prone. Compared against version.json by the update check below.
-const APP_VERSION = "2026-07-30T14:44:00";
+const APP_VERSION = "2026-07-30T15:05:00";
 
 // Signing out has to be unconditional, because every failure mode here ends the same way: a person
 // tapping a button that does nothing.
@@ -3762,8 +3762,14 @@ function App() {
     });
     return function () { authListener.subscription.unsubscribe(); };
   }, []);
-  function signUpWithEmail(email, password) {
-    return supabaseClient.auth.signUp({ email: email, password: password });
+  function signUpWithEmail(email, password, coachRequested) {
+    // The flag rides in user metadata rather than a profiles write: at this point there's no
+    // session (email confirmation comes first), so there's nothing to write with. Metadata is
+    // stored atomically with the account, so the intent can't be lost between the two steps.
+    return supabaseClient.auth.signUp({
+      email: email, password: password,
+      options: { data: { coach_requested: !!coachRequested } },
+    });
   }
   function signInWithEmail(email, password) {
     return supabaseClient.auth.signInWithPassword({ email: email, password: password });
@@ -8377,6 +8383,7 @@ function AccountAuthPanel(props) {
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
   const [signupSent, setSignupSent] = useState(false);
+  const [coachRequested, setCoachRequested] = useState(false);
 
   if (!props.authChecked) {
     return h("p", { style: { fontSize: 12, color: "#737373" } }, "Checking sign-in status\u2026");
@@ -8397,7 +8404,7 @@ function AccountAuthPanel(props) {
     if (!email || !password) { setError("Enter both an email and a password."); return; }
     setError("");
     setLoading(true);
-    const action = mode === "signup" ? props.signUpWithEmail(email, password) : props.signInWithEmail(email, password);
+    const action = mode === "signup" ? props.signUpWithEmail(email, password, coachRequested) : props.signInWithEmail(email, password);
     action.then(function (result) {
       setLoading(false);
       if (result.error) { setError(result.error.message); return; }
@@ -8427,6 +8434,17 @@ function AccountAuthPanel(props) {
       style: { width: "100%", background: "#0a0a0a", border: "1px solid #404040", borderRadius: 8, padding: "8px 10px", fontSize: 13, color: "#f5f5f5", marginBottom: 8 },
     }),
     error && h("p", { style: { fontSize: 12, color: "#f87171", margin: "0 0 8px" } }, error),
+    // Signup only. Records a REQUEST, nothing more — coach access is granted by hand from the
+    // admin panel, never by ticking this. Worded so that's obvious rather than implied, so nobody
+    // ticks it expecting instant access and wonders why nothing happened.
+    mode === "signup" && h("label", {
+      style: { display: "flex", alignItems: "flex-start", gap: 8, margin: "0 0 10px", cursor: "pointer" },
+    },
+      h("input", { type: "checkbox", checked: coachRequested, onChange: function (e) { setCoachRequested(e.target.checked); }, style: { marginTop: 2 } }),
+      h("span", { style: { fontSize: 12, color: "#a3a3a3", lineHeight: 1.45 } },
+        "I'm a coach and want to train clients here",
+        h("span", { style: { display: "block", fontSize: 11, color: "#737373" } },
+          "Sent as a request \u2014 an admin reviews it before coaching tools are enabled."))),
     h("div", { style: { display: "flex", gap: 8 } },
       h("button", {
         type: "submit", className: "ex-action-btn", style: { flex: 1, background: "#1d4ed8", color: "#fff", borderColor: "#1d4ed8" }, disabled: loading,
@@ -9588,6 +9606,19 @@ function AdminTab(props) {
         props.onRefresh();
       });
   }
+  // Separate call, not a tier argument: coach status is a THIRD switch (the `coaches` table) on
+  // top of approved and tier. Approving at tier 3 alone leaves someone without coaching tools —
+  // that exact gap is what this button exists to close.
+  function approveCoach(userId) {
+    setBusyId(userId);
+    supabaseClient.rpc("owner_approve_coach", { target: userId })
+      .then(function (r) {
+        setBusyId(null);
+        if (r.error) { setError("Couldn't approve as coach — " + (r.error.message || "try again")); return; }
+        setError("");
+        props.onRefresh();
+      });
+  }
 
   return h("div", null,
     h("h2", { style: { fontSize: 16, margin: "0 0 4px" } }, "Signup approvals"),
@@ -9598,15 +9629,26 @@ function AdminTab(props) {
     pending.length === 0
       ? h("p", { style: { fontSize: 13, color: "#737373" } }, "Nobody waiting right now.")
       : pending.map(function (p) {
-          return h("div", { key: p.user_id, style: { background: "#171717", border: "1px solid #262626", borderRadius: 8, padding: 12, marginBottom: 8 } },
+          return h("div", { key: p.user_id, style: { background: "#171717", border: "1px solid " + (p.coach_requested ? "#3d97d3" : "#262626"), borderRadius: 8, padding: 12, marginBottom: 8 } },
             h("p", { style: { margin: "0 0 2px", fontSize: 13, overflow: "hidden", textOverflow: "ellipsis" } }, p.email),
             h("p", { style: { margin: "0 0 10px", fontSize: 11, color: "#737373" } },
               "Signed up " + new Date(p.signed_up_at).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" })),
-            h("div", { style: { display: "flex", gap: 8 } },
+            // Shown only when they actually asked. It's a claim they made about themselves, not a
+            // verified fact, so the wording stays neutral — the decision is still entirely yours.
+            p.coach_requested && h("p", { style: { margin: "-6px 0 10px", fontSize: 12, color: "#3d97d3" } },
+              "\u25CF Says they're a coach and wants to train clients"),
+            h("div", { style: { display: "flex", gap: 8, marginBottom: p.coach_requested ? 8 : 0 } },
               h("button", { className: "ex-action-btn", style: { flex: 1 }, disabled: busyId === p.user_id,
                 onClick: function () { approve(p.user_id, 1); } }, busyId === p.user_id ? "\u2026" : "Approve (free)"),
               h("button", { className: "swap-save-btn", style: { flex: 1 }, disabled: busyId === p.user_id,
-                onClick: function () { approve(p.user_id, 3); } }, busyId === p.user_id ? "\u2026" : "Approve (full)")));
+                onClick: function () { approve(p.user_id, 3); } }, busyId === p.user_id ? "\u2026" : "Approve (full)")),
+            // Always available, not just when requested — you may know someone's a coach without
+            // them having ticked the box. Sets approved + tier + coach status in one call, so the
+            // three can't drift apart the way they did before this existed.
+            h("button", { className: "ex-action-btn", style: { width: "100%", borderColor: "#3d97d3", color: "#3d97d3" },
+              disabled: busyId === p.user_id,
+              onClick: function () { approveCoach(p.user_id); } },
+              busyId === p.user_id ? "\u2026" : "Approve as coach"));
         })
   );
 }
@@ -10822,7 +10864,7 @@ function AuthGate() {
         "Sign in to your account, or create one, to continue."),
       h(AccountAuthPanel, {
         session: null, authChecked: true,
-        signUpWithEmail: function (email, password) { return supabaseClient.auth.signUp({ email: email, password: password }); },
+        signUpWithEmail: function (email, password, coachRequested) { return supabaseClient.auth.signUp({ email: email, password: password, options: { data: { coach_requested: !!coachRequested } } }); },
         signInWithEmail: function (email, password) { return supabaseClient.auth.signInWithPassword({ email: email, password: password }); },
         signOut: function () { return signOutEverywhereOrLocally(); },
       }),
