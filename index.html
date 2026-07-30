@@ -3388,7 +3388,7 @@ function programStateHasRealData(state) {
 // The build currently running. Surfaced in Settings -> Account, because "is the deploy actually
 // live?" has been the real answer to several apparent bugs, and inferring it from behaviour is slow
 // and error-prone. Compared against version.json by the update check below.
-const APP_VERSION = "2026-07-30T15:31:00";
+const APP_VERSION = "2026-07-30T18:48:00";
 
 // Signing out has to be unconditional, because every failure mode here ends the same way: a person
 // tapping a button that does nothing.
@@ -9680,18 +9680,39 @@ function AdminTab(props) {
             // verified fact, so the wording stays neutral — the decision is still entirely yours.
             p.coach_requested && h("p", { style: { margin: "-6px 0 10px", fontSize: 12, color: "#3d97d3" } },
               "\u25CF Says they're a coach and wants to train clients"),
-            h("div", { style: { display: "flex", gap: 8, marginBottom: p.coach_requested ? 8 : 0 } },
-              h("button", { className: "ex-action-btn", style: { flex: 1 }, disabled: busyId === p.user_id,
-                onClick: function () { approve(p.user_id, 1); } }, busyId === p.user_id ? "\u2026" : "Approve (free)"),
-              h("button", { className: "swap-save-btn", style: { flex: 1 }, disabled: busyId === p.user_id,
-                onClick: function () { approve(p.user_id, 3); } }, busyId === p.user_id ? "\u2026" : "Approve (full)")),
-            // Always available, not just when requested — you may know someone's a coach without
-            // them having ticked the box. Sets approved + tier + coach status in one call, so the
-            // three can't drift apart the way they did before this existed.
-            h("button", { className: "ex-action-btn", style: { width: "100%", borderColor: "#3d97d3", color: "#3d97d3" },
-              disabled: busyId === p.user_id,
-              onClick: function () { approveCoach(p.user_id); } },
-              busyId === p.user_id ? "\u2026" : "Approve as coach"));
+            // A flex COLUMN with gap, not margins between siblings. Margins here were fragile —
+            // one was accidentally conditional (collapsing to zero on non-requester rows), and
+            // .ex-action-btn/.swap-save-btn differ by 2px in height because one has a 1px border
+            // and the other has none. Explicit box-sizing + a shared minHeight makes all three
+            // buttons the same size regardless of which class they use.
+            h("div", { style: { display: "flex", flexDirection: "column", gap: 8 } },
+              h("div", { style: { display: "flex", gap: 8 } },
+                h("button", {
+                  className: "ex-action-btn", disabled: busyId === p.user_id,
+                  style: { flex: "1 1 0", minWidth: 0, minHeight: 36, boxSizing: "border-box" },
+                  onClick: function () { approve(p.user_id, 1); },
+                }, busyId === p.user_id ? "\u2026" : "Approve (free)"),
+                h("button", {
+                  className: "swap-save-btn", disabled: busyId === p.user_id,
+                  // 1px transparent border matches ex-action-btn's box so the two line up exactly.
+                  style: { flex: "1 1 0", minWidth: 0, minHeight: 36, boxSizing: "border-box", border: "1px solid transparent" },
+                  onClick: function () { approve(p.user_id, 3); },
+                }, busyId === p.user_id ? "\u2026" : "Approve (full)")),
+              // Always available, not just when requested — you may know someone's a coach without
+              // them having ticked the box. Sets approved + tier + coach status in one call, so the
+              // three can't drift apart the way they did before this existed.
+              h("button", {
+                className: "ex-action-btn", disabled: busyId === p.user_id,
+                style: { flex: "0 0 auto", width: "100%", minHeight: 36, boxSizing: "border-box", borderColor: "#3d97d3", color: "#3d97d3" },
+                onClick: function () { approveCoach(p.user_id); },
+              }, busyId === p.user_id ? "\u2026" : "Approve as coach")),
+            // The button is always available, so its presence alone says nothing about what this
+            // person asked for. Spell out which state this row is actually in, so a coach grant is
+            // never made on the mistaken assumption that they requested it.
+            h("p", { style: { margin: "8px 0 0", fontSize: 11, color: "#737373", lineHeight: 1.45 } },
+              p.coach_requested
+                ? "They asked for coach access at signup. Approving as coach also approves the account and sets full access."
+                : "They didn't ask for coach access \u2014 this button is here for coaches you already know. It also approves the account and sets full access."));
         })
   );
 }
