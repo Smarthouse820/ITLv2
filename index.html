@@ -30,7 +30,17 @@
   body { margin: 0; -webkit-tap-highlight-color: transparent; overscroll-behavior: none; overflow-x: hidden;
     background: #0a0a0a; color: #f5f5f5; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
   button, input { font-family: inherit; }
-  input[type=number]::-webkit-inner-spin-button { opacity: 1; }
+  /* NO SPINNERS ON NUMBER INPUTS (2026-07-31). This rule previously forced them VISIBLE with
+     opacity: 1, which nobody noticed for months because mobile browsers don't render spin buttons
+     at all — it only showed up the first time the app was opened on a desktop, where every rep and
+     weight field grew a pair of arrows that ate the field's width.
+     Hiding them was already the convention in this file: .logged-food-grams and .milestone-inputs
+     each carried their own appearance:none override to fight this very rule. Now it's global and
+     those two are redundant (left in place; harmless).
+     Keyboard up/down still increments — only the rendered control is gone. */
+  input[type=number]::-webkit-inner-spin-button,
+  input[type=number]::-webkit-outer-spin-button { -webkit-appearance: none; appearance: none; margin: 0; }
+  input[type=number] { -moz-appearance: textfield; appearance: textfield; }
 
   .app { min-height: 100vh; padding-bottom: 90px; }
   .header { border-bottom: 1px solid #262626; padding: 12px 16px; position: sticky; top: 0;
@@ -3787,7 +3797,7 @@ function programStateHasRealData(state) {
 // The build currently running. Surfaced in Settings -> Account, because "is the deploy actually
 // live?" has been the real answer to several apparent bugs, and inferring it from behaviour is slow
 // and error-prone. Compared against version.json by the update check below.
-const APP_VERSION = "2026-07-30T23:26:00";
+const APP_VERSION = "2026-07-31T13:37:00";
 
 // Signing out has to be unconditional, because every failure mode here ends the same way: a person
 // tapping a button that does nothing.
