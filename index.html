@@ -320,45 +320,45 @@ function Sparkles(p) { return h(Icon, p,
 // ---------- Program data ----------
 const EXERCISES_CUTTING = {
   Monday: { label: "Upper", cardio: "25–30 min cardio", exercises: [
-    { id: "mon1", name: "Incline Dumbbell Press", weight: 95, sets: 3, repLow: 10, repHigh: 15, muscle: "chest" },
-    { id: "mon2", name: "Cable Flexion Row", weight: 212, sets: 3, repLow: 10, repHigh: 15, muscle: "back" },
-    { id: "mon3", name: "Prime Plate Loaded Incline Press", weight: 280, sets: 3, repLow: 10, repHigh: 15, muscle: "chest" },
-    { id: "mon4", name: "Hammer Strength Underhand High Pulldown", weight: 80, sets: 3, repLow: 10, repHigh: 15, muscle: "back" },
-    { id: "mon5", name: "Leaning Cable Lateral Raise", weight: 16, sets: 4, repLow: 10, repHigh: 15, muscle: "shoulders" },
-    { id: "mon6", name: "Bayesian Cable Curl", weight: 20, sets: 4, repLow: 10, repHigh: 15, muscle: "biceps" },
-    { id: "mon7", name: "EZ Bar Skullcrusher", weight: 60, sets: 3, repLow: 10, repHigh: 15, muscle: "triceps" },
+    { id: "mon1", name: "Incline Dumbbell Press", weight: 95, sets: 3, muscle: "chest", mechanic: "compound" },
+    { id: "mon2", name: "Cable Flexion Row", weight: 212, sets: 3, muscle: "back", mechanic: "compound" },
+    { id: "mon3", name: "Prime Plate Loaded Incline Press", weight: 280, sets: 3, muscle: "chest", mechanic: "compound" },
+    { id: "mon4", name: "Hammer Strength Underhand High Pulldown", weight: 80, sets: 3, muscle: "back", mechanic: "compound" },
+    { id: "mon5", name: "Leaning Cable Lateral Raise", weight: 16, sets: 4, muscle: "shoulders", mechanic: "isolation" },
+    { id: "mon6", name: "Bayesian Cable Curl", weight: 20, sets: 4, muscle: "biceps", mechanic: "isolation" },
+    { id: "mon7", name: "EZ Bar Skullcrusher", weight: 60, sets: 3, muscle: "triceps", mechanic: "isolation" },
   ]},
   Tuesday: { label: "Lower", cardio: "25–30 min cardio", exercises: [
-    { id: "tue1", name: "Leg Press", weight: 488, sets: 3, repLow: 10, repHigh: 15, muscle: "quads" },
-    { id: "tue2", name: "Pendulum Squat", weight: 45, sets: 3, repLow: 10, repHigh: 15, muscle: "quads" },
-    { id: "tue3", name: "Hip Thruster", weight: 105, sets: 3, repLow: 10, repHigh: 15, muscle: "hamstrings_glutes" },
-    { id: "tue4", name: "Leg Extension", weight: 140, sets: 3, repLow: 10, repHigh: 15, muscle: "quads" },
-    { id: "tue5", name: "Seated Leg Curl", weight: 105, sets: 3, repLow: 10, repHigh: 15, muscle: "hamstrings_glutes" },
+    { id: "tue1", name: "Leg Press", weight: 488, sets: 3, muscle: "quads", mechanic: "compound" },
+    { id: "tue2", name: "Pendulum Squat", weight: 45, sets: 3, muscle: "quads", mechanic: "compound" },
+    { id: "tue3", name: "Hip Thruster", weight: 105, sets: 3, muscle: "hamstrings_glutes", mechanic: "compound" },
+    { id: "tue4", name: "Leg Extension", weight: 140, sets: 3, muscle: "quads", mechanic: "isolation" },
+    { id: "tue5", name: "Seated Leg Curl", weight: 105, sets: 3, muscle: "hamstrings_glutes", mechanic: "isolation" },
   ]},
   Wednesday: { label: "Full Rest", exercises: [] },
   Thursday: { label: "Push / Pump Hybrid", cardio: "25–30 min cardio", exercises: [
-    { id: "thu1", name: "Deficit Pushup", weight: null, bodyweight: true, sets: 3, repLow: 12, repHigh: 20, isFailure: true, muscle: "chest" },
-    { id: "thu2", name: "Dips", weight: null, bodyweight: true, sets: 3, repLow: 12, repHigh: 20, isFailure: true, muscle: "chest" },
-    { id: "thu3", name: "Dumbbell Fly", weight: 35, sets: 3, repLow: 10, repHigh: 15, muscle: "chest" },
-    { id: "thu4", name: "Cable Rope Face Pull", weight: 58, sets: 3, repLow: 10, repHigh: 15, muscle: "shoulders" },
-    { id: "thu5", name: "Standing Cable Fly", weight: 27.5, sets: 3, repLow: 10, repHigh: 15, muscle: "chest" },
-    { id: "thu6", name: "Triceps Pushdown", weight: 50, sets: 4, repLow: 10, repHigh: 15, muscle: "triceps" },
-    { id: "thu7", name: "Bent Over Cable Fly", weight: 37.5, sets: 3, repLow: 10, repHigh: 15, muscle: "shoulders" },
-    { id: "thu8", name: "Donkey Calf Raise", weight: 70, sets: 3, repLow: 10, repHigh: 15, muscle: "calves" },
+    { id: "thu1", name: "Deficit Pushup", weight: null, bodyweight: true, sets: 3, isFailure: true, muscle: "chest", mechanic: "compound" },
+    { id: "thu2", name: "Dips", weight: null, bodyweight: true, sets: 3, isFailure: true, muscle: "chest", mechanic: "compound" },
+    { id: "thu3", name: "Dumbbell Fly", weight: 35, sets: 3, muscle: "chest", mechanic: "isolation" },
+    { id: "thu4", name: "Cable Rope Face Pull", weight: 58, sets: 3, muscle: "shoulders", mechanic: "compound" },
+    { id: "thu5", name: "Standing Cable Fly", weight: 27.5, sets: 3, muscle: "chest", mechanic: "isolation" },
+    { id: "thu6", name: "Triceps Pushdown", weight: 50, sets: 4, muscle: "triceps", mechanic: "isolation" },
+    { id: "thu7", name: "Bent Over Cable Fly", weight: 37.5, sets: 3, muscle: "shoulders", mechanic: "compound" },
+    { id: "thu8", name: "Donkey Calf Raise", weight: 70, sets: 3, muscle: "calves", mechanic: "isolation" },
   ]},
   Friday: { label: "Pull", cardio: "25–30 min cardio", exercises: [
-    { id: "fri1", name: "Cross Body Pulldown", weight: 90, sets: 3, repLow: 10, repHigh: 15, muscle: "back" },
-    { id: "fri2", name: "Extreme Row Machine", weight: 93, sets: 3, repLow: 10, repHigh: 15, muscle: "back" },
-    { id: "fri3", name: "Meadows Row", weight: 95, sets: 3, repLow: 10, repHigh: 15, muscle: "back" },
-    { id: "fri4", name: "Seated Dumbbell Lateral Raise", weight: 25, sets: 3, repLow: 10, repHigh: 15, muscle: "shoulders" },
-    { id: "fri5", name: "Incline Dumbbell Curl", weight: 35, sets: 3, repLow: 10, repHigh: 15, muscle: "biceps" },
+    { id: "fri1", name: "Cross Body Pulldown", weight: 90, sets: 3, muscle: "back", mechanic: "isolation" },
+    { id: "fri2", name: "Extreme Row Machine", weight: 93, sets: 3, muscle: "back", mechanic: "compound" },
+    { id: "fri3", name: "Meadows Row", weight: 95, sets: 3, muscle: "back", mechanic: "compound" },
+    { id: "fri4", name: "Seated Dumbbell Lateral Raise", weight: 25, sets: 3, muscle: "shoulders", mechanic: "isolation" },
+    { id: "fri5", name: "Incline Dumbbell Curl", weight: 35, sets: 3, muscle: "biceps", mechanic: "isolation" },
   ]},
   Saturday: { label: "Legs (Unilateral / Hip Hinge)", cardio: "25–30 min cardio", exercises: [
-    { id: "sat1", name: "Single Leg Press", weight: 117, sets: 3, repLow: 10, repHigh: 15, muscle: "quads" },
-    { id: "sat2", name: "Romanian Deadlift", weight: 45, sets: 3, repLow: 10, repHigh: 15, muscle: "hamstrings_glutes" },
-    { id: "sat3", name: "Hip Abduction Machine", weight: 52, sets: 3, repLow: 10, repHigh: 15, muscle: "hamstrings_glutes" },
-    { id: "sat4", name: "Single Leg Extension", weight: 52, sets: 3, repLow: 10, repHigh: 15, muscle: "quads" },
-    { id: "sat5", name: "Single Leg Curl", weight: 52, sets: 3, repLow: 10, repHigh: 15, muscle: "hamstrings_glutes" },
+    { id: "sat1", name: "Single Leg Press", weight: 117, sets: 3, muscle: "quads", mechanic: "compound" },
+    { id: "sat2", name: "Romanian Deadlift", weight: 45, sets: 3, muscle: "hamstrings_glutes", mechanic: "compound" },
+    { id: "sat3", name: "Hip Abduction Machine", weight: 52, sets: 3, muscle: "hamstrings_glutes", mechanic: "isolation" },
+    { id: "sat4", name: "Single Leg Extension", weight: 52, sets: 3, muscle: "quads", mechanic: "isolation" },
+    { id: "sat5", name: "Single Leg Curl", weight: 52, sets: 3, muscle: "hamstrings_glutes", mechanic: "isolation" },
   ]},
   Sunday: { label: "Full Rest", exercises: [] },
 };
@@ -641,10 +641,30 @@ const GOAL_CAL_ADJUST = { cut: 0.8, bulk: 1.12, maintain: 1.0 };
 // per-pound heuristic above, since this multiplies a true BMR rather than bodyweight directly.
 const MSJ_ACTIVITY_MULTIPLIER = { sedentary: 1.2, light: 1.375, moderate: 1.55, active: 1.725 };
 const GOAL_REP_RULES = {
-  cut: { sets: 3, repLow: 10, repHigh: 15 },
-  bulk: { sets: 4, repLow: 10, repHigh: 15 },
-  maintain: { sets: 3, repLow: 10, repHigh: 15 },
+  cut: { sets: 3 },
+  bulk: { sets: 4 },
+  maintain: { sets: 3 },
 };
+// Rep bands are a property of the MOVEMENT, not of the goal or the person. The evidence is that
+// hypertrophy is equivalent across roughly 5-30 reps once sets are taken near failure and volume
+// is equated (Schoenfeld et al.) — so a band cannot be "optimal for growth" and is not trying to
+// be. It does two jobs: seed a sensible starting load, and give calibration a reference to judge
+// that estimate against. Heavy compounds sit lower for joint stress and skill reasons; isolation
+// work tolerates more reps at loads that stay meaningful.
+const MECHANIC_REP_BANDS = {
+  compound: { repLow: 8, repHigh: 12 },
+  isolation: { repLow: 10, repHigh: 15 },
+};
+const DEFAULT_REP_BAND = MECHANIC_REP_BANDS.isolation;
+function bandForMechanic(mechanic) {
+  return MECHANIC_REP_BANDS[mechanic] || DEFAULT_REP_BAND;
+}
+// Bodyweight movements are never given a band: there is no load to select, and "did they land in
+// range" is not a signal when the instruction is to go to failure. Reps ARE the variable, so they
+// run to a ceiling instead. At the ceiling the person adds external load if they have it; if they
+// do not, they add a set; and once both are exhausted they move to the next rung of the ladder.
+const BODYWEIGHT_REP_CEILING = 30;
+const BODYWEIGHT_MAX_SETS = 5;
 
 // Fraction of total weight change assumed to be FAT (vs. lean mass), for converting a body-fat-%
 // goal into an implied target weight. Based on research in trained individuals with adequate
@@ -1038,29 +1058,29 @@ const EXERCISE_POOL = [
   { name: "Barbell Back Squat", muscle: "quads", mechanic: "compound", equipment: ["barbell"], weight: 95 },
   { name: "Goblet Squat", muscle: "quads", mechanic: "compound", equipment: ["dumbbell", "kettlebell"], weight: 30 },
   { name: "Leg Press", muscle: "quads", mechanic: "compound", equipment: ["machine"], weight: 140 },
-  { name: "Bodyweight Squat", muscle: "quads", mechanic: "compound", equipment: ["bodyweight"], weight: null, bodyweight: true, isFailure: true },
+  { name: "Bodyweight Squat", muscle: "quads", mechanic: "compound", equipment: ["bodyweight"], weight: null, bodyweight: true, isFailure: true, bwPct: 43 },
   { name: "Banded Squat", muscle: "quads", mechanic: "compound", equipment: ["band"], weight: 0 },
   // Hamstrings/glutes (hinge pattern) — compound
   { name: "Barbell Romanian Deadlift", muscle: "hamstrings_glutes", mechanic: "compound", equipment: ["barbell"], weight: 95 },
   { name: "Dumbbell Romanian Deadlift", muscle: "hamstrings_glutes", mechanic: "compound", equipment: ["dumbbell"], weight: 30 },
   { name: "Kettlebell Swing", muscle: "hamstrings_glutes", mechanic: "compound", equipment: ["kettlebell"], weight: 25 },
   { name: "Cable Pull-Through", muscle: "hamstrings_glutes", mechanic: "compound", equipment: ["machine"], weight: 50 },
-  { name: "Glute Bridge", muscle: "hamstrings_glutes", mechanic: "compound", equipment: ["bodyweight"], weight: null, bodyweight: true, isFailure: true },
+  { name: "Glute Bridge", muscle: "hamstrings_glutes", mechanic: "compound", equipment: ["bodyweight"], weight: null, bodyweight: true, isFailure: true, bwPct: 22 },
   { name: "Banded Hip Thrust", muscle: "hamstrings_glutes", mechanic: "compound", equipment: ["band"], weight: 0 },
   // Chest (horizontal push) — compound
   { name: "Barbell Bench Press", muscle: "chest", mechanic: "compound", equipment: ["barbell"], weight: 65 },
   { name: "Dumbbell Bench Press", muscle: "chest", mechanic: "compound", equipment: ["dumbbell"], weight: 25 },
   { name: "Machine Chest Press", muscle: "chest", mechanic: "compound", equipment: ["machine"], weight: 40 },
-  { name: "Pushup", muscle: "chest", mechanic: "compound", equipment: ["bodyweight"], weight: null, bodyweight: true, isFailure: true },
+  { name: "Pushup", muscle: "chest", mechanic: "compound", equipment: ["bodyweight"], weight: null, bodyweight: true, isFailure: true, bwPct: 64 },
   { name: "Banded Chest Press", muscle: "chest", mechanic: "compound", equipment: ["band"], weight: 0 },
   // Back — horizontal pull (row) — compound
   { name: "Barbell Bent-Over Row", muscle: "back_horizontal", mechanic: "compound", equipment: ["barbell"], weight: 65 },
   { name: "Dumbbell Row", muscle: "back_horizontal", mechanic: "compound", equipment: ["dumbbell"], weight: 25 },
   { name: "Seated Cable Row", muscle: "back_horizontal", mechanic: "compound", equipment: ["machine"], weight: 50 },
-  { name: "Inverted Row", muscle: "back_horizontal", mechanic: "compound", equipment: ["bodyweight", "pullup_bar"], weight: null, bodyweight: true, isFailure: true },
+  { name: "Inverted Row", muscle: "back_horizontal", mechanic: "compound", equipment: ["bodyweight", "pullup_bar"], weight: null, bodyweight: true, isFailure: true, bwPct: 68 },
   { name: "Banded Row", muscle: "back_horizontal", mechanic: "compound", equipment: ["band"], weight: 0 },
   // Back — vertical pull — compound
-  { name: "Pull-Up", muscle: "back_vertical", mechanic: "compound", equipment: ["pullup_bar"], weight: null, bodyweight: true, isFailure: true },
+  { name: "Pull-Up", muscle: "back_vertical", mechanic: "compound", equipment: ["pullup_bar"], weight: null, bodyweight: true, isFailure: true, bwPct: 100 },
   { name: "Lat Pulldown", muscle: "back_vertical", mechanic: "compound", equipment: ["machine"], weight: 60 },
   { name: "Dumbbell Pullover", muscle: "back_vertical", mechanic: "compound", equipment: ["dumbbell"], weight: 20 },
   { name: "Banded Pulldown", muscle: "back_vertical", mechanic: "compound", equipment: ["band"], weight: 0 },
@@ -1068,7 +1088,7 @@ const EXERCISE_POOL = [
   { name: "Barbell Overhead Press", muscle: "shoulders", mechanic: "compound", equipment: ["barbell"], weight: 45 },
   { name: "Seated Dumbbell Shoulder Press", muscle: "shoulders", mechanic: "compound", equipment: ["dumbbell"], weight: 20 },
   { name: "Machine Shoulder Press", muscle: "shoulders", mechanic: "compound", equipment: ["machine"], weight: 30 },
-  { name: "Pike Pushup", muscle: "shoulders", mechanic: "compound", equipment: ["bodyweight"], weight: null, bodyweight: true, isFailure: true },
+  { name: "Pike Pushup", muscle: "shoulders", mechanic: "compound", equipment: ["bodyweight"], weight: null, bodyweight: true, isFailure: true, bwPct: 65 },
   { name: "Kettlebell Overhead Press", muscle: "shoulders", mechanic: "compound", equipment: ["kettlebell"], weight: 20 },
   { name: "Banded Overhead Press", muscle: "shoulders", mechanic: "compound", equipment: ["band"], weight: 0 },
   // Biceps — isolation
@@ -1076,33 +1096,77 @@ const EXERCISE_POOL = [
   { name: "Dumbbell Bicep Curl", muscle: "biceps", mechanic: "isolation", equipment: ["dumbbell"], weight: 12 },
   { name: "Cable Bicep Curl", muscle: "biceps", mechanic: "isolation", equipment: ["machine"], weight: 25 },
   { name: "Banded Bicep Curl", muscle: "biceps", mechanic: "isolation", equipment: ["band"], weight: 0 },
-  { name: "Chin-Up", muscle: "biceps", mechanic: "isolation", equipment: ["pullup_bar"], weight: null, bodyweight: true, isFailure: true },
+  { name: "Chin-Up", muscle: "biceps", mechanic: "isolation", equipment: ["pullup_bar"], weight: null, bodyweight: true, isFailure: true, bwPct: 100 },
   // Triceps — isolation
   { name: "Triceps Pushdown", muscle: "triceps", mechanic: "isolation", equipment: ["machine"], weight: 40 },
   { name: "Dumbbell Overhead Triceps Extension", muscle: "triceps", mechanic: "isolation", equipment: ["dumbbell"], weight: 15 },
   { name: "Close-Grip Bench Press", muscle: "triceps", mechanic: "isolation", equipment: ["barbell"], weight: 45 },
-  { name: "Diamond Pushup", muscle: "triceps", mechanic: "isolation", equipment: ["bodyweight"], weight: null, bodyweight: true, isFailure: true },
+  { name: "Diamond Pushup", muscle: "triceps", mechanic: "isolation", equipment: ["bodyweight"], weight: null, bodyweight: true, isFailure: true, bwPct: 68 },
   { name: "Banded Triceps Pushdown", muscle: "triceps", mechanic: "isolation", equipment: ["band"], weight: 0 },
   // Quads — isolation (Intermediate Lower day)
   { name: "Leg Extension", muscle: "quads_isolation", mechanic: "isolation", equipment: ["machine"], weight: 50 },
   { name: "Bulgarian Split Squat", muscle: "quads_isolation", mechanic: "isolation", equipment: ["dumbbell"], weight: 15 },
-  { name: "Walking Lunge", muscle: "quads_isolation", mechanic: "isolation", equipment: ["bodyweight"], weight: null, bodyweight: true, isFailure: true },
+  { name: "Walking Lunge", muscle: "quads_isolation", mechanic: "isolation", equipment: ["bodyweight"], weight: null, bodyweight: true, isFailure: true, bwPct: 62, unilateral: true },
   { name: "Banded Lateral Walk", muscle: "quads_isolation", mechanic: "isolation", equipment: ["band"], weight: 0 },
   // Hamstrings — isolation (Intermediate Lower day)
   { name: "Seated Leg Curl", muscle: "hamstrings_isolation", mechanic: "isolation", equipment: ["machine"], weight: 50 },
   { name: "Single-Leg Deadlift", muscle: "hamstrings_isolation", mechanic: "isolation", equipment: ["dumbbell"], weight: 15 },
-  { name: "Nordic Curl", muscle: "hamstrings_isolation", mechanic: "isolation", equipment: ["bodyweight"], weight: null, bodyweight: true, isFailure: true },
+  { name: "Nordic Curl", muscle: "hamstrings_isolation", mechanic: "isolation", equipment: ["bodyweight"], weight: null, bodyweight: true, isFailure: true, bwPct: 70 },
+
+  // --- bodyweight progression ladder ---------------------------------------------------
+  // Ordered by bwPct: the percentage of bodyweight the working limbs resist. Chest values are
+  // force-plate measured; the rest are estimated from lever principles and are the first thing
+  // to revisit if a ladder step feels wrong. `unilateral` means the load is borne by one limb,
+  // so bwPct is already expressed PER LIMB. ladderOnly keeps these out of initial selection —
+  // they are reached by progressing off the base variant in the same slot, never assigned cold.
+  { name: "Incline Pushup (hands 60cm)", muscle: "chest", mechanic: "compound", equipment: ["bodyweight"], weight: null, bodyweight: true, isFailure: true, bwPct: 41, ladderOnly: true },
+  { name: "Knee Pushup", muscle: "chest", mechanic: "compound", equipment: ["bodyweight"], weight: null, bodyweight: true, isFailure: true, bwPct: 49, ladderOnly: true },
+  { name: "Incline Pushup (hands 30cm)", muscle: "chest", mechanic: "compound", equipment: ["bodyweight"], weight: null, bodyweight: true, isFailure: true, bwPct: 55, ladderOnly: true },
+  { name: "Decline Pushup (feet 30cm)", muscle: "chest", mechanic: "compound", equipment: ["bodyweight"], weight: null, bodyweight: true, isFailure: true, bwPct: 70, ladderOnly: true },
+  { name: "Decline Pushup (feet 60cm)", muscle: "chest", mechanic: "compound", equipment: ["bodyweight"], weight: null, bodyweight: true, isFailure: true, bwPct: 74, ladderOnly: true },
+  { name: "Knee Diamond Pushup", muscle: "triceps", mechanic: "isolation", equipment: ["bodyweight"], weight: null, bodyweight: true, isFailure: true, bwPct: 52, ladderOnly: true },
+  { name: "Decline Diamond Pushup", muscle: "triceps", mechanic: "isolation", equipment: ["bodyweight"], weight: null, bodyweight: true, isFailure: true, bwPct: 76, ladderOnly: true },
+  { name: "Elevated Pike Pushup", muscle: "shoulders", mechanic: "compound", equipment: ["bodyweight"], weight: null, bodyweight: true, isFailure: true, bwPct: 78, ladderOnly: true },
+  { name: "Wall Handstand Pushup", muscle: "shoulders", mechanic: "compound", equipment: ["bodyweight"], weight: null, bodyweight: true, isFailure: true, bwPct: 95, ladderOnly: true },
+  { name: "Inverted Row (45 degrees)", muscle: "back_horizontal", mechanic: "compound", equipment: ["bodyweight", "pullup_bar"], weight: null, bodyweight: true, isFailure: true, bwPct: 50, ladderOnly: true },
+  { name: "Feet-Elevated Inverted Row", muscle: "back_horizontal", mechanic: "compound", equipment: ["bodyweight", "pullup_bar"], weight: null, bodyweight: true, isFailure: true, bwPct: 80, ladderOnly: true },
+  { name: "Feet-Assisted Pull-Up", muscle: "back_vertical", mechanic: "compound", equipment: ["pullup_bar"], weight: null, bodyweight: true, isFailure: true, bwPct: 65, ladderOnly: true },
+  { name: "Negative-Only Pull-Up", muscle: "back_vertical", mechanic: "compound", equipment: ["pullup_bar"], weight: null, bodyweight: true, isFailure: true, bwPct: 85, ladderOnly: true },
+  { name: "Feet-Assisted Chin-Up", muscle: "biceps", mechanic: "isolation", equipment: ["pullup_bar"], weight: null, bodyweight: true, isFailure: true, bwPct: 65, ladderOnly: true },
+  { name: "Split Squat", muscle: "quads", mechanic: "compound", equipment: ["bodyweight"], weight: null, bodyweight: true, isFailure: true, bwPct: 65, unilateral: true, ladderOnly: true },
+  { name: "Bulgarian Split Squat", muscle: "quads", mechanic: "compound", equipment: ["bodyweight"], weight: null, bodyweight: true, isFailure: true, bwPct: 85, unilateral: true, ladderOnly: true },
+  { name: "Pistol Squat", muscle: "quads", mechanic: "compound", equipment: ["bodyweight"], weight: null, bodyweight: true, isFailure: true, bwPct: 100, unilateral: true, ladderOnly: true },
+  { name: "Reverse Lunge", muscle: "quads_isolation", mechanic: "isolation", equipment: ["bodyweight"], weight: null, bodyweight: true, isFailure: true, bwPct: 55, unilateral: true, ladderOnly: true },
+  { name: "Deficit Walking Lunge", muscle: "quads_isolation", mechanic: "isolation", equipment: ["bodyweight"], weight: null, bodyweight: true, isFailure: true, bwPct: 72, unilateral: true, ladderOnly: true },
+  { name: "Single-Leg Glute Bridge", muscle: "hamstrings_glutes", mechanic: "compound", equipment: ["bodyweight"], weight: null, bodyweight: true, isFailure: true, bwPct: 44, unilateral: true, ladderOnly: true },
+  { name: "Shoulder-Elevated Hip Thrust", muscle: "hamstrings_glutes", mechanic: "compound", equipment: ["bodyweight"], weight: null, bodyweight: true, isFailure: true, bwPct: 58, ladderOnly: true },
+  { name: "Hands-Assisted Nordic Curl", muscle: "hamstrings_isolation", mechanic: "isolation", equipment: ["bodyweight"], weight: null, bodyweight: true, isFailure: true, bwPct: 45, ladderOnly: true },
+  { name: "Band-Assisted Nordic Curl", muscle: "hamstrings_isolation", mechanic: "isolation", equipment: ["band"], weight: null, bodyweight: true, isFailure: true, bwPct: 60, ladderOnly: true },
   { name: "Banded Hamstring Curl", muscle: "hamstrings_isolation", mechanic: "isolation", equipment: ["band"], weight: 0 },
 ];
 
 // Picks the best available exercise for a required muscle group/mechanic, given the equipment the
 // person actually has. Falls back progressively (relax mechanic, then fall back to bodyweight) so
 // there's always something usable rather than a dead end for an unusual equipment combination.
+// The next rung up for a bodyweight movement: the lowest bwPct in the same muscle slot that is
+// still HARDER than the current one, restricted to equipment the person actually has. Returns
+// null at the top of a ladder, which is a real state — there is nothing above a pistol squat in
+// the pool, and the honest answer is that the person has outgrown what bodyweight can offer.
+function nextLadderRung(ex, equipmentAvailable) {
+  if (!ex || ex.bwPct == null) return null;
+  const eq = equipmentAvailable && equipmentAvailable.length ? equipmentAvailable : ["bodyweight"];
+  const harder = EXERCISE_POOL.filter(function (c) {
+    return c.muscle === ex.muscle && c.bwPct != null && c.bwPct > ex.bwPct &&
+      c.equipment.some(function (e) { return eq.indexOf(e) !== -1; });
+  }).sort(function (a, b) { return a.bwPct - b.bwPct; });
+  return harder[0] || null;
+}
+
 function pickExercise(muscle, mechanic, equipmentAvailable, excludeNames) {
   const eq = equipmentAvailable && equipmentAvailable.length ? equipmentAvailable : ["bodyweight"];
   const excl = excludeNames || [];
   function matches(ex, requireMechanic, honorExclude) {
-    return ex.muscle === muscle && (!requireMechanic || ex.mechanic === mechanic) &&
+    return ex.muscle === muscle && !ex.ladderOnly && (!requireMechanic || ex.mechanic === mechanic) &&
       (!honorExclude || excl.indexOf(ex.name) === -1) &&
       ex.equipment.some(function (e) { return eq.indexOf(e) !== -1; });
   }
@@ -1114,8 +1178,8 @@ function pickExercise(muscle, mechanic, equipmentAvailable, excludeNames) {
     const hit = EXERCISE_POOL.filter(function (ex) { return matches(ex, stages[s][0], stages[s][1]); })[0];
     if (hit) return hit;
   }
-  const bodyweightFallback = EXERCISE_POOL.filter(function (ex) { return ex.muscle === muscle && ex.equipment.indexOf("bodyweight") !== -1; });
-  return bodyweightFallback[0] || EXERCISE_POOL.filter(function (ex) { return ex.muscle === muscle; })[0];
+  const bodyweightFallback = EXERCISE_POOL.filter(function (ex) { return ex.muscle === muscle && !ex.ladderOnly && ex.equipment.indexOf("bodyweight") !== -1; });
+  return bodyweightFallback[0] || EXERCISE_POOL.filter(function (ex) { return ex.muscle === muscle && !ex.ladderOnly; })[0];
 }
 
 // Consolidates the finer-grained muscle tags used for exercise SELECTION (e.g. distinguishing a
@@ -1143,7 +1207,11 @@ function requirementToExercise(req, idSuffix, equipmentAvailable, excludeNames) 
   const picked = pickExercise(req.muscle, req.mechanic, equipmentAvailable, excludeNames);
   return Object.assign({ id: req.slot + idSuffix }, {
     name: picked.name, weight: picked.weight, bodyweight: picked.bodyweight || false, isFailure: picked.isFailure || false,
-    sets: 3, repLow: 10, repHigh: 15, // overwritten by goal-based rules right after selection
+    sets: 3,
+    repLow: picked.bodyweight ? null : bandForMechanic(picked.mechanic).repLow,
+    repHigh: picked.bodyweight ? null : bandForMechanic(picked.mechanic).repHigh,
+    mechanic: picked.mechanic, bwPct: picked.bwPct != null ? picked.bwPct : null,
+    unilateral: !!picked.unilateral,
     muscle: consolidateMuscleGroup(req.muscle),
   });
 }
@@ -1272,7 +1340,7 @@ function buildCustomExercises(goal, experience, trainingDays, cardioDays, equipm
       const template = JSON.parse(JSON.stringify(templates[trainIdx]));
       template.exercises.forEach(function (ex) {
         if (ex.isFailure) return;
-        ex.sets = rules.sets; ex.repLow = rules.repLow; ex.repHigh = rules.repHigh;
+        ex.sets = rules.sets; // band is the movement's own; goal no longer touches it
       });
       result[day] = template;
     }
@@ -1302,6 +1370,50 @@ function buildCustomMilestones(currentWeight, targetWeight, weeksNeeded, current
     milestones.push(entry);
   }
   return milestones;
+}
+
+// Programs built before mechanic-derived rep bands existed carry a flat 10-15 on every exercise
+// and no mechanic tag at all. The tag is recoverable: those exercises came out of EXERCISE_POOL,
+// so the name identifies the movement. Clearing the stored band then lets effectiveRepRange
+// derive it, which is the whole point — a band that follows the movement rather than a number
+// frozen at build time.
+//
+// GATED TO THE DELOAD BOUNDARY. Someone mid-phase has a working weight and a rep target that
+// were calibrated against the old band; moving the band under them mid-week means their next
+// completed week reads as "hit the top of the range", takes a weight increment, and drops them
+// from 15 reps to 8. At a deload that is a program transition they can see coming. Mid-phase it
+// is just their program changing for no reason they were told about.
+const REP_BAND_MIGRATION_ID = "mechanic-bands-2026-08";
+function migrateExerciseBandsToMechanic(config, currentWeek, extraDeloadWeeks) {
+  if (!config || !config.exercises) return { config: config, migrated: false, reason: "no config" };
+  if (config.repBandMigration === REP_BAND_MIGRATION_ID) return { config: config, migrated: false, reason: "already migrated" };
+  if (!isDeloadWeekNumber(currentWeek, extraDeloadWeeks)) return { config: config, migrated: false, reason: "not at a deload boundary" };
+  const byName = {};
+  EXERCISE_POOL.forEach(function (p) { byName[p.name] = p; });
+  const changed = [];
+  const next = JSON.parse(JSON.stringify(config));
+  Object.keys(next.exercises).forEach(function (day) {
+    const list = (next.exercises[day] && next.exercises[day].exercises) || [];
+    list.forEach(function (ex) {
+      const hit = byName[ex.nameOverride || ex.name];
+      // No pool match means a hand-renamed or swapped-in movement whose mechanic cannot be
+      // recovered. Leave its stored band alone rather than guessing — a wrong band is worse
+      // than an old one, and effectiveRepRange keeps honouring the explicit values.
+      if (!hit) return;
+      ex.mechanic = hit.mechanic;
+      if (hit.bwPct != null) ex.bwPct = hit.bwPct;
+      if (hit.unilateral) ex.unilateral = true;
+      const before = ex.repLow + "-" + ex.repHigh;
+      ex.repLow = null; ex.repHigh = null;
+      // A bodyweight movement does not acquire the mechanic band — it becomes UNBANDED, and
+      // reporting it as 8-12 would be a false notice about the one thing the person can see.
+      const band = bandForMechanic(hit.mechanic);
+      const to = hit.bwPct != null ? "to failure" : band.repLow + "-" + band.repHigh;
+      if (before !== to) changed.push({ name: ex.name, from: before, to: to });
+    });
+  });
+  next.repBandMigration = REP_BAND_MIGRATION_ID;
+  return { config: next, migrated: true, changed: changed };
 }
 
 function buildCustomProgramDef(config) {
@@ -2094,7 +2206,19 @@ function effectiveRepRange(ex, state) {
   if (state && state.repLowOverride != null && state.repHighOverride != null) {
     return { repLow: state.repLowOverride, repHigh: state.repHighOverride };
   }
+  // No band for bodyweight work. Callers that need a ceiling get BODYWEIGHT_REP_CEILING so the
+  // existing clamps keep working rather than comparing against undefined; repLow is 1 because a
+  // bad week should fall to "any completed rep", not to a target that was never prescribed.
+  if (hasNoRepBand(ex)) return { repLow: 1, repHigh: BODYWEIGHT_REP_CEILING, unbanded: true };
+  if (ex.repLow == null || ex.repHigh == null) {
+    const band = bandForMechanic(ex.mechanic);
+    return { repLow: band.repLow, repHigh: band.repHigh };
+  }
   return { repLow: ex.repLow, repHigh: ex.repHigh };
+}
+// A movement whose only progression variable is reps: nothing to load, so nothing to band.
+function hasNoRepBand(ex) {
+  return !!(ex && (ex.bodyweight || ex.isFailure) && ex.weight == null);
 }
 // User-editable, same as any other exerciseState override — corrects a mis-tagged exercise or one
 // added via a permanent swap, without needing to touch the exercise's own hardcoded definition.
@@ -2179,6 +2303,17 @@ function exerciseConsistentlyMet(score) {
 const RIR_SCHEDULE = [3, 3, 1, 0];
 const RIR_PHASE_LENGTH = 4; // training weeks per phase (matches the existing every-5th-week deload cadence, minus the deload week itself)
 const RIR_REP_CEILING = 20; // past this, a rep count stops being a meaningful "target" on its own
+// Rep range and proximity to failure INTERACT. At low loads (roughly 30-50% 1RM, i.e. high reps)
+// stopping several reps short leaves high-threshold motor units unrecruited, because they are
+// only called on once fatigue demands it. At heavier loads they are recruited from the first rep,
+// so 3 RIR is already sufficient. A set that has drifted above this rep count therefore has to be
+// taken closer to failure to deliver the same stimulus.
+const RIR_HIGH_REP_THRESHOLD = 15;
+const RIR_HIGH_REP_TIGHTEN = 1;
+function adjustTargetRIRForReps(targetRIR, targetReps) {
+  if (targetReps == null || targetReps <= RIR_HIGH_REP_THRESHOLD) return targetRIR;
+  return Math.max(0, targetRIR - RIR_HIGH_REP_TIGHTEN);
+}
 
 // Which target RIR applies to a given week, based on its position within the current phase (1 =
 // first week of the phase). Clamped to the schedule's length so an out-of-range position (e.g. 0,
@@ -2425,14 +2560,64 @@ function computeExerciseWeekProgression(ex, ctx) {
         return { state: out, escalateToDeload: escalate };
       }
       if (maxReps >= range.repHigh) {
-        out = Object.assign({}, cur, {
-          weight: ex.bodyweight ? cur.weight : nextWeightIncrement(cur.weight),
-          repsTarget: ex.bodyweight ? Math.min(cur.repsTarget + 2, range.repHigh) : range.repLow,
-        });
+        if (range.unbanded) {
+          // A bodyweight movement at the rep ceiling has run out of reps. Three levers remain,
+          // in order of least disruption: add external load if the person owns any; otherwise
+          // add a set, up to the volume cap; otherwise step up to a harder variant and restart
+          // the rep climb. The ladder step is deliberately LAST — it changes the exercise, which
+          // is a bigger event for the person than one more set.
+          out = Object.assign({}, cur, progressAtBodyweightCeiling(ex, cur, ctx));
+        } else {
+          out = Object.assign({}, cur, {
+            weight: nextWeightIncrement(cur.weight),
+            repsTarget: range.repLow,
+          });
+        }
       } else {
-        out = Object.assign({}, cur, { repsTarget: Math.min(cur.repsTarget + 1, range.repHigh) });
+        out = Object.assign({}, cur, { repsTarget: Math.min(cur.repsTarget + (range.unbanded ? 2 : 1), range.repHigh) });
       }
   return { state: out, escalateToDeload: escalate };
+}
+
+// What happens when a bodyweight movement reaches BODYWEIGHT_REP_CEILING. Returns only the fields
+// that change, so the caller keeps everything else about the exercise state intact.
+function progressAtBodyweightCeiling(ex, cur, ctx) {
+  // A coached client does not get autoregulated unless their coach has granted it (migration 19).
+  // Holding at the ceiling is the honest result: the person keeps training at 30 reps and their
+  // coach decides what happens next. Silently adding a set would be the app overruling a
+  // prescription, and silently doing nothing WITHOUT saying so would leave them stuck with no
+  // explanation — hence the flag, which the UI surfaces.
+  if (ctx && ctx.isCoached && !ctx.autoregulationAllowed) {
+    return { repsTarget: BODYWEIGHT_REP_CEILING, autoregulationSuppressed: true };
+  }
+  const equipment = (ctx && ctx.equipmentAvailable) || [];
+  const canLoad = equipment.some(function (e) { return e === "weight_belt" || e === "vest" || e === "dumbbell" || e === "barbell"; });
+  // 1. External load available: the movement stops being bodyweight and joins the normal weighted
+  //    path. Reps stay high and walk down into the band over subsequent weeks rather than
+  //    dropping to repLow immediately — a 30-rep-to-8-rep jump in one week is a load estimate
+  //    nobody can make well, and calibration would spend weeks unwinding it.
+  if (canLoad) {
+    return { pendingLoadPrompt: true, repsTarget: BODYWEIGHT_REP_CEILING };
+  }
+  // 2. No load: add a set, up to the cap.
+  //    BODYWEIGHT_MAX_SETS is the ceiling on what AUTOREGULATION may add, not a global cap on
+  //    sets. A coach prescribing 7, or an accepted volume-increase recommendation, can legitimately
+  //    put an exercise above it — and when that happens autoregulation simply has no headroom left
+  //    and falls through to the ladder step below. It never removes a set someone else added.
+  const currentSets = effectiveSets(ex, cur);
+  if (currentSets < BODYWEIGHT_MAX_SETS) {
+    return { setsOverride: currentSets + 1, repsTarget: BODYWEIGHT_REP_CEILING };
+  }
+  // 3. Reps and sets both exhausted: step up the ladder and restart the rep climb. Sets reset to
+  //    the exercise default, because the harder variant is a fresh starting point, not a
+  //    continuation of the volume that was compensating for an easy one.
+  const next = nextLadderRung(ex, equipment);
+  if (next) {
+    return { pendingLadderStep: next.name, setsOverride: null, repsTarget: null };
+  }
+  // Top of the ladder with no equipment: hold. There is nothing dishonest to offer here, and
+  // silently inflating reps past the ceiling would be worse than saying nothing.
+  return { repsTarget: BODYWEIGHT_REP_CEILING, atLadderTop: true };
 }
 
 // Ties the three pieces above together into the one full update completeWeek() runs per RIR-mode
@@ -2449,8 +2634,10 @@ function computeNextWeekRirUpdate(prevActualReps, prevWeekTargetReps, priorMissH
   const missHistory = prevActualReps != null ? baseMissHistory.concat([missedThisWeek]) : baseMissHistory;
   const pattern = evaluateRirMissPattern(missHistory);
 
-  const prevTargetRIR = computeTargetRIRForWeek(prevWeekPositionInPhase, phaseLength);
-  const nextTargetRIR = computeTargetRIRForWeek(nextWeekPositionInPhase, phaseLength);
+  // Offset applied against the reps ACTUALLY being performed, not the band: a set that has drifted
+  // high needs to be taken closer to failure regardless of what its band nominally says.
+  const prevTargetRIR = adjustTargetRIRForReps(computeTargetRIRForWeek(prevWeekPositionInPhase, phaseLength), prevActualReps);
+  const nextTargetRIR = adjustTargetRIRForReps(computeTargetRIRForWeek(nextWeekPositionInPhase, phaseLength), prevActualReps);
   let computed = computeRirAdjustedTarget(prevActualReps, prevTargetRIR, nextTargetRIR, currentWeight, isBodyweight);
 
   // CORROBORATION (added 2026-07-30). Two independent signals — what was performed, and what the
@@ -3797,7 +3984,7 @@ function programStateHasRealData(state) {
 // The build currently running. Surfaced in Settings -> Account, because "is the deploy actually
 // live?" has been the real answer to several apparent bugs, and inferring it from behaviour is slow
 // and error-prone. Compared against version.json by the update check below.
-const APP_VERSION = "2026-07-31T13:37:00";
+const APP_VERSION = "2026-08-01T20:18:17";
 
 // Signing out has to be unconditional, because every failure mode here ends the same way: a person
 // tapping a button that does nothing.
@@ -4479,6 +4666,9 @@ function App() {
   const [isOwner, setIsOwner] = useState(false);
   const [pendingSignups, setPendingSignups] = useState([]);
 
+  const [oooWindows, setOooWindows] = useState([]);         // OOO rows — mine if coach, my coach's if client
+  const [myAutoregGrants, setMyAutoregGrants] = useState([]); // autoregulation rows naming ME as client
+  const [autoregGrantedTo, setAutoregGrantedTo] = useState({}); // clientId -> bool (coach view)
   const [clientRequests, setClientRequests] = useState([]); // pending requests from MY clients (coach view)
   const [myRequests, setMyRequests] = useState([]);         // my own recent requests (client view)
   function refreshCoaching() {
@@ -4487,6 +4677,15 @@ function App() {
       supabaseClient.rpc("my_clients"),
       supabaseClient.rpc("my_pending_invites"),
       supabaseClient.rpc("am_i_coach"),
+      // Out-of-office windows (migration 20). ONE query serves both roles: the RLS policies
+      // decide what comes back. A coach sees their own rows via "coach manages own ooo"; a
+      // client sees their coach's via "client reads their coach ooo", which is scoped through
+      // is_coach_of_reverse and so closes the instant a link is severed OR the coach loses their
+      // coaches row. Nothing here has to re-derive either rule.
+      supabaseClient.from("coach_out_of_office").select("*").is("cancelled_at", null).order("starts_on", { ascending: false }),
+      // Autoregulation grants naming this account as the client. RLS already scopes
+      // coach_assignments to the two parties, so no extra filtering is needed here.
+      supabaseClient.from("coach_assignments").select("*").eq("kind", "autoregulation").order("effective_week", { ascending: false }),
       // Change requests ride the same cadence as everything else coaching-shaped. RLS scopes both:
       // the first returns only linked clients' rows (is_coach_of), the second only this account's.
       supabaseClient.from("change_requests").select("*").eq("status", "pending").order("created_at"),
@@ -4497,10 +4696,79 @@ function App() {
       setMyClients(r[0].error ? [] : (r[0].data || []));
       setPendingInvites(r[1].error ? [] : (r[1].data || []));
       setAmICoach(!r[2].error && r[2].data === true);
-      setClientRequests((r[3] && !r[3].error ? (r[3].data || []) : []).filter(function (q) { return q.client_id !== userId; }));
-      setMyRequests((r[4] && !r[4].error ? (r[4].data || []) : []).filter(function (q) { return q.client_id === userId; }));
+      // NOTE ON THE INDICES: coach_out_of_office was inserted at position 3, which moved both
+      // change_requests results down one. Anything added to the Promise.all above must be
+      // APPENDED, or every index below it silently reads the wrong result — the failure would
+      // look like "requests stopped appearing", not like an error.
+      setOooWindows(r[3] && !r[3].error ? (r[3].data || []) : []);
+      const grants = r[4] && !r[4].error ? (r[4].data || []) : [];
+      setMyAutoregGrants(grants.filter(function (a) { return a.client_id === userId; }));
+      const byClient = {};
+      grants.filter(function (a) { return a.coach_id === userId; }).forEach(function (a) {
+        if (byClient[a.client_id] === undefined) byClient[a.client_id] = !!(a.payload && a.payload.granted);
+      });
+      setAutoregGrantedTo(byClient);
+      setClientRequests((r[5] && !r[5].error ? (r[5].data || []) : []).filter(function (q) { return q.client_id !== userId; }));
+      setMyRequests((r[6] && !r[6].error ? (r[6].data || []) : []).filter(function (q) { return q.client_id === userId; }));
     });
   }
+  // Posts an away window. Per-coach, not per-client: every linked client sees it without the
+  // coach choosing recipients. Bounded dates are enforced by the table's own constraints
+  // (migration 20) — an open-ended window is indistinguishable from abandonment, which is the
+  // exact thing path 2's clock exists to catch.
+  function postOutOfOffice(startsOn, endsOn, message) {
+    if (!startsOn || !endsOn) { showToast("Both a start and an end date are required."); return; }
+    if (endsOn < startsOn) { showToast("The end date can't be before the start date."); return; }
+    return supabaseClient.from("coach_out_of_office")
+      .insert({ coach_id: userId, starts_on: startsOn, ends_on: endsOn, message: message || null })
+      .then(function (r) {
+        if (r.error) { showToast("Couldn't save that: " + r.error.message); return; }
+        showToast("Your clients will see this next time they open the app.");
+        return refreshCoaching();
+      });
+  }
+  // Cancelling STAMPS rather than deletes. A client who asks later why their program changed
+  // still gets an answer, and coach_is_out_of_office() already ignores cancelled rows.
+  function cancelOutOfOffice(id) {
+    return supabaseClient.from("coach_out_of_office").update({ cancelled_at: new Date().toISOString() }).eq("id", id)
+      .then(function (r) {
+        if (r.error) { showToast("Couldn't cancel that: " + r.error.message); return; }
+        return refreshCoaching();
+      });
+  }
+  // Grant or revoke autoregulation for ONE client. Both are INSERTS — revoking never edits the
+  // grant, because the history is the product: the deload review has to be able to say which
+  // weeks were autoregulated, and a mutable flag could never answer that.
+  function setClientAutoregulation(clientId, granted, effectiveWeek, reason) {
+    return supabaseClient.from("coach_assignments").insert({
+      kind: "autoregulation", coach_id: userId, client_id: clientId,
+      effective_week: effectiveWeek, status: "approved",
+      payload: { granted: !!granted, reason: reason || null },
+    }).then(function (r) {
+      if (r.error) { showToast("Couldn't save that: " + r.error.message); return; }
+      showToast(granted ? "Autoregulation on from week " + effectiveWeek : "Autoregulation off from week " + effectiveWeek);
+      const next = Object.assign({}, autoregGrantedTo); next[clientId] = !!granted;
+      setAutoregGrantedTo(next);
+    });
+  }
+
+  // Whether autoregulation is live for THIS account in a given week. Uncoached accounts are
+  // always allowed — the suppression exists to protect a coach's prescription, and there is no
+  // prescription to protect when nobody is coaching. Reads the grant rows cached by
+  // refreshCoaching(); latest effective_week at or below the target wins, matching what
+  // autoregulation_enabled() does server-side. The RPC remains the authority — this is the
+  // synchronous local read of the same rows, and completeWeek cannot await.
+  function autoregulationAllowedForWeek(week) {
+    if (!myCoachRow) return true;
+    const rows = (myAutoregGrants || []).filter(function (a) { return a.effective_week <= week; });
+    if (!rows.length) return false;
+    rows.sort(function (a, b) {
+      if (b.effective_week !== a.effective_week) return b.effective_week - a.effective_week;
+      return String(b.created_at).localeCompare(String(a.created_at));
+    });
+    return !!(rows[0].payload && rows[0].payload.granted);
+  }
+
   // A coached client's change lands here instead of local state: the draft is exactly the
   // assignment that would implement it, computed by this device's own solver, so the coach's
   // approval is a reviewed insert and the verified apply path delivers it unchanged.
@@ -5296,6 +5564,13 @@ function App() {
         lastTrainedLogs: lastTrainedLogs,
         lastTrainedPosition: computePhaseWeeks(week - 1, prog.extraDeloadWeeks).length,
         lastTrainedRating: ((prog.exerciseDifficulty || {})[week - 1] || {})[ex.id] || null,
+        // Migration 19. isCoached comes from myCoachRow — the single source for "do I have a
+        // coach", deliberately not a second state (see the note by its declaration). The grant
+        // is resolved for the week being ENTERED, since that is the week the progression is
+        // being computed for.
+        isCoached: !!myCoachRow,
+        autoregulationAllowed: autoregulationAllowedForWeek(week + 1),
+        equipmentAvailable: (data.customProgramConfig && data.customProgramConfig.equipment) || [],
       });
       if (step.escalateToDeload) {
         const nm = ((newState[ex.id] || {}).nameOverride) || ex.name;
@@ -5358,7 +5633,18 @@ function App() {
     const rirFlagPatch = !rirModeTurningOnNow ? {} : isSharedProgram
       ? { sharedRirModeEnabled: true, sharedRirModePendingEnable: false }
       : { customProgramConfig: Object.assign({}, data.customProgramConfig, { rirModeEnabled: true, rirModePendingEnable: false }) };
-    const newData = Object.assign({}, data, { programs: newPrograms }, isSharedProgram ? { sharedExerciseState: newState } : {}, rirFlagPatch);
+    // Rep bands moved from a flat 10-15 to a property of the movement itself. A program built
+    // before that change has the old band frozen into its stored config, so it has to be
+    // rewritten once — but never mid-phase. Someone's working weight and rep target were
+    // calibrated against the old band; moving it under them mid-week makes their next completed
+    // week read as "hit the top of the range", which takes a weight increment and drops them
+    // from 15 reps to 8 with no explanation. At a deload it is a transition they can see.
+    const bandMigration = migrateExerciseBandsToMechanic(data.customProgramConfig, week + 1, prog.extraDeloadWeeks);
+    const bandPatch = bandMigration.migrated
+      ? { customProgramConfig: Object.assign({}, bandMigration.config, (rirFlagPatch.customProgramConfig || {})),
+          repBandChangeNotice: bandMigration.changed.length ? { forWeek: week + 1, changed: bandMigration.changed } : null }
+      : {};
+    const newData = Object.assign({}, data, { programs: newPrograms }, isSharedProgram ? { sharedExerciseState: newState } : {}, rirFlagPatch, bandPatch);
     save(newData);
     showToast("Week " + week + " complete — Week " + (week + 1) + " targets updated" + (rirModeTurningOnNow ? " — RIR mode is now on" : ""));
     return true;
@@ -6424,6 +6710,13 @@ function App() {
       : h(React.Fragment, null,
           h("main", null,
             tab === "workouts" && lapseNudge && h(LapseNudgeBanner, { nudge: lapseNudge }),
+            tab === "workouts" && myCoachRow && (oooWindows || []).filter(function (w) {
+              return w.coach_id !== userId && new Date().toISOString().slice(0, 10) <= w.ends_on;
+            }).slice(0, 1).map(function (w) { return h(CoachAwayBanner, { key: w.id, window: w }); }),
+            tab === "workouts" && data.repBandChangeNotice && h(RepBandChangeBanner, {
+              notice: data.repBandChangeNotice,
+              onDismiss: function () { save(Object.assign({}, data, { repBandChangeNotice: null })); },
+            }),
             tab === "workouts" && rirModeEnabled && !isDeloadWeek && h(RirWeekBanner, {
               // Position within the phase, not the absolute week — the same input the progression
               // math uses, so the number shown can never disagree with the targets computed from it.
@@ -6614,6 +6907,53 @@ function isDayFullyComplete(dayExercises, isDeloadWeek, weekLogs, weekSkipped, w
 // Shown whenever computeLapseNudge finds a real gap — no dismiss button, because logging
 // something today is what actually makes it go away, not tapping a button that hides it while
 // the underlying gap is still true.
+// Migration 20, client side. Shown from the moment the coach POSTS the window, not from its
+// start date: "your coach is away 10-24 August" is more useful known in advance than discovered
+// on day one. The window itself still governs the abandonment suspension server-side — this only
+// controls when the person is told.
+//
+// PULL, NOT PUSH. The client sees this the next time they open the app. A coach posting on a
+// Friday for a Monday departure reaches someone who does not open the app until Thursday on
+// THURSDAY. That is the cost of not depending on the unresolved Worker<->Supabase question that
+// blocks every other coach-to-client message (handoff 8b). Do not describe this as notifying.
+function CoachAwayBanner(props) {
+  const w = props.window;
+  const fmt = function (d) {
+    const parts = String(d).split("-");
+    if (parts.length !== 3) return String(d);
+    const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+    return Number(parts[2]) + " " + (months[Number(parts[1]) - 1] || parts[1]);
+  };
+  const today = new Date().toISOString().slice(0, 10);
+  const live = today >= w.starts_on && today <= w.ends_on;
+  return h("div", { className: "plan-error", style: { borderColor: "#f0a742", marginBottom: 16 } },
+    h("strong", null, live ? "Your coach is away" : "Your coach will be away"),
+    h("p", { style: { margin: "6px 0 0", fontSize: 13 } }, fmt(w.starts_on) + " \u2013 " + fmt(w.ends_on)),
+    w.message ? h("p", { style: { margin: "6px 0 0", fontSize: 13 } }, w.message) : null
+  );
+}
+
+// The rep bands moved from a flat 10-15 to a property of each movement. Someone whose program
+// was built before that change has it rewritten once, at a deload. Saying so is not optional:
+// their targets visibly move, and "nothing disappears without warning" applies just as much to
+// something appearing different as to something going away.
+function RepBandChangeBanner(props) {
+  const changed = props.notice.changed || [];
+  return h("div", { className: "plan-error", style: { borderColor: "#a78bfa", marginBottom: 16 } },
+    h("strong", null, "Your rep targets have been updated"),
+    h("p", { style: { margin: "6px 0 0", fontSize: 13 } },
+      "Rep ranges now follow the movement rather than one range for everything. Heavier compound " +
+      "lifts sit a little lower, isolation work a little higher. Your weights are unchanged."),
+    h("ul", { style: { margin: "8px 0 0", paddingLeft: 18, fontSize: 13 } },
+      changed.slice(0, 8).map(function (c) {
+        return h("li", { key: c.name }, c.name + ": " + c.from + " \u2192 " + c.to);
+      })),
+    changed.length > 8 ? h("p", { style: { margin: "6px 0 0", fontSize: 12, opacity: 0.8 } },
+      "+ " + (changed.length - 8) + " more") : null,
+    h("button", { className: "ex-action-btn", style: { marginTop: 10 }, onClick: props.onDismiss }, "OK")
+  );
+}
+
 function LapseNudgeBanner(props) {
   return h("div", { className: "plan-error", style: { borderColor: "#4eba6f", marginBottom: 16 } },
     h("strong", null, "Welcome back"),
@@ -6893,7 +7233,9 @@ function WorkoutsTab(props) {
                   ? state.rirTargetReps + " reps \u00b7 " +
                     (function (r) { return r === 0 ? "to failure" : "leave ~" + r + " in reserve"; })(
                       computeTargetRIRForWeek(computePhaseWeeks(props.data.currentWeek, props.data.extraDeloadWeeks).length, RIR_PHASE_LENGTH))
-                  : ex.isFailure ? "to failure (target " + state.repsTarget + ", range " + range.repLow + "–" + range.repHigh + ")" : state.repsTarget + " (range " + range.repLow + "–" + range.repHigh + ")"),
+                  : ex.isFailure ? ("to failure" + (state.repsTarget != null ? " (last: " + state.repsTarget + ")" : ""))
+                  : range.unbanded ? String(state.repsTarget)
+                  : state.repsTarget + " (range " + range.repLow + "–" + range.repHigh + ")"),
             sessionAdjustmentDirection === "down" && h("span", { style: { color: "#f0b429" } }, " · reduced this session after a big rep miss"),
             sessionAdjustmentDirection === "up" && h("span", { style: { color: "#4eba6f" } }, " · increased this session after beating the top of your range"),
             loggedCount > 0 && !isSkipped && h("span", { className: "done" }, " · " + loggedCount + "/" + setsToday + " logged"),
@@ -9490,10 +9832,45 @@ function CoachingPanel(props) {
   const [openEditor, setOpenEditor] = useState(null); // client_id of the card with the editor open
   const reqs = props.clientRequests || [];
   const mine = props.myRequests || [];
+  const [oooStart, setOooStart] = useState("");
+  const [oooEnd, setOooEnd] = useState("");
+  const [oooMsg, setOooMsg] = useState("");
   function clientEmailOf(id) {
     const m = (props.myClients || []).filter(function (x) { return x.client_id === id; })[0];
     return m ? personLabel(m.display_name, m.email) : "a client";
   }
+  // Coach side: an away window. Per-coach, not per-client — everyone linked sees it without the
+  // coach picking recipients. Only rendered for actual coaches: an away window from someone with
+  // nobody to coach is a control with nothing behind it.
+  // (Wording note: avoid the bare token `clients` above the later `const clients` in this
+  // function — preflight's temporal-dead-zone scan is textual and prose trips it.)
+  const myWindows = (props.oooWindows || []).filter(function (w) { return w.coach_id === props.coachId; });
+  const awayPanel = !props.canCoach ? null : h("div", { style: { border: "1px solid #f0a742", borderRadius: 8, padding: 8, marginBottom: 12 } },
+    h("p", { style: { fontSize: 12, color: "#f0a742", margin: "0 0 6px" } }, "Going away"),
+    h("p", { style: { fontSize: 11, color: "#a3a3a3", margin: "0 0 8px" } },
+      "Everyone you coach sees this next time they open the app, and it stops the inactivity clock " +
+      "while you're away. Consider turning on autoregulation for anyone who should keep progressing."),
+    myWindows.map(function (w) {
+      return h("div", { key: w.id, style: { borderTop: "1px solid #262626", padding: "6px 0", display: "flex", gap: 8, alignItems: "center" } },
+        h("p", { style: { fontSize: 12, margin: 0, flex: 1 } }, w.starts_on + " \u2013 " + w.ends_on + (w.message ? " \u00b7 " + w.message : "")),
+        h("button", { className: "ex-action-btn", style: { borderColor: "#f87171", color: "#f87171", fontSize: 11, padding: "4px 8px" },
+          onClick: function () { props.cancelOutOfOffice(w.id); } }, "Cancel"));
+    }),
+    h("div", { style: { display: "flex", gap: 6, marginTop: 8, flexWrap: "wrap" } },
+      h("input", { type: "date", value: oooStart, onChange: function (e) { setOooStart(e.target.value); },
+        style: { flex: "1 1 120px", background: "#171717", color: "#e5e5e5", border: "1px solid #404040", borderRadius: 6, padding: "4px 6px", fontSize: 12 } }),
+      h("input", { type: "date", value: oooEnd, onChange: function (e) { setOooEnd(e.target.value); },
+        style: { flex: "1 1 120px", background: "#171717", color: "#e5e5e5", border: "1px solid #404040", borderRadius: 6, padding: "4px 6px", fontSize: 12 } })),
+    h("input", { type: "text", value: oooMsg, placeholder: "Optional note for your clients",
+      onChange: function (e) { setOooMsg(e.target.value); },
+      style: { width: "100%", marginTop: 6, background: "#171717", color: "#e5e5e5", border: "1px solid #404040", borderRadius: 6, padding: "4px 6px", fontSize: 12, boxSizing: "border-box" } }),
+    h("button", { className: "swap-save-btn", style: { marginTop: 8, fontSize: 11, padding: "4px 8px" },
+      onClick: function () {
+        Promise.resolve(props.postOutOfOffice(oooStart, oooEnd, oooMsg)).then(function () {
+          setOooStart(""); setOooEnd(""); setOooMsg("");
+        });
+      } }, "Post away window"));
+
   // Coach side: requests waiting for a decision. Approve inserts the client's own computed draft
   // as an assignment (reviewed by the human reading this list); Reject just answers.
   const requestReview = reqs.length > 0 ? h("div", { style: { border: "1px solid #f0b429", borderRadius: 8, padding: 8, marginBottom: 12 } },
@@ -9602,6 +9979,7 @@ function CoachingPanel(props) {
   }
 
   return h("div", null,
+    awayPanel,
     requestReview,
     myRequestList,
     // ---- Client side: someone has asked to coach you ----
@@ -9776,6 +10154,7 @@ function SettingsTab(props) {
       },
         h(CoachingPanel, {
           coachId: props.userId,
+          oooWindows: props.oooWindows, postOutOfOffice: props.postOutOfOffice, cancelOutOfOffice: props.cancelOutOfOffice,
           myClients: props.myClients, pendingInvites: props.pendingInvites, canCoach: props.canCoach,
           clientRequests: props.clientRequests, myRequests: props.myRequests,
           approveRequest: props.approveRequest, rejectRequest: props.rejectRequest,
@@ -10745,6 +11124,7 @@ function CustomSetupWizard(props) {
   const EQUIPMENT_OPTIONS = [
     { id: "barbell", label: "Barbell" }, { id: "dumbbell", label: "Dumbbells" }, { id: "machine", label: "Machines / Cables" },
     { id: "kettlebell", label: "Kettlebell" }, { id: "band", label: "Resistance Bands" }, { id: "pullup_bar", label: "Pull-Up Bar" },
+    { id: "weight_belt", label: "Weight Belt / Dip Belt" }, { id: "vest", label: "Weighted Vest" },
     { id: "bodyweight", label: "Bodyweight Only" },
   ];
   const FOOD_CATS = [{ key: "protein", label: "Proteins (pick at least 1)" }, { key: "carb", label: "Carbs (pick at least 1)" }, { key: "fat", label: "Fats (pick at least 1)" }, { key: "veg", label: "Vegetables (optional)" }];
