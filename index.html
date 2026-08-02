@@ -3984,7 +3984,7 @@ function programStateHasRealData(state) {
 // The build currently running. Surfaced in Settings -> Account, because "is the deploy actually
 // live?" has been the real answer to several apparent bugs, and inferring it from behaviour is slow
 // and error-prone. Compared against version.json by the update check below.
-const APP_VERSION = "2026-08-01T20:18:17";
+const APP_VERSION = "2026-08-02T00:03:35";
 
 // Signing out has to be unconditional, because every failure mode here ends the same way: a person
 // tapping a button that does nothing.
@@ -5641,8 +5641,8 @@ function App() {
     // from 15 reps to 8 with no explanation. At a deload it is a transition they can see.
     const bandMigration = migrateExerciseBandsToMechanic(data.customProgramConfig, week + 1, prog.extraDeloadWeeks);
     const bandPatch = bandMigration.migrated
-      ? { customProgramConfig: Object.assign({}, bandMigration.config, (rirFlagPatch.customProgramConfig || {})),
-          repBandChangeNotice: bandMigration.changed.length ? { forWeek: week + 1, changed: bandMigration.changed } : null }
+      ? { customProgramConfig: Object.assign({}, bandMigration.config, (rirFlagPatch.customProgramConfig || {}),
+          bandMigration.changed.length ? { repBandChangeNotice: { forWeek: week + 1, changed: bandMigration.changed } } : {}) }
       : {};
     const newData = Object.assign({}, data, { programs: newPrograms }, isSharedProgram ? { sharedExerciseState: newState } : {}, rirFlagPatch, bandPatch);
     save(newData);
@@ -6650,6 +6650,8 @@ function App() {
           displayName: data.displayName,
           setDisplayName: function (v) { save(Object.assign({}, data, { displayName: v })); showToast(v ? "Name saved" : "Name cleared"); },
           myClients: myClients, pendingInvites: pendingInvites, coachingBusy: coachingBusy,
+          oooWindows: oooWindows, postOutOfOffice: postOutOfOffice, cancelOutOfOffice: cancelOutOfOffice,
+          autoregGrantedTo: autoregGrantedTo, setClientAutoregulation: setClientAutoregulation,
           clientRequests: clientRequests, myRequests: myRequests, approveRequest: approveRequest, rejectRequest: rejectRequest,
           inviteClient: inviteClient, respondToInvite: respondToInvite, endCoaching: endCoaching,
           canCoach: amICoach,
@@ -6713,9 +6715,14 @@ function App() {
             tab === "workouts" && myCoachRow && (oooWindows || []).filter(function (w) {
               return w.coach_id !== userId && new Date().toISOString().slice(0, 10) <= w.ends_on;
             }).slice(0, 1).map(function (w) { return h(CoachAwayBanner, { key: w.id, window: w }); }),
-            tab === "workouts" && data.repBandChangeNotice && h(RepBandChangeBanner, {
-              notice: data.repBandChangeNotice,
-              onDismiss: function () { save(Object.assign({}, data, { repBandChangeNotice: null })); },
+            tab === "workouts" && data.customProgramConfig && data.customProgramConfig.repBandChangeNotice && h(RepBandChangeBanner, {
+              notice: data.customProgramConfig.repBandChangeNotice,
+              // Dismissal syncs too — inside the config, clearing it on one device clears it
+              // everywhere, instead of the same banner reappearing on every phone the person owns.
+              onDismiss: function () {
+                const cfg = Object.assign({}, data.customProgramConfig); delete cfg.repBandChangeNotice;
+                save(Object.assign({}, data, { customProgramConfig: cfg }));
+              },
             }),
             tab === "workouts" && rirModeEnabled && !isDeloadWeek && h(RirWeekBanner, {
               // Position within the phase, not the absolute week — the same input the progression
@@ -6916,6 +6923,26 @@ function isDayFullyComplete(dayExercises, isDeloadWeek, weekLogs, weekSkipped, w
 // Friday for a Monday departure reaches someone who does not open the app until Thursday on
 // THURSDAY. That is the cost of not depending on the unresolved Worker<->Supabase question that
 // blocks every other coach-to-client message (handoff 8b). Do not describe this as notifying.
+// The bodyweight ceiling produces four states, and each earns one plain sentence on the exercise
+// card. Silent progression is how trust erodes: a set appearing from nowhere, an exercise
+// changing under someone, or — worst — nothing happening with no acknowledgement that the
+// person has topped out.
+function BodyweightProgressNote(props) {
+  const st = props.state || {};
+  let copy = null;
+  if (st.pendingLoadPrompt) {
+    copy = "You\u2019ve hit " + BODYWEIGHT_REP_CEILING + " reps — time to add weight. Start light: a vest, a belt, or a plate.";
+  } else if (st.pendingLadderStep) {
+    copy = "You\u2019ve outgrown this one. Next up: " + st.pendingLadderStep + ".";
+  } else if (st.atLadderTop) {
+    copy = "Top of the bodyweight ladder at " + BODYWEIGHT_REP_CEILING + " reps \u00d7 " + BODYWEIGHT_MAX_SETS + " sets. Adding equipment is the honest next step when you\u2019re ready.";
+  } else if (st.autoregulationSuppressed) {
+    copy = "You\u2019ve hit the rep ceiling. Your coach decides what\u2019s next \u2014 mention it, or they\u2019ll see it in your logs.";
+  }
+  if (!copy) return null;
+  return h("p", { style: { fontSize: 12, color: "#f0a742", margin: "4px 0 0" } }, copy);
+}
+
 function CoachAwayBanner(props) {
   const w = props.window;
   const fmt = function (d) {
@@ -7242,7 +7269,8 @@ function WorkoutsTab(props) {
             rating && h("span", { className: "rated-tag" + (rating === "hard" ? " hard" : "") },
               " · Rated: " + (rating === "easy" ? "Easy" : rating === "right" ? "Just Right" : "Too Difficult")),
             !canEnter && h("span", { className: "lock-hint" }, h(Lock, { size: 11 }), " Finish \"" + blockedBy + "\" first")
-          )
+          ),
+          h(BodyweightProgressNote, { state: state })
         ),
         isOpen ? h(ChevronUp, { size: 16 }) : h(ChevronDown, { size: 16 })
       ),
@@ -10059,11 +10087,35 @@ function CoachingPanel(props) {
                     }))),
                 props.triage && triage && triage.findings && triage.findings.length === 0 && h("div", { style: { marginTop: 6, fontSize: 11, color: "#737373" } },
                   "No flags" + (anchorLabel ? " \u00B7 " + anchorLabel : "")),
-                h("div", { style: { display: "flex", gap: 8, marginTop: 8 } },
+                h("div", { style: { display: "flex", gap: 8, marginTop: 8, flexWrap: "wrap" } },
                   h("button", {
                     className: "ex-action-btn", style: { fontSize: 11, padding: "4px 8px" },
                     onClick: function () { setOpenEditor(openEditor === c.client_id ? null : c.client_id); },
                   }, openEditor === c.client_id ? "Close editor" : "Prescribe"),
+                  // Migration 19. The grant takes effect at the client's NEXT DELOAD, never
+                  // mid-phase — the agreed rule is that nothing changes under someone whose
+                  // working weights were calibrated against the current prescription. The week is
+                  // computed from the client's own current_week; when my_clients doesn't carry
+                  // one (client hasn't synced yet), the next boundary from week 1 is week 5,
+                  // which is the conservative end: never earlier than reality.
+                  h("button", {
+                    className: "ex-action-btn",
+                    style: (props.autoregGrantedTo || {})[c.client_id]
+                      ? { borderColor: "#4eba6f", color: "#4eba6f", fontSize: 11, padding: "4px 8px" }
+                      : { fontSize: 11, padding: "4px 8px" },
+                    disabled: props.busy,
+                    onClick: function () {
+                      const on = !(props.autoregGrantedTo || {})[c.client_id];
+                      const wk = c.current_week != null ? c.current_week : 1;
+                      const boundary = wk + (RIR_PHASE_LENGTH + 1 - ((wk - 1) % (RIR_PHASE_LENGTH + 1)));
+                      const label = personLabel(c.display_name, c.email);
+                      if (window.confirm((on
+                        ? "Let the app auto-progress " + label + "\u2019s bodyweight work (add sets, step up variants) from their next deload (week " + boundary + ")? Your prescriptions are never overwritten \u2014 this only fills in where reps have topped out."
+                        : "Stop auto-progression for " + label + " from week " + boundary + "? Sets already added stay \u2014 nothing is removed."))) {
+                        props.setClientAutoregulation(c.client_id, on, boundary, null);
+                      }
+                    },
+                  }, (props.autoregGrantedTo || {})[c.client_id] ? "Auto-progress: on" : "Auto-progress: off"),
                   h("button", {
                     className: "ex-action-btn", style: { borderColor: "#f87171", color: "#f87171", fontSize: 11, padding: "4px 8px" },
                     disabled: props.busy,
@@ -10155,6 +10207,7 @@ function SettingsTab(props) {
         h(CoachingPanel, {
           coachId: props.userId,
           oooWindows: props.oooWindows, postOutOfOffice: props.postOutOfOffice, cancelOutOfOffice: props.cancelOutOfOffice,
+          autoregGrantedTo: props.autoregGrantedTo, setClientAutoregulation: props.setClientAutoregulation,
           myClients: props.myClients, pendingInvites: props.pendingInvites, canCoach: props.canCoach,
           clientRequests: props.clientRequests, myRequests: props.myRequests,
           approveRequest: props.approveRequest, rejectRequest: props.rejectRequest,
