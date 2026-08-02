@@ -3984,7 +3984,7 @@ function programStateHasRealData(state) {
 // The build currently running. Surfaced in Settings -> Account, because "is the deploy actually
 // live?" has been the real answer to several apparent bugs, and inferring it from behaviour is slow
 // and error-prone. Compared against version.json by the update check below.
-const APP_VERSION = "2026-08-02T00:03:35";
+const APP_VERSION = "2026-08-02T00:22:37";
 
 // Signing out has to be unconditional, because every failure mode here ends the same way: a person
 // tapping a button that does nothing.
@@ -5732,7 +5732,9 @@ function App() {
     // While coached, accepting the app's own suggestion is still a plan change the coach governs —
     // it becomes a request carrying the recommendation, and the suggestion stays pending until
     // answered (an approved request applies it through the normal pipeline).
-    if (myCoachRow) {
+    // UNLESS autoregulation is granted (migration 19): this recommendation is APP-initiated, so
+    // it is precisely what the grant delegates. Client-initiated edits elsewhere still queue.
+    if (myCoachRow && !autoregulationAllowedForWeek(prog.currentWeek)) {
       const reqPayload = {}; reqPayload[exerciseId] = { setsOverride: rec.currentSets + 1 };
       submitChangeRequest({
         kind: "exercise_state", program_key: data.activeProgram, effective_week: prog.currentWeek,
@@ -10107,11 +10109,17 @@ function CoachingPanel(props) {
                     onClick: function () {
                       const on = !(props.autoregGrantedTo || {})[c.client_id];
                       const wk = c.current_week != null ? c.current_week : 1;
-                      const boundary = wk + (RIR_PHASE_LENGTH + 1 - ((wk - 1) % (RIR_PHASE_LENGTH + 1)));
+                      // The NEXT canonical deload week (multiples of phase+1: 5, 10, 15...) —
+                      // landing ON it, matching where the band backfill and the review both
+                      // happen. If the client has inserted extra deloads this is approximate;
+                      // the coach's card cannot see those, and a grant activating a week early
+                      // only ever ADDS progression, never rewrites anything.
+                      const cycle = RIR_PHASE_LENGTH + 1;
+                      const boundary = wk + ((cycle - (wk % cycle)) % cycle);
                       const label = personLabel(c.display_name, c.email);
                       if (window.confirm((on
-                        ? "Let the app auto-progress " + label + "\u2019s bodyweight work (add sets, step up variants) from their next deload (week " + boundary + ")? Your prescriptions are never overwritten \u2014 this only fills in where reps have topped out."
-                        : "Stop auto-progression for " + label + " from week " + boundary + "? Sets already added stay \u2014 nothing is removed."))) {
+                        ? "Let the app fully auto-progress " + label + " from their next deload (week " + boundary + ")? Weekly weights and reps already progress automatically for everyone. This additionally lets the app act on its own suggestions without waiting for you: adding a set where reps have topped out, applying its volume recommendations, and stepping bodyweight work up to harder variants. Your prescriptions are never overwritten, and their own edit requests still queue for you."
+                        : "Stop auto-progression for " + label + " from week " + boundary + "? Anything already applied stays \u2014 nothing is removed."))) {
                         props.setClientAutoregulation(c.client_id, on, boundary, null);
                       }
                     },
