@@ -2470,12 +2470,16 @@ function computeExerciseWeekProgression(ex, ctx) {
       // Merged, not `||` — same reasoning as renderCard's state resolution: a partial stub entry
       // (missing weight/repsTarget) must still inherit the exercise's own defaults for progression
       // math to work off a real number, not undefined.
-      const rawCur = Object.assign({ weight: ex.weight, repsTarget: ex.repLow, nameOverride: null }, ctx.priorState || {});
+      const rawCur = Object.assign({ weight: ex.weight, repsTarget: effectiveRepRange(ex, ctx.priorState).repLow, nameOverride: null }, ctx.priorState || {});
       // If a within-session adjustment happened this week (undershoot drop or overshoot bump), next
       // week's progression should build from that realistic weight/target, not the stale pre-
       // adjustment one — otherwise the safety mechanism would just get silently undone the moment
       // the week completes.
       const cur = ctx.sessionAdjustment != null ? Object.assign({}, rawCur, ctx.sessionAdjustment) : rawCur;
+      // Same post-merge guard as the display. Here the stakes are higher: an undefined target
+      // entering this math becomes NaN in next week's repsTarget at completeWeek — a corrupted
+      // progression, not just a wrong label.
+      if (cur.repsTarget == null) cur.repsTarget = rawCur.repsTarget;
       if (setsLogged.length === 0) return { state: null, escalateToDeload: false };
       const maxReps = Math.max.apply(null, setsLogged.map(function (s) { return s.reps || 0; }));
 
@@ -2740,7 +2744,7 @@ function suggestRepShift(oldWeight, newWeight, repLow, repHigh) {
 function baseExerciseState(exercises) {
   const state = {};
   DAYS.forEach((d) => exercises[d].exercises.forEach((ex) => {
-    state[ex.id] = { weight: ex.weight, repsTarget: ex.repLow, nameOverride: null, notes: "" };
+    state[ex.id] = { weight: ex.weight, repsTarget: effectiveRepRange(ex, null).repLow, nameOverride: null, notes: "" };
   }));
   return state;
 }
@@ -3984,7 +3988,7 @@ function programStateHasRealData(state) {
 // The build currently running. Surfaced in Settings -> Account, because "is the deploy actually
 // live?" has been the real answer to several apparent bugs, and inferring it from behaviour is slow
 // and error-prone. Compared against version.json by the update check below.
-const APP_VERSION = "2026-08-02T00:22:37";
+const APP_VERSION = "2026-08-04T20:35:11";
 
 // Signing out has to be unconditional, because every failure mode here ends the same way: a person
 // tapping a button that does nothing.
@@ -4135,6 +4139,19 @@ function App() {
     }
     tick();
     const iv = setInterval(tick, 1000);
+    // FIELD BUG (2026-08-04): the countdown froze mid-count at a lit screen. The interval above
+    // is not guaranteed: Android and installed-PWA WebViews throttle or silently kill page
+    // timers under screen managers and battery savers, and some never fire visibilitychange in
+    // standalone mode — so the wall-clock correction below never ran either. Belt and braces:
+    // a requestAnimationFrame loop re-derives the remaining time on every frame while the page
+    // is actually being drawn. rAF cannot be throttled below the display's own refresh while
+    // visible — if the user can see a frozen number, rAF is by definition still running, which
+    // makes "frozen while watched" impossible rather than merely unlikely. setRestRemaining is
+    // still only called once per second (the derived integer changes once per second), so this
+    // adds no render churn.
+    let rafId = null;
+    function rafTick() { tick(); rafId = requestAnimationFrame(rafTick); }
+    if (typeof requestAnimationFrame === "function") rafId = requestAnimationFrame(rafTick);
     // Phones aggressively throttle (or entirely freeze) page timers once the screen is off or the
     // browser is backgrounded — which is exactly what happens when you put the phone down between
     // sets. Without this, the interval simply never reaches zero and no notification ever fires.
@@ -4148,8 +4165,21 @@ function App() {
       if (document.visibilityState !== "visible") return;
       tick();
       if (!restFiredRef.current && Date.now() >= restTimer.endsAt) fireNow();
+      // The OS releases a wake lock on every visibility loss and never gives it back on its
+      // own. Without this, the screen-stays-on defence only survives until the first dim.
+      if (!restFiredRef.current && navigator.wakeLock && navigator.wakeLock.request && !restWakeLockRef.current) {
+        navigator.wakeLock.request("screen")
+          .then(function (lock) { restWakeLockRef.current = lock; lock.addEventListener("release", function () { restWakeLockRef.current = null; }); })
+          .catch(function () {});
+      }
     }
     document.addEventListener("visibilitychange", onVisible);
+    // Installed-PWA WebViews that skip visibilitychange usually still fire one of these on
+    // return; all three route to the same wall-clock correction, and firing twice is harmless
+    // (tick is idempotent and fireNow is ref-guarded).
+    window.addEventListener("focus", onVisible);
+    window.addEventListener("pageshow", onVisible);
+    document.addEventListener("resume", onVisible);
     if (navigator.wakeLock && navigator.wakeLock.request) {
       navigator.wakeLock.request("screen")
         .then(function (lock) { restWakeLockRef.current = lock; })
@@ -4157,6 +4187,10 @@ function App() {
     }
     return function () {
       clearInterval(iv);
+      if (rafId != null) cancelAnimationFrame(rafId);
+      window.removeEventListener("focus", onVisible);
+      window.removeEventListener("pageshow", onVisible);
+      document.removeEventListener("resume", onVisible);
       document.removeEventListener("visibilitychange", onVisible);
       if (restWakeLockRef.current) {
         try { restWakeLockRef.current.release(); } catch (e) {}
@@ -5487,9 +5521,11 @@ function App() {
     if (!rirModeEnabled && !isBodyweight && reps != null && weight != null && weight > 0) {
       let adjustment = null;
       if (targetRepLow != null && reps <= targetRepLow * 0.5) {
-        adjustment = { weight: nextWeightDecrement(weight), repsTarget: currentRepsTarget };
+        adjustment = { weight: nextWeightDecrement(weight) };
+        if (currentRepsTarget != null) adjustment.repsTarget = currentRepsTarget;
       } else if (targetRepHigh != null && reps >= targetRepHigh) {
-        adjustment = { weight: nextWeightIncrement(weight), repsTarget: targetRepLow };
+        adjustment = { weight: nextWeightIncrement(weight) };
+        if (targetRepLow != null) adjustment.repsTarget = targetRepLow;
       }
       // A normal, in-range set (neither a big miss nor beating the top of the range) means the
       // CURRENT weight is appropriate — any adjustment already sitting from an earlier set this
@@ -7184,13 +7220,13 @@ function WorkoutsTab(props) {
     // still fall through to the exercise's own defaults for whichever fields it doesn't specify.
     // `||` treats ANY existing object as complete, so a stub entry missing weight/repsTarget would
     // otherwise permanently display as "undefined" instead of the exercise's real starting numbers.
-    const rawState = Object.assign({ weight: ex.weight, repsTarget: ex.repLow, nameOverride: null }, props.data.exerciseState[ex.id] || {});
+    const rawState = Object.assign({ weight: ex.weight, repsTarget: null, nameOverride: null }, props.data.exerciseState[ex.id] || {});
     // Object.assign copies over an explicit `undefined` value from the stored object too (unlike
     // `||`) — so a previously-saved exerciseState entry with weight/repsTarget already stuck at
     // undefined (e.g. a leftover from an earlier bug) would silently win over the sensible default
     // above. Coalesce back to the default for either field specifically if that happened.
     if (rawState.weight == null) rawState.weight = ex.weight;
-    if (rawState.repsTarget == null) rawState.repsTarget = ex.repLow;
+    if (rawState.repsTarget == null) rawState.repsTarget = effectiveRepRange(ex, rawState).repLow;
     // A within-session adjustment (undershoot drop or overshoot bump, triggered by a big rep miss or
     // a big rep beat) overrides the displayed/logged weight (and, for an overshoot, the rep target
     // too) for this exercise's remaining sets this week, without touching the persistent
@@ -7198,6 +7234,10 @@ function WorkoutsTab(props) {
     const weekAdjustments = (props.data.sessionAdjustments && props.data.sessionAdjustments[props.data.currentWeek]) || {};
     const sessionAdjustment = weekAdjustments[ex.id];
     const state = sessionAdjustment ? Object.assign({}, rawState, sessionAdjustment) : rawState;
+    // The guard above runs on rawState, but Object.assign copies an explicit undefined from an
+    // adjustment right over the coalesced value — the exact mechanism of the "3×undefined" bug.
+    // Re-coalesce at the point of use: the last line of defence must sit AFTER the last merge.
+    if (state.repsTarget == null) state.repsTarget = rawState.repsTarget;
     const sessionAdjustmentDirection = !sessionAdjustment ? null : (sessionAdjustment.weight > rawState.weight ? "up" : "down");
     const range = effectiveRepRange(ex, state);
     const setsToday = props.isDeloadWeek ? Math.ceil(effectiveSets(ex, rawState) / 2) : effectiveSets(ex, rawState);
