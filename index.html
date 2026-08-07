@@ -3988,7 +3988,7 @@ function programStateHasRealData(state) {
 // The build currently running. Surfaced in Settings -> Account, because "is the deploy actually
 // live?" has been the real answer to several apparent bugs, and inferring it from behaviour is slow
 // and error-prone. Compared against version.json by the update check below.
-const APP_VERSION = "2026-08-04T20:35:11";
+const APP_VERSION = "2026-08-07T18:18:30";
 
 // Signing out has to be unconditional, because every failure mode here ends the same way: a person
 // tapping a button that does nothing.
@@ -4776,6 +4776,11 @@ function App() {
   function setClientAutoregulation(clientId, granted, effectiveWeek, reason) {
     return supabaseClient.from("coach_assignments").insert({
       kind: "autoregulation", coach_id: userId, client_id: clientId,
+      // program_key is NOT NULL on coach_assignments (found 2026-08-05 when the live toggle's
+      // insert 400'd). "account" is a deliberate sentinel: the grant is per-CLIENT, not
+      // per-program, and a key no program uses keeps these rows out of my_pending_assignments'
+      // program-filtered apply pipeline — they are state, not a prescription to apply.
+      program_key: "account",
       effective_week: effectiveWeek, status: "approved",
       payload: { granted: !!granted, reason: reason || null },
     }).then(function (r) {
@@ -6100,6 +6105,59 @@ function App() {
   // a request is queued cancels it rather than doing nothing. The actual flip to enabled happens in
   // completeWeek, at the exact moment a new phase begins — the same clean-slate boundary a phase
   // transition already represents.
+  // Adding or removing an exercise on a custom day. DELIBERATE DECISIONS (2026-08-05):
+  // BUILT-INS STAY FIXED — these act only on customProgramConfig; the built-in programs'
+  // composition is code. And they take effect IMMEDIATELY, not at the deload: a person adding
+  // or dropping an exercise is autoregulating their own volume, and the deload gate exists to
+  // stop things changing UNDER someone — not to slow down changes they are making themselves.
+  // (Contrast the band backfill, which is the app changing their program: that one waits.)
+  // While coached, both route as a program_config change request — composition is the coach's
+  // prescription, same governance as every other plan change.
+  function customCompositionChange(nextConfig, summary) {
+    if (myCoachRow) {
+      submitChangeRequest({
+        kind: "program_config", program_key: "custom",
+        effective_week: prog.currentWeek, payload: nextConfig, summary: summary,
+      });
+      showToast("Sent to your coach for approval.");
+      return;
+    }
+    save(Object.assign({}, data, { customProgramConfig: nextConfig }));
+    showToast(summary);
+  }
+  function addCustomExercise(dayKey, poolName, startWeight) {
+    const pool = EXERCISE_POOL.filter(function (p) { return p.name === poolName; })[0];
+    if (!pool || !data.customProgramConfig) return;
+    const next = JSON.parse(JSON.stringify(data.customProgramConfig));
+    const dayObj = next.exercises[dayKey];
+    if (!dayObj) return;
+    // Same entry shape requirementToExercise builds, so everything downstream — band derivation
+    // from mechanic, the bodyweight ceiling, calibration seeding a fresh exercise — just works.
+    dayObj.exercises = (dayObj.exercises || []).concat([{
+      id: "cx" + Date.now().toString(36),
+      name: pool.name, weight: pool.bodyweight ? null : (startWeight != null ? startWeight : null),
+      bodyweight: pool.bodyweight || false, isFailure: pool.isFailure || false,
+      sets: 3,
+      repLow: pool.bodyweight ? null : bandForMechanic(pool.mechanic).repLow,
+      repHigh: pool.bodyweight ? null : bandForMechanic(pool.mechanic).repHigh,
+      mechanic: pool.mechanic, bwPct: pool.bwPct != null ? pool.bwPct : null,
+      unilateral: !!pool.unilateral,
+      muscle: consolidateMuscleGroup(pool.muscle),
+    }]);
+    customCompositionChange(next, "Added " + pool.name);
+  }
+  function removeCustomExercise(dayKey, exerciseId, exerciseName) {
+    if (!data.customProgramConfig) return;
+    const next = JSON.parse(JSON.stringify(data.customProgramConfig));
+    const dayObj = next.exercises[dayKey];
+    if (!dayObj) return;
+    dayObj.exercises = (dayObj.exercises || []).filter(function (e) { return e.id !== exerciseId; });
+    // Features leave, data stays: logs and exercise state are keyed by id and are NOT deleted —
+    // they stop rendering. Re-adding the same movement gets a NEW id and a fresh start on
+    // purpose: resurrecting months-old targets under an old id would be a worse surprise.
+    customCompositionChange(next, "Removed " + exerciseName);
+  }
+
   function toggleRirMode() {
     // While coached, the toggle is a REQUEST — same governance as every other plan change. The
     // target state accounts for a queued enable: tapping while queued asks to cancel, i.e. off.
@@ -6785,6 +6843,11 @@ function App() {
               targetHR: (data.customProgramConfig && data.customProgramConfig.age) ? Math.round((220 - data.customProgramConfig.age) * 0.65) : null,
               supersetGroups: prog.supersetGroups, createSuperset: createSuperset, removeSuperset: removeSuperset,
               coachManaged: !!myCoachRow, tierHasTraining: tierHasTraining, adjustSets: adjustSets,
+              // Composition editing exists only for custom programs (built-ins stay fixed).
+              // Passing null (not a fn) is the gate: the card and the add panel both render
+              // their controls only when the prop is callable.
+              addExercise: data.activeProgram === "custom" ? addCustomExercise : null,
+              removeExercise: data.activeProgram === "custom" ? removeCustomExercise : null,
               deloadRecommendation: prog.deloadRecommendation, acceptDeloadRecommendation: acceptDeloadRecommendation,
               dismissDeloadRecommendation: dismissDeloadRecommendation, readinessSignal: readinessSignal,
               volumeIncreaseRecommendations: prog.volumeIncreaseRecommendations,
@@ -7153,6 +7216,30 @@ function InsightDigest(props) {
 
 function WorkoutsTab(props) {
   const [swapOpen, setSwapOpen] = useState({});
+  const [addPick, setAddPick] = useState("");
+  const [addWeight, setAddWeight] = useState("");
+  const addPickIsBodyweight = !!(addPick && (EXERCISE_POOL.filter(function (p) { return p.name === addPick; })[0] || {}).bodyweight);
+  const addPanel = !props.addExercise ? null : h("div", { className: "panel", style: { marginTop: 12, padding: "10px 14px", background: "#0a0a0a", border: "1px solid #404040", borderRadius: 8 } },
+    h("p", { style: { fontSize: 13, margin: "0 0 8px" } }, "Add an exercise to " + props.selectedDay),
+    h("div", { style: { display: "flex", gap: 6, flexWrap: "wrap" } },
+      h("select", { value: addPick, onChange: function (e) { setAddPick(e.target.value); },
+        style: { flex: "2 1 200px", background: "#171717", color: "#e5e5e5", border: "1px solid #404040", borderRadius: 6, padding: "6px 8px", fontSize: 13 } },
+        h("option", { value: "" }, "Choose a movement\u2026"),
+        EXERCISE_POOL.filter(function (p) { return !p.ladderOnly; })
+          .slice().sort(function (a, b) { return a.muscle === b.muscle ? (a.name < b.name ? -1 : 1) : (a.muscle < b.muscle ? -1 : 1); })
+          .map(function (p) { return h("option", { key: p.name, value: p.name }, titleCaseMuscle(p.muscle) + " \u2014 " + p.name + (p.bodyweight ? " (bodyweight)" : "")); })),
+      !addPickIsBodyweight && h("input", { type: "number", inputMode: "decimal", value: addWeight, placeholder: "Start weight (lb)",
+        onChange: function (e) { setAddWeight(e.target.value); },
+        style: { flex: "1 1 120px", background: "#171717", color: "#e5e5e5", border: "1px solid #404040", borderRadius: 6, padding: "6px 8px", fontSize: 13 } }),
+      h("button", { className: "swap-save-btn", style: { flex: "1 1 90px", padding: "8px 10px" },
+        disabled: !addPick || (!addPickIsBodyweight && !(Number(addWeight) > 0)),
+        onClick: function () {
+          props.addExercise(props.selectedDay, addPick, addPickIsBodyweight ? null : Number(addWeight));
+          setAddPick(""); setAddWeight("");
+        } }, props.coachManaged ? "Request add" : "Add")),
+    h("p", { style: { fontSize: 11, color: "#a3a3a3", margin: "8px 0 0" } },
+      "Rep range comes from the movement itself. A starting weight is required for loaded work \u2014 " +
+      "the first week calibrates it from there" + (props.coachManaged ? ". Your coach approves composition changes." : ".")));
   const [historyOpen, setHistoryOpen] = useState({});
   const [muscleEditOpen, setMuscleEditOpen] = useState({});
   const [actionsOpen, setActionsOpen] = useState({}); // per-exercise: the collapsed button cluster
@@ -7377,6 +7464,19 @@ function WorkoutsTab(props) {
               window.open("https://www.youtube.com/results?search_query=" + encodeURIComponent(ex.name + " exercise form"), "_blank", "noopener,noreferrer");
             },
           }, "Watch Demo"),
+          // Custom programs only — built-ins stay fixed (decision 2026-08-05). While coached,
+          // removal routes as a change request like every other composition edit; the confirm
+          // wording differs so nobody thinks the exercise vanishes without their coach.
+          props.removeExercise && h("button", {
+            className: "ex-action-btn", style: { borderColor: "#f87171", color: "#f87171" },
+            onClick: function () {
+              if (window.confirm(props.coachManaged
+                ? "Ask your coach to remove " + ex.name + " from this day? Your logged history stays either way."
+                : "Remove " + ex.name + " from this day? Your logged history stays — only the exercise leaves the plan.")) {
+                props.removeExercise(props.selectedDay, ex.id, ex.name);
+              }
+            },
+          }, "Remove"),
           // Manual set add/subtract, centered as the cluster's last row. Rides the SAME
           // setsOverride the autoregulation volume-accept writes, so RIR targets, deload halving,
           // and completion all just follow; while coached, adjustSets routes to a request.
@@ -7633,6 +7733,7 @@ function WorkoutsTab(props) {
             : "Moves you straight to your next training day.")
       );
     })(),
+    addPanel,
     props.data.undoSnapshot && h("button", { className: "undo-btn", onClick: props.undoCompleteWeek },
       "Undo last week completion (back to Week " + props.data.undoSnapshot.currentWeek + ")")
   );
