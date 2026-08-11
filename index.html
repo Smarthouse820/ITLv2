@@ -3988,7 +3988,7 @@ function programStateHasRealData(state) {
 // The build currently running. Surfaced in Settings -> Account, because "is the deploy actually
 // live?" has been the real answer to several apparent bugs, and inferring it from behaviour is slow
 // and error-prone. Compared against version.json by the update check below.
-const APP_VERSION = "2026-08-07T18:18:30";
+const APP_VERSION = "2026-08-10T11:02:36";
 
 // Signing out has to be unconditional, because every failure mode here ends the same way: a person
 // tapping a button that does nothing.
@@ -4774,16 +4774,24 @@ function App() {
   // grant, because the history is the product: the deload review has to be able to say which
   // weeks were autoregulated, and a mutable flag could never answer that.
   function setClientAutoregulation(clientId, granted, effectiveWeek, reason) {
-    return supabaseClient.from("coach_assignments").insert({
+    // NATIVE STATUS VOCABULARY (migration 21): a grant in force is 'applied'; a replaced one is
+    // 'superseded'. The UNIQUE (client, program_key, week, kind, status) key makes the supersede
+    // step mandatory for a same-week re-toggle — two 'applied' rows at one week would collide,
+    // by design. Supersede first, then insert; nothing is ever deleted.
+    return supabaseClient.from("coach_assignments")
+      .update({ status: "superseded" })
+      .eq("kind", "autoregulation").eq("client_id", clientId)
+      .eq("effective_week", effectiveWeek).eq("status", "applied")
+      .then(function () { return supabaseClient.from("coach_assignments").insert({
       kind: "autoregulation", coach_id: userId, client_id: clientId,
       // program_key is NOT NULL on coach_assignments (found 2026-08-05 when the live toggle's
       // insert 400'd). "account" is a deliberate sentinel: the grant is per-CLIENT, not
       // per-program, and a key no program uses keeps these rows out of my_pending_assignments'
       // program-filtered apply pipeline — they are state, not a prescription to apply.
       program_key: "account",
-      effective_week: effectiveWeek, status: "approved",
+      effective_week: effectiveWeek, status: "applied",
       payload: { granted: !!granted, reason: reason || null },
-    }).then(function (r) {
+    }); }).then(function (r) {
       if (r.error) { showToast("Couldn't save that: " + r.error.message); return; }
       showToast(granted ? "Autoregulation on from week " + effectiveWeek : "Autoregulation off from week " + effectiveWeek);
       const next = Object.assign({}, autoregGrantedTo); next[clientId] = !!granted;
@@ -4799,7 +4807,7 @@ function App() {
   // synchronous local read of the same rows, and completeWeek cannot await.
   function autoregulationAllowedForWeek(week) {
     if (!myCoachRow) return true;
-    const rows = (myAutoregGrants || []).filter(function (a) { return a.effective_week <= week; });
+    const rows = (myAutoregGrants || []).filter(function (a) { return a.status === "applied" && a.effective_week <= week; });
     if (!rows.length) return false;
     rows.sort(function (a, b) {
       if (b.effective_week !== a.effective_week) return b.effective_week - a.effective_week;
@@ -5801,7 +5809,7 @@ function App() {
   }
 
   function resetAll() {
-    if (!window.confirm("Reset all progress for the " + def.label + " program? This clears logs, week count, and weights back to Week 1 defaults. Your liked/scanned foods and other programs aren't affected.")) return;
+    if (!window.confirm("Reset all progress for the " + def.label + " program? This clears logs, week count, and weights back to Week 1 defaults, and restarts the meal rotation at Wk 1 from this week. Your liked/scanned foods and other programs aren't affected.")) return;
     saveProgram(freshProgramState(def.exercises));
   }
 
@@ -6125,9 +6133,21 @@ function App() {
     save(Object.assign({}, data, { customProgramConfig: nextConfig }));
     showToast(summary);
   }
-  function addCustomExercise(dayKey, poolName, startWeight) {
-    const pool = EXERCISE_POOL.filter(function (p) { return p.name === poolName; })[0];
-    if (!pool || !data.customProgramConfig) return;
+  // `pick` is a pool name, or — for equipment the pool has never heard of — an object
+  // { custom: true, name, muscle, mechanic } where mechanic is "compound", "isolation", or
+  // "bodyweight". Those are the two facts the system cannot infer without a pool match: the
+  // band derives from mechanic, and insights group by muscle. A custom bodyweight movement is
+  // unbanded to-failure like every other; it has no bwPct, so at the 30-rep ceiling the ladder
+  // step finds no rung and it holds honestly — load or a set remain the levers.
+  function addCustomExercise(dayKey, pick, startWeight) {
+    const isCustom = pick && typeof pick === "object" && pick.custom;
+    const pool = isCustom
+      ? { name: String(pick.name || "").trim(), muscle: pick.muscle,
+          mechanic: pick.mechanic === "bodyweight" ? "compound" : pick.mechanic,
+          bodyweight: pick.mechanic === "bodyweight", isFailure: pick.mechanic === "bodyweight",
+          weight: null, bwPct: null, unilateral: false }
+      : EXERCISE_POOL.filter(function (p) { return p.name === pick; })[0];
+    if (!pool || !pool.name || !data.customProgramConfig) return;
     const next = JSON.parse(JSON.stringify(data.customProgramConfig));
     const dayObj = next.exercises[dayKey];
     if (!dayObj) return;
@@ -6933,6 +6953,13 @@ function App() {
                 myClients: myClients, pendingInvites: pendingInvites, canCoach: amICoach,
                 inviteClient: inviteClient, respondToInvite: respondToInvite,
                 endCoaching: endCoaching, busy: coachingBusy,
+                // THE 2026-08-08 GREY-BUTTON BUG: this Clients-tab mount is the one people
+                // actually use, and it never received the autoregulation or away props — only
+                // the settings mount did. The card rendered its buttons regardless (their labels
+                // read defensively), so the miss was invisible until a press did nothing. When a
+                // component has TWO mounts, a new prop goes to BOTH or the gap hides exactly here.
+                oooWindows: oooWindows, postOutOfOffice: postOutOfOffice, cancelOutOfOffice: cancelOutOfOffice,
+                autoregGrantedTo: autoregGrantedTo, setClientAutoregulation: setClientAutoregulation,
                 clientRequests: clientRequests, myRequests: myRequests,
                 approveRequest: approveRequest, rejectRequest: rejectRequest,
               })),
@@ -7218,24 +7245,45 @@ function WorkoutsTab(props) {
   const [swapOpen, setSwapOpen] = useState({});
   const [addPick, setAddPick] = useState("");
   const [addWeight, setAddWeight] = useState("");
-  const addPickIsBodyweight = !!(addPick && (EXERCISE_POOL.filter(function (p) { return p.name === addPick; })[0] || {}).bodyweight);
+  const [customName, setCustomName] = useState("");
+  const [customMuscle, setCustomMuscle] = useState("chest");
+  const [customMechanic, setCustomMechanic] = useState("compound");
+  const addPickIsBodyweight = addPick === "__custom__"
+    ? customMechanic === "bodyweight"
+    : !!(addPick && (EXERCISE_POOL.filter(function (p) { return p.name === addPick; })[0] || {}).bodyweight);
   const addPanel = !props.addExercise ? null : h("div", { className: "panel", style: { marginTop: 12, padding: "10px 14px", background: "#0a0a0a", border: "1px solid #404040", borderRadius: 8 } },
     h("p", { style: { fontSize: 13, margin: "0 0 8px" } }, "Add an exercise to " + props.selectedDay),
     h("div", { style: { display: "flex", gap: 6, flexWrap: "wrap" } },
       h("select", { value: addPick, onChange: function (e) { setAddPick(e.target.value); },
         style: { flex: "2 1 200px", background: "#171717", color: "#e5e5e5", border: "1px solid #404040", borderRadius: 6, padding: "6px 8px", fontSize: 13 } },
         h("option", { value: "" }, "Choose a movement\u2026"),
+        h("option", { value: "__custom__" }, "Not listed \u2014 add my own\u2026"),
         EXERCISE_POOL.filter(function (p) { return !p.ladderOnly; })
           .slice().sort(function (a, b) { return a.muscle === b.muscle ? (a.name < b.name ? -1 : 1) : (a.muscle < b.muscle ? -1 : 1); })
           .map(function (p) { return h("option", { key: p.name, value: p.name }, titleCaseMuscle(p.muscle) + " \u2014 " + p.name + (p.bodyweight ? " (bodyweight)" : "")); })),
+      addPick === "__custom__" && h(React.Fragment, null,
+        h("input", { type: "text", value: customName, placeholder: "Exercise name",
+          onChange: function (e) { setCustomName(e.target.value); },
+          style: { flex: "2 1 200px", background: "#171717", color: "#e5e5e5", border: "1px solid #404040", borderRadius: 6, padding: "6px 8px", fontSize: 13 } }),
+        h("select", { value: customMuscle, onChange: function (e) { setCustomMuscle(e.target.value); },
+          style: { flex: "1 1 140px", background: "#171717", color: "#e5e5e5", border: "1px solid #404040", borderRadius: 6, padding: "6px 8px", fontSize: 13 } },
+          MUSCLE_GROUPS.map(function (m) { return h("option", { key: m, value: m }, titleCaseMuscle(m)); })),
+        h("select", { value: customMechanic, onChange: function (e) { setCustomMechanic(e.target.value); },
+          style: { flex: "1 1 170px", background: "#171717", color: "#e5e5e5", border: "1px solid #404040", borderRadius: 6, padding: "6px 8px", fontSize: 13 } },
+          h("option", { value: "compound" }, "Compound \u2014 8\u201312 reps"),
+          h("option", { value: "isolation" }, "Isolation \u2014 10\u201315 reps"),
+          h("option", { value: "bodyweight" }, "Bodyweight \u2014 to failure"))),
       !addPickIsBodyweight && h("input", { type: "number", inputMode: "decimal", value: addWeight, placeholder: "Start weight (lb)",
         onChange: function (e) { setAddWeight(e.target.value); },
         style: { flex: "1 1 120px", background: "#171717", color: "#e5e5e5", border: "1px solid #404040", borderRadius: 6, padding: "6px 8px", fontSize: 13 } }),
       h("button", { className: "swap-save-btn", style: { flex: "1 1 90px", padding: "8px 10px" },
-        disabled: !addPick || (!addPickIsBodyweight && !(Number(addWeight) > 0)),
+        disabled: !addPick || (addPick === "__custom__" && !customName.trim()) || (!addPickIsBodyweight && !(Number(addWeight) > 0)),
         onClick: function () {
-          props.addExercise(props.selectedDay, addPick, addPickIsBodyweight ? null : Number(addWeight));
-          setAddPick(""); setAddWeight("");
+          const pick = addPick === "__custom__"
+            ? { custom: true, name: customName.trim(), muscle: customMuscle, mechanic: customMechanic }
+            : addPick;
+          props.addExercise(props.selectedDay, pick, addPickIsBodyweight ? null : Number(addWeight));
+          setAddPick(""); setAddWeight(""); setCustomName("");
         } }, props.coachManaged ? "Request add" : "Add")),
     h("p", { style: { fontSize: 11, color: "#a3a3a3", margin: "8px 0 0" } },
       "Rep range comes from the movement itself. A starting weight is required for loaded work \u2014 " +
@@ -7391,6 +7439,16 @@ function WorkoutsTab(props) {
                       computeTargetRIRForWeek(computePhaseWeeks(props.data.currentWeek, props.data.extraDeloadWeeks).length, RIR_PHASE_LENGTH))
                   : ex.isFailure ? ("to failure" + (state.repsTarget != null ? " (last: " + state.repsTarget + ")" : ""))
                   : range.unbanded ? String(state.repsTarget)
+                  // RIR mode on but no stored per-exercise target yet (nothing computed until the
+                  // first week completes): speak the decided language anyway. The schedule's RIR
+                  // for this phase week is the INSTRUCTION; the band is demoted to an expectation
+                  // ("a number displayed becomes the target" — the whole rep-band argument).
+                  // Cards converge on per-exercise targets as completions compute them; until
+                  // then no card presents the range as the thing to hit.
+                  : props.rirModeEnabled ?
+                    ((function (r) { return r === 0 ? "to failure" : "leave ~" + r + " in reserve"; })(
+                      computeTargetRIRForWeek(computePhaseWeeks(props.data.currentWeek, props.data.extraDeloadWeeks).length, RIR_PHASE_LENGTH))
+                     + " · expect " + range.repLow + "–" + range.repHigh)
                   : state.repsTarget + " (range " + range.repLow + "–" + range.repHigh + ")"),
             sessionAdjustmentDirection === "down" && h("span", { style: { color: "#f0b429" } }, " · reduced this session after a big rep miss"),
             sessionAdjustmentDirection === "up" && h("span", { style: { color: "#4eba6f" } }, " · increased this session after beating the top of your range"),
@@ -10006,6 +10064,7 @@ function CoachingPanel(props) {
   const [oooStart, setOooStart] = useState("");
   const [oooEnd, setOooEnd] = useState("");
   const [oooMsg, setOooMsg] = useState("");
+  const [armedAutoToggle, setArmedAutoToggle] = useState(null);
   function clientEmailOf(id) {
     const m = (props.myClients || []).filter(function (x) { return x.client_id === id; })[0];
     return m ? personLabel(m.display_name, m.email) : "a client";
@@ -10248,23 +10307,27 @@ function CoachingPanel(props) {
                       : { fontSize: 11, padding: "4px 8px" },
                     disabled: props.busy,
                     onClick: function () {
+                      // TWO-PRESS ARM, NOT window.confirm. Installed PWAs (Android standalone
+                      // especially) can suppress native dialogs entirely — confirm() returns
+                      // false with nothing shown, and the press dies invisibly. That was the
+                      // 2026-08-08 grey-button mystery's second half. First press arms the
+                      // button with the week stated on it; second press within 8s executes;
+                      // anything else disarms. No native dialogs, nothing suppressible.
                       const on = !(props.autoregGrantedTo || {})[c.client_id];
                       const wk = c.current_week != null ? c.current_week : 1;
-                      // The NEXT canonical deload week (multiples of phase+1: 5, 10, 15...) —
-                      // landing ON it, matching where the band backfill and the review both
-                      // happen. If the client has inserted extra deloads this is approximate;
-                      // the coach's card cannot see those, and a grant activating a week early
-                      // only ever ADDS progression, never rewrites anything.
                       const cycle = RIR_PHASE_LENGTH + 1;
                       const boundary = wk + ((cycle - (wk % cycle)) % cycle);
-                      const label = personLabel(c.display_name, c.email);
-                      if (window.confirm((on
-                        ? "Let the app fully auto-progress " + label + " from their next deload (week " + boundary + ")? Weekly weights and reps already progress automatically for everyone. This additionally lets the app act on its own suggestions without waiting for you: adding a set where reps have topped out, applying its volume recommendations, and stepping bodyweight work up to harder variants. Your prescriptions are never overwritten, and their own edit requests still queue for you."
-                        : "Stop auto-progression for " + label + " from week " + boundary + "? Anything already applied stays \u2014 nothing is removed."))) {
-                        props.setClientAutoregulation(c.client_id, on, boundary, null);
+                      const armed = armedAutoToggle && armedAutoToggle.clientId === c.client_id && (Date.now() - armedAutoToggle.ts) < 8000;
+                      if (!armed) {
+                        setArmedAutoToggle({ clientId: c.client_id, on: on, boundary: boundary, ts: Date.now() });
+                        return;
                       }
+                      setArmedAutoToggle(null);
+                      props.setClientAutoregulation(c.client_id, armedAutoToggle.on, armedAutoToggle.boundary, null);
                     },
-                  }, (props.autoregGrantedTo || {})[c.client_id] ? "Auto-progress: on" : "Auto-progress: off"),
+                  }, (armedAutoToggle && armedAutoToggle.clientId === c.client_id && (Date.now() - armedAutoToggle.ts) < 8000)
+                     ? ("Press again \u2014 " + (armedAutoToggle.on ? "ON" : "OFF") + " from wk " + armedAutoToggle.boundary)
+                     : (props.autoregGrantedTo || {})[c.client_id] ? "Auto-progress: on" : "Auto-progress: off"),
                   h("button", {
                     className: "ex-action-btn", style: { borderColor: "#f87171", color: "#f87171", fontSize: 11, padding: "4px 8px" },
                     disabled: props.busy,
@@ -11081,7 +11144,8 @@ function GroceryTab(props) {
   return h("div", null,
     h("h2", { className: "section-title" }, "Grocery List"),
     h("p", { className: "section-sub" },
-      "Rotation Week " + props.displayWeek + " of 4 · " + checkedCount + "/" + props.list.length + " checked" + (isPreview ? " · Preview" : "") + (props.hasOverride ? " · From custom plan" : "")),
+      "Meal rotation Wk " + props.displayWeek + " of 4 · " + checkedCount + "/" + props.list.length + " checked" + (isPreview ? " · Preview" : "") + (props.hasOverride ? " · From custom plan" : "")),
+      h("p", { style: { fontSize: 11, color: "#a3a3a3", margin: "2px 0 8px" } }, "Rotates every calendar week for meal variety — separate from your training week. Resetting the program restarts it at Wk 1."),
     h(WeekSelector, { viewWeek: props.viewWeek, setViewWeek: props.setViewWeek, rotationWeek: props.rotationWeek }),
     isPreview && h("div", { className: "preview-banner" },
       "Previewing Week " + props.viewWeek + "'s list — useful for shopping ahead. Checks here are saved separately per week."),
