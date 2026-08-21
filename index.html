@@ -400,20 +400,20 @@ function trainingDayOrder(exercisesByDay) {
 
 const MEALS_CUTTING = {
   1: [
-    { id: "m1", time: "4:00 AM", name: "Meal 1", food: "37g whey protein + 36g dry oats + 7g peanut butter", slot: "cm1", items: [{ name: "Whey isolate", grams: 48.8 }, { name: "Oats (dry)", grams: 36 }, { name: "Peanut butter", grams: 7 }], cal: 329, p: 45, c: 25, f: 6 },
+    { id: "m1", time: "4:00 AM", name: "Meal 1", food: "1 scoop Cream of Rice (33g dry) + \u00bd banana", slot: "cm1", items: [{ name: "Creamy Rice (dry)", grams: 33 }, { name: "Banana", grams: 59 }], cal: 166, p: 2.5, c: 39.0, f: 0.2 },
     { id: "iw", time: "5:45–7:00 AM", name: "Intra-Workout", food: "40g protein isolate + ½ scoop Cluster Dextrin + electrolytes", cal: 220, p: 40, c: 15, f: 0.5 },
-    { id: "m2", time: "7:30 AM", name: "Meal 2", food: "6.8oz chicken breast + 153g banana", slot: "cm2", items: [{ name: "Chicken breast", grams: 192.8 }, { name: "Banana", grams: 153 }, { name: "Peanut butter", grams: 0 }], cal: 445, p: 61, c: 35, f: 7 },
-    { id: "m3", time: "12:00 PM", name: "Meal 3", food: "6.7oz chicken breast + 105g brown rice + 100g broccoli + 3g peanut butter", slot: "cm3", items: [{ name: "Chicken breast", grams: 189.9 }, { name: "Brown rice", grams: 105 }, { name: "Peanut butter", grams: 3 }, { name: "Broccoli", grams: 100 }], cal: 498, p: 65, c: 35, f: 10 },
+    { id: "m2", time: "7:30 AM", name: "Meal 2", food: "6.8oz chicken breast + 153g banana + 1.5 scoops whey protein", slot: "cm2", items: [{ name: "Chicken breast", grams: 192.8 }, { name: "Banana", grams: 153 }, { name: "Whey isolate", grams: 49.5 }], cal: 619, p: 99, c: 37, f: 9 },
+    { id: "m3", time: "12:00 PM", name: "Meal 3", food: "6.7oz chicken breast + 105g white rice + 100g broccoli + 3g peanut butter", slot: "cm3", items: [{ name: "Chicken breast", grams: 189.9 }, { name: "White rice", grams: 105 }, { name: "Peanut butter", grams: 3 }, { name: "Broccoli", grams: 100 }], cal: 501, p: 65, c: 37, f: 9 },
     { id: "snack", time: "1:30 PM", name: "Snack", food: "1 SimplyFuel protein ball", cal: 95, p: 4, c: 12, f: 4.5 },
-    { id: "m4", time: "3:00 PM", name: "Meal 4", food: "7.9oz lean beef (93/7) + 64g low-carb tortilla + 39g peanut butter + 25g whey protein", slot: "cm4", items: [{ name: "Lean beef (93/7)", grams: 224.0 }, { name: "Low-carb tortilla", grams: 64 }, { name: "Peanut butter", grams: 39 }, { name: "Whey isolate", grams: 33 }], cal: 855, p: 90, c: 9, f: 47 },
+    { id: "m4", time: "3:00 PM", name: "Meal 4", food: "7.9oz lean beef (93/7) + 64g low-carb tortilla + 18g peanut butter + 40g whey protein", slot: "cm4", items: [{ name: "Lean beef (93/7)", grams: 224.0 }, { name: "Low-carb tortilla", grams: 64 }, { name: "Peanut butter", grams: 18 }, { name: "Whey isolate", grams: 40 }], cal: 755, p: 90, c: 5, f: 36 },
   ],
   2: [
-    { id: "m1", time: "4:00 AM", name: "Meal 1", food: "40g whey protein + 28g dry Cream of Rice + 12g peanut butter", slot: "cm1", items: [{ name: "Whey isolate", grams: 52.8 }, { name: "Creamy Rice (dry)", grams: 28 }, { name: "Peanut butter", grams: 12 }], cal: 332, p: 45, c: 25, f: 6 },
+    { id: "m1", time: "4:00 AM", name: "Meal 1", food: "40g whey protein + 28g dry oats + 12g peanut butter", slot: "cm1", items: [{ name: "Whey isolate", grams: 52.8 }, { name: "Oats (dry)", grams: 28 }, { name: "Peanut butter", grams: 12 }], cal: 355, p: 48, c: 22, f: 10 },
     { id: "iw", time: "5:45–7:00 AM", name: "Intra-Workout", food: "40g protein isolate + ½ scoop Cluster Dextrin + electrolytes", cal: 220, p: 40, c: 15, f: 0.5 },
     { id: "m2", time: "7:30 AM", name: "Meal 2", food: "6.1oz turkey breast + 145g banana + 8g peanut butter", slot: "cm2", items: [{ name: "Turkey breast", grams: 172.9 }, { name: "Banana", grams: 145 }, { name: "Peanut butter", grams: 8 }], cal: 406, p: 55, c: 35, f: 6 },
     { id: "m3", time: "12:00 PM", name: "Meal 3", food: "7.2oz chicken breast + 133g cooked quinoa + 100g green beans", slot: "cm3", items: [{ name: "Chicken breast", grams: 204.1 }, { name: "Quinoa", grams: 133 }, { name: "Peanut butter", grams: 0 }, { name: "Green beans", grams: 100 }], cal: 537, p: 71, c: 35, f: 11 },
     { id: "snack", time: "1:30 PM", name: "Snack", food: "1 SimplyFuel protein ball", cal: 95, p: 4, c: 12, f: 4.5 },
-    { id: "m4", time: "3:00 PM", name: "Meal 4", food: "7.9oz lean beef (93/7) + 64g low-carb tortilla + 39g peanut butter + 25g whey protein", slot: "cm4", items: [{ name: "Lean beef (93/7)", grams: 224.0 }, { name: "Low-carb tortilla", grams: 64 }, { name: "Peanut butter", grams: 39 }, { name: "Whey isolate", grams: 33 }], cal: 855, p: 90, c: 9, f: 47 },
+    { id: "m4", time: "3:00 PM", name: "Meal 4", food: "7.9oz lean beef (93/7) + 64g low-carb tortilla + 18g peanut butter + 40g whey protein", slot: "cm4", items: [{ name: "Lean beef (93/7)", grams: 224.0 }, { name: "Low-carb tortilla", grams: 64 }, { name: "Peanut butter", grams: 18 }, { name: "Whey isolate", grams: 40 }], cal: 755, p: 90, c: 5, f: 36 },
   ],
   3: [
     { id: "m1", time: "4:00 AM", name: "Meal 1", food: "12.2oz egg whites + ⅓ cup dry oats + 6g peanut butter", slot: "cm1", items: [{ name: "Egg whites", grams: 345.9 }, { name: "Oats (dry)", grams: 32 }, { name: "Peanut butter", grams: 6 }], cal: 341, p: 45, c: 25, f: 6 },
@@ -505,8 +505,9 @@ const MEALS_HYPERTROPHY = {
 
 const GROCERY_CUTTING = {
   1: [
-    ["Rolled oats (dry)", "~9 oz"], ["Peanut butter", "~6.2 oz"], ["Chicken breast", "~5.6 lb"],
-    ["Bananas", "~9"], ["Brown rice (dry)", "~8.6 oz"], ["Broccoli", "~1.5 lb"],
+    ["Cream of Rice (dry)", "~8 oz"], ["Peanut butter", "~5.2 oz"], ["Chicken breast", "~5.6 lb"],
+    ["Bananas", "~10"], ["White rice (dry)", "~13 oz"], ["Broccoli", "~1.5 lb"],
+    ["Whey protein (Meals 2 + 4)", "~22 oz for the week"],
     ["Lean beef (93/7)", "~5.6 lb"], ["Low-carb tortillas", "~10"],
   ],
   2: [
@@ -601,7 +602,7 @@ const PROGRAM_DEFS = {
   cutting: {
     label: "Cutting", color: "#3d97d3",
     goalLine: "Goal: 15.5% → 9.0% body fat over 15 weeks.",
-    exercises: EXERCISES_CUTTING, mealsByWeek: MEALS_CUTTING, groceryByWeek: GROCERY_CUTTING, slots: SLOTS_CUTTING,
+    exercises: EXERCISES_CUTTING, mealsByWeek: MEALS_CUTTING, groceryByWeek: GROCERY_CUTTING, slots: SLOTS_CUTTING, hydration: HYDRATION_CUTTING,
     hasMilestoneTargets: true, totalWeeks: 15,
   },
   cruise: {
@@ -1438,6 +1439,23 @@ const HYDRATION = [
   { id: "h8", time: "3:00 PM", label: "Meal 4", amount: 16 },
 ];
 const HYDRATION_TOTAL = HYDRATION.reduce((a, hy) => a + hy.amount, 0);
+
+// Cutting-only hydration: the doc's glycerol shooter REQUIRES its co-ingested water — glycerol
+// without ~16oz is an osmotic load, not hyperhydration — so the water is a first-class checkpoint
+// here. The shooter's 80 cal / 20g label-carbs stay OUT of the meal tables on purpose (label-
+// convention glycerol, not metabolic carbs; matches the source doc's own accounting). Fixed 16oz,
+// the low end of the doc's 16\u201320oz, keeps the total honest. Day lands at 148oz.
+const HYDRATION_CUTTING = [
+  { id: "h1", time: "1:40 AM", label: "Wake", amount: 24 },
+  { id: "h2", time: "2:10 AM", label: "Cardio", amount: 16 },
+  { id: "h3", time: "4:00 AM", label: "Meal 1", amount: 12 },
+  { id: "h3b", time: "~4:45\u20135:15 AM", label: "Pre-workout (with glycerol)", amount: 16 },
+  { id: "h4", time: "5:45\u20137:00 AM", label: "Intra-workout", amount: 24 },
+  { id: "h5", time: "7:30 AM", label: "Meal 2", amount: 16 },
+  { id: "h6", time: "12:00 PM", label: "Meal 3", amount: 16 },
+  { id: "h7", time: "1:30 PM", label: "Snack", amount: 8 },
+  { id: "h8", time: "3:00 PM", label: "Meal 4", amount: 16 },
+];
 
 const MILESTONES = [
   { week: 1, phase: 1, weight: 215.0, fat: 32.5, bf: 15.1 },
@@ -3988,7 +4006,7 @@ function programStateHasRealData(state) {
 // The build currently running. Surfaced in Settings -> Account, because "is the deploy actually
 // live?" has been the real answer to several apparent bugs, and inferring it from behaviour is slow
 // and error-prone. Compared against version.json by the update check below.
-const APP_VERSION = "2026-08-21T05:09:09";
+const APP_VERSION = "2026-08-21T06:18:06";
 
 // Signing out has to be unconditional, because every failure mode here ends the same way: a person
 // tapping a button that does nothing.
@@ -5944,8 +5962,8 @@ function App() {
   // routine and doesn't generalize). Built-in programs keep the fixed schedule, since their meal
   // times are already fixed too.
   const customHydrationSchedule = data.activeProgram === "custom" ? computeCustomHydrationSchedule(meals, def.trainingTime, HYDRATION_TOTAL) : null;
-  const activeHydration = customHydrationSchedule || HYDRATION;
-  const activeHydrationTotal = customHydrationSchedule ? customHydrationSchedule.reduce(function (a, hy) { return a + hy.amount; }, 0) : HYDRATION_TOTAL;
+  const activeHydration = customHydrationSchedule || def.hydration || HYDRATION;
+  const activeHydrationTotal = activeHydration.reduce(function (a, hy) { return a + hy.amount; }, 0);
   const ozLogged = activeHydration.filter(function (hy) { return hToday[hy.id]; }).reduce(function (a, hy) { return a + hy.amount; }, 0);
   function completeHydrationDay() {
     const newDone = Object.assign({}, prog.hydrationDayComplete || {});
@@ -6682,8 +6700,9 @@ function App() {
         // Wordmark is TEXT now, not pixels (2026-08-21: "In The Lab" name conflict — an LLC claim by a
         // third party forced the removal; "ITL Fitness App" is the surviving brand). The glyph image
         // was cropped to drop the baked-in words; any future rename is a string edit, not image surgery.
+        // Wordmark REMOVED entirely (owner, 2026-08-21): logo glyph only, no text — the rendered
+        // font didn't match the brand mark. The accessible name lives in alt text.
         h("img", { src: LOGO_HEADER_URI, className: "app-logo", alt: "ITL Fitness App" }),
-        h("span", { style: { fontWeight: 800, letterSpacing: 2, color: "#4eba6f", fontSize: 15, marginLeft: 10, whiteSpace: "nowrap" } }, "ITL FITNESS APP"),
         h("button", {
           className: "icon-btn", "aria-label": "Settings" + (pendingInvites.length ? " — " + pendingInvites.length + " pending coaching invitation" + (pendingInvites.length > 1 ? "s" : "") : ""),
           style: Object.assign({ position: "relative" }, tab === "settings" ? { color: "#60a5fa" } : {}),
@@ -11809,7 +11828,6 @@ function ConsentGate(props) {
   return h("div", { style: { height: "100vh", maxHeight: "100vh", background: "#0a0a0a", color: "#f5f5f5", display: "flex", flexDirection: "column", fontFamily: "inherit", overflow: "hidden" } },
     h("div", { style: { padding: "20px 20px 12px", borderBottom: "1px solid #262626", flexShrink: 0 } },
       h("img", { src: LOGO_HEADER_URI, alt: "ITL Fitness App", style: { height: 32, marginBottom: 12 } }),
-    h("div", { style: { fontWeight: 800, letterSpacing: 2, color: "#4eba6f", fontSize: 12, marginBottom: 12 } }, "ITL FITNESS APP"),
       h("h2", { style: { margin: 0, fontSize: 17 } }, "Before you start"),
       h("p", { style: { fontSize: 12, color: "#a3a3a3", margin: "6px 0 0", lineHeight: 1.5 } },
         "Please read this. It explains what the app records, who can see it, and how to stop at any time.")
@@ -11886,7 +11904,6 @@ function ApprovalGate(props) {
   // pending
   return shell(h("div", { style: { maxWidth: 320 } },
     h("img", { src: LOGO_HEADER_URI, alt: "ITL Fitness App", style: { height: 40, marginBottom: 20 } }),
-    h("div", { style: { fontWeight: 800, letterSpacing: 2, color: "#4eba6f", fontSize: 16, marginBottom: 12 } }, "ITL FITNESS APP"),
     h("p", { style: { fontSize: 15, color: "#f5f5f5", marginBottom: 10, fontWeight: 600 } }, "You're in — almost."),
     h("p", { style: { fontSize: 13, color: "#a3a3a3", lineHeight: 1.55, marginBottom: 20 } },
       "Your account is created. We're approving new accounts by hand right now, so hang tight " +
@@ -11952,7 +11969,6 @@ function AuthGate() {
     },
   },
     h("img", { src: LOGO_HEADER_URI, alt: "ITL Fitness App", style: { height: 48, marginBottom: 24 } }),
-    h("div", { style: { fontWeight: 800, letterSpacing: 2, color: "#4eba6f", fontSize: 19, marginBottom: 12 } }, "ITL FITNESS APP"),
     h("div", { style: { width: "100%", maxWidth: 320 } },
       h("div", { style: { fontSize: 14, color: "#a3a3a3", marginBottom: 16, textAlign: "center", lineHeight: 1.5 } },
         "Sign in to your account, or create one, to continue."),
